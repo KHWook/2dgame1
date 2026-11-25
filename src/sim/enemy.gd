@@ -16,6 +16,7 @@ var dead := false
 var gone := false # left the field with a log: it is removed, but that is not a kill
 var at_torch := false # a smotherer that has reached the torch
 var carrying := false # a thief holding a log
+var summon_t := 0.0 # time until it next calls its kind (a boss with summon in its row)
 
 
 func _init(kind_: String, pos_: Vector2) -> void:
@@ -23,6 +24,8 @@ func _init(kind_: String, pos_: Vector2) -> void:
 	T = Config.ENEMY_TYPES[kind]
 	pos = pos_
 	hp = T.hp
+	if T.has("summon"):
+		summon_t = T.summon.every
 
 
 func step(world) -> void:
@@ -38,6 +41,19 @@ func step(world) -> void:
 	pos += vel * Config.STEP
 	if T.target == "log":
 		_thieve(world)
+	if T.has("summon"):
+		_summon(world)
+
+
+## A boss calls its kind around itself every so often. They join the fight at the end of the step.
+func _summon(world) -> void:
+	summon_t -= Config.STEP
+	if summon_t > 0.0:
+		return
+	summon_t += T.summon.every
+	for i in T.summon.count:
+		var around: Vector2 = Vector2.from_angle(TAU * i / T.summon.count + world.time) * (T.radius + E.summon_gap)
+		world.born.append(get_script().new(T.summon.kind, pos + around))
 
 
 ## Where it is heading. A thief goes for the nearest log, shadows the player when there is none, and once it has
@@ -81,6 +97,6 @@ func touches(p) -> bool:
 func hit(dmg: int, from_pos: Vector2) -> void:
 	hp -= dmg
 	flash = E.flash
-	knock = (pos - from_pos).normalized() * E.knock
+	knock = (pos - from_pos).normalized() * E.knock * T.get("heavy", 1.0)
 	if hp <= 0:
 		dead = true
