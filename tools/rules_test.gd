@@ -23,6 +23,9 @@ static func run() -> Array:
 	out.append_array(_thief())
 	out.append_array(_berry())
 	out.append_array(_upgrades())
+	out.append_array(_levels())
+	out.append_array(_new_upgrades())
+	out.append_array(_bosses())
 	out.append_array(_logs())
 	out.append_array(_nights())
 	out.append_array(_setup())
@@ -169,6 +172,122 @@ static func _upgrades() -> Array:
 	return out
 
 
+static func _levels() -> Array:
+	var out := []
+	var w = _night(DARK, ["ember_ring"])
+	_expect(out, "an upgrade starts at level 1", [w.level("ember_ring"), w.mod("ember_radius", 0.0)], [1, Config.UPGRADES.ember_ring.ember_radius])
+	w.picks.append("ember_ring")
+	_expect(out, "taken again it is level 2, with its level-2 numbers", [w.level("ember_ring"), w.mod("ember_radius", 0.0)], [2, Config.UPGRADES.ember_ring.levels[0].ember_radius])
+	w = World.new(1)
+	w.picks = ["quick_hands", "ember_ring", "ember_ring", "ember_ring"]
+	for i in 50:
+		w._offer()
+		_expect(out, "a maxed upgrade or one without levels is not offered again", w.offer.has("quick_hands") or w.offer.has("ember_ring"), false)
+	w = World.new(1)
+	w.picks = ["slow_burn"]
+	var seen := false
+	for i in 100:
+		w._offer()
+		seen = seen or w.offer.has("slow_burn")
+	_expect(out, "an upgrade with a next level can be offered again", seen, true)
+	w = World.new(1)
+	w.picks = ["sturdy"]
+	w.player.hp = 3
+	w.offer = ["sturdy"]
+	_play(w, 1, "pick_1")
+	_expect(out, "sturdy at level 2 adds one more max hp and heals by one", [w.max_hp(), w.player.hp], [Config.PLAYER.hp + 2, 4])
+	return out
+
+
+static func _new_upgrades() -> Array:
+	var out := []
+	# dash
+	for has in [false, true]:
+		var w = _night(DARK, ["dash"] if has else [])
+		var from: Vector2 = w.player.pos
+		_play(w, 1, "dash", "right")
+		_play(w, 9, "", "right")
+		var walked: float = Config.PLAYER.speed * Config.STEP * 10.0
+		_expect(out, "the dash key dashes only with the dash upgrade (%s)" % has, w.player.pos.x - from.x > walked + 10.0, has)
+	var w = _night(DARK, ["dash"])
+	_play(w, 1, "dash", "right")
+	_add(w, "slime", Vector2(4.0, 0.0))
+	_play(w, 1)
+	_expect(out, "nothing hurts you while you dash", w.player.hp, Config.PLAYER.hp)
+	_play(w, int(Config.PLAYER.dash_time / Config.STEP) + 2)
+	_play(w, 1, "dash", "left")
+	_expect(out, "the dash has to wait before it comes again", w.player.dash_t > 0.0, false)
+	# spin
+	w = _night(DARK, ["spin"])
+	var ahead = _add(w, "slime", NEAR) # nearer, so the swing aims at it
+	var behind = _add(w, "slime", -NEAR * 1.25)
+	for e in [ahead, behind]:
+		e.hp = 99
+		e.T = e.T.duplicate()
+		e.T.speed = 0.0
+		e.T.heavy = 0.0
+	for i in Config.UPGRADES.spin.spin_every:
+		_play(w, SWING + 10, "attack")
+		_expect(out, "only every %dth swing goes all the way round (swing %d)" % [Config.UPGRADES.spin.spin_every, i + 1], behind.hp < 99, i + 1 == Config.UPGRADES.spin.spin_every)
+	# spark
+	for at in [LIT, DARK]:
+		w = _night(Vector2(0.0, 60.0), ["spark"])
+		var e = Enemy.new("big_slime", Config.TORCH.pos + at)
+		e.T = e.T.duplicate()
+		e.T.speed = 0.0
+		w.enemies.append(e)
+		var told := _play(w, 60)
+		_expect(out, "the torch shoots a spark only at an enemy in its light (%s)" % ("lit" if at == LIT else "dark"), [told.has("shot"), e.hp < e.T.hp], [at == LIT, at == LIT])
+	# vampire
+	w = _night(DARK, ["vampire"])
+	w.player.hp = 3
+	var healed := false
+	for i in Config.UPGRADES.vampire.vamp_kills:
+		_expect(out, "the vampire blade heals only on its %dth kill" % Config.UPGRADES.vampire.vamp_kills, w.player.hp, 3)
+		var bat = _add(w, "bat", NEAR)
+		bat.T = bat.T.duplicate()
+		bat.T.speed = 0.0
+		healed = _play(w, SWING + 10, "attack").has("healed")
+	_expect(out, "the vampire blade heals after enough sword kills, and says so", [w.player.hp, healed], [4, true])
+	# big torch
+	w = _night(DARK, ["big_torch"])
+	w.fuel = Config.TORCH.max_fuel
+	w.player.carrying = true
+	w.player.pos = Config.TORCH.pos
+	_play(w, 1)
+	_expect(out, "a big torch takes fuel past the usual full tank", w.fuel > Config.TORCH.max_fuel, true)
+	return out
+
+
+static func _bosses() -> Array:
+	var out := []
+	var every: int = Config.BOSS.every
+	for night in [every - 1, every, every * 2]:
+		var w = _night(DARK)
+		w.night = night
+		w.boss_due = w._boss_night()
+		w.time = Config.NIGHT.length * Config.BOSS.at - Config.STEP * 0.5
+		var told := _play(w, 1)
+		var bosses: Array = w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.kind)
+		var want: Array = [] if night % every != 0 else [Config.BOSS.kinds[(night / every - 1) % Config.BOSS.kinds.size()]]
+		_expect(out, "night %d brings its boss partway through, and says so" % night, [bosses, told.has("boss")], [want, not want.is_empty()])
+	var w = _night(DARK)
+	var king = _add(w, "slime_king", Vector2(60.0, 0.0))
+	_play(w, int(Config.ENEMY_TYPES.slime_king.summon.every / Config.STEP) + 1)
+	_expect(out, "a boss calls its kind every so often", w.enemies.filter(func(e): return e.kind == "slime").size(), Config.ENEMY_TYPES.slime_king.summon.count)
+	w = _night(DARK)
+	king = _add(w, "slime_king", Vector2(22.0, 0.0))
+	king.T = king.T.duplicate()
+	king.T.speed = 0.0
+	_play(w, SWING + 10, "attack") # the whole swing, so the next press starts another
+	_expect(out, "a heavy boss is barely knocked back", king.knock.length() < Config.ENEMY.knock * 0.5, true)
+	king.hp = 1
+	w.score = 0
+	_play(w, SWING + 20, "attack")
+	_expect(out, "the slime king breaks into two big slimes and scores its own worth", [w.enemies.filter(func(e): return e.kind == "big_slime").size(), w.score], [2, Config.ENEMY_TYPES.slime_king.score])
+	return out
+
+
 static func _logs() -> Array:
 	var out := []
 	var w = _night(DARK)
@@ -230,8 +349,13 @@ static func _setup() -> Array:
 		for kind in row.who:
 			named[kind] = true
 			_expect(out, "NIGHTS names a real enemy kind (%s)" % kind, Config.ENEMY_TYPES.has(kind), true)
+	for kind in Config.BOSS.kinds:
+		_expect(out, "BOSS names a boss (%s)" % kind, Config.ENEMY_TYPES.get(kind, {}).get("boss", false), true)
+		named[kind] = true
 	for kind in Config.ENEMY_TYPES:
-		_expect(out, "every enemy kind comes on some night (%s)" % kind, named.has(kind), true)
+		_expect(out, "every enemy kind comes on some night or as a boss (%s)" % kind, named.has(kind), true)
+		if Config.ENEMY_TYPES[kind].has("summon"):
+			_expect(out, "a boss summons a real enemy kind (%s)" % kind, Config.ENEMY_TYPES.has(Config.ENEMY_TYPES[kind].summon.kind), true)
 	var viewport := Vector2(ProjectSettings.get_setting("display/window/size/viewport_width"), ProjectSettings.get_setting("display/window/size/viewport_height"))
 	_expect(out, "project.godot's viewport is Config.VIEW", viewport, Config.VIEW)
 	_expect(out, "the field lies inside the view", Rect2(Vector2.ZERO, Config.VIEW).encloses(Config.FIELD), true)

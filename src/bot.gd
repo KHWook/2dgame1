@@ -9,6 +9,7 @@ const FIGHT_RANGE := 26.0
 const SWING_EVERY := 12 # steps between swing presses
 const DEADZONE := 2.0
 const KEEP := 2.0 # how far outside a foe's touch the bot stands while it fights it
+const DASH_FROM := 60.0 # with the dash upgrade, the bot dashes toward a goal at least this far away
 const HUNGRY := 2 # the bot goes for a berry at this hp or less; above it, hauling logs matters more
 
 var pick := 1 # which offer slot this bot always takes
@@ -49,6 +50,9 @@ func frame(w) -> InputFrame:
 	elif not p.carrying and foe != null:
 		goal = foe.pos
 	var d: Vector2 = goal - p.pos
+	var clear: bool = foe == null or p.pos.distance_to(foe.pos) > FIGHT_RANGE * 2.0
+	if w.mod("dash_every", 0.0) > 0.0 and clear and d.length() > DASH_FROM:
+		f.pressed["dash"] = true # a long way to go and nothing close: dash (it waits for the dash to be ready)
 	if d.x > DEADZONE: f.held["right"] = true
 	if d.x < -DEADZONE: f.held["left"] = true
 	if d.y > DEADZONE: f.held["down"] = true
