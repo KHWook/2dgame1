@@ -1,0 +1,787 @@
+## Every picture in the game, drawn as text: one character is one pixel and PALETTE says which colour it is.
+## To change a sprite, edit its grid. ./verify rejects a ragged row or a character that is not in PALETTE (A1),
+## and tools/art_sheet.gd saves all of them enlarged as one PNG to look at.
+extends RefCounted
+
+const PALETTE := {
+	".": Color(0, 0, 0, 0),
+	"_": Color(0.05, 0.04, 0.09, 0.4), # ground shadow
+	"k": Color("#1a1423"), "K": Color("#3a3350"), # outline, dark slate
+	"w": Color("#e6dcc6"), "c": Color("#c4b498"), "d": Color("#8f7f72"), # the keeper's cloak
+	"r": Color("#e0503f"), "R": Color("#a22f3a"), # scarf
+	"s": Color("#f6c198"), "S": Color("#d0906c"), # skin
+	"b": Color("#80522f"), "B": Color("#573620"), # boots
+	"o": Color("#b0733f"), "O": Color("#855030"), "n": Color("#5a3621"), "y": Color("#ebc288"), # wood
+	"f": Color("#fff6c0"), "F": Color("#ffc94a"), "x": Color("#f58230"), "X": Color("#c8432b"), # fire
+	"h": Color("#d6f79a"), "g": Color("#9fdc55"), "G": Color("#66b03c"), "j": Color("#387a3a"), # slime
+	"p": Color("#c07ee0"), "P": Color("#8a4fbd"), "q": Color("#55307f"), "e": Color("#ffe04a"), # bat
+	"2": Color("#3f6644"), "3": Color("#223a2c"), "4": Color("#5a8a4c"), # grass blades
+	"m": Color("#7a6650"), "M": Color("#5a4a3b"), "N": Color("#40342b"), # dirt
+	"t": Color("#a3a6ae"), "T": Color("#6b6e7c"), "z": Color("#454759"), # stone
+	"u": Color("#18281f"), "U": Color("#213a2a"), "v": Color("#2f5236"), # treetops
+	"W": Color("#ffffff"), "Y": Color("#ffd84a"), # white, yellow
+	"a": Color("#eef3f6"), "A": Color("#a9b6c4"), "Z": Color("#66708a"), # steel
+	"i": Color("#ef4b5a"), "I": Color("#a82a45"), # hearts
+	"l": Color("#b5e3ff"), "L": Color("#4a9be8"), # a cool flame for the slow burn icon; the shade's eyes
+	"7": Color("#6f67a8"), "8": Color("#4a4378"), "9": Color("#241f3d"), # shade
+}
+
+const SPRITES := {
+	"keeper_down_a": [
+		"................",
+		".....kkkkkk.....",
+		"....kwwwwwwk....",
+		"...kwwwwwwwwk...",
+		"..kwwwddddwwwk..",
+		"..kwwdssssdwwk..",
+		"..kwcsksskscwk..",
+		"..kwcsssssscwk..",
+		"...kcrrrrrrck...",
+		"...krrRrrRrrk...",
+		"..kwwrRwwwwwwk..",
+		"..kwwwrwwwwwck..",
+		"..kcwwwwwwwcck..",
+		"...kcccccccck...",
+		"...kbbk..kbbk...",
+		"....kk....kk....",
+	],
+	"keeper_up_a": [
+		"................",
+		".....kkkkkk.....",
+		"....kwwwwwwk....",
+		"...kwwwwwwwwk...",
+		"..kwwwwwwwwwwk..",
+		"..kwwwwwwwwwwk..",
+		"..kwcwwwwwwcwk..",
+		"..kwccwwwwccwk..",
+		"...kcccccccck...",
+		"...krrrrrrrrk...",
+		"..kwwwwrRwwwwk..",
+		"..kwwwwrRwwwck..",
+		"..kcwwwwRwwcck..",
+		"...kcccccccck...",
+		"...kbbk..kbbk...",
+		"....kk....kk....",
+	],
+	"keeper_side_a": [
+		"................",
+		"......kkkkkk....",
+		".....kwwwwwwk...",
+		"....kwwwwwwwwk..",
+		"....kwwwwdddwk..",
+		"....kwwwdsssk...",
+		"....kwwcdsksk...",
+		"....kwwcdsssk...",
+		".....kccrrrrk...",
+		"....kRrrrrrrk...",
+		"...kRkwwwwwwk...",
+		"....kwwwwwwck...",
+		"....kcwwwwcck...",
+		".....kccccck....",
+		".....kbbkbbk....",
+		"......kk.kk.....",
+	],
+	"keeper_dead": [
+		"................",
+		"................",
+		"....kkkk..kkk...",
+		"...kwwwwkkwcckk.",
+		"..kwwwcccrwwccbk",
+		".kwwwdssrrwwwcbk",
+		".kwwdsSsrRwwwck.",
+		".kwwdsssrrwwwck.",
+		".kwwdsssrrwwwck.",
+		".kwwdsSsrRRrwck.",
+		".kwwwdssrrrwwcbk",
+		"..kwwwcccrwwwcbk",
+		"...kwwwwkkwwckk.",
+		"....kkkk..kkk...",
+		"................",
+		"................",
+	],
+	"slime_a": [
+		"................",
+		"................",
+		"................",
+		"................",
+		".....kkkkkk.....",
+		"...kkggggggkk...",
+		"..kgghhggggggk..",
+		"..kghhgggggggk..",
+		".kggggggggggggk.",
+		".kggWkggggWkggk.",
+		".kggkkggggkkggk.",
+		".kgggggggggggGk.",
+		".kGggggggggGGGk.",
+		"..kGGGGGGGGGGk..",
+		"...kkkkkkkkkk...",
+		"................",
+	],
+	"slime_b": [
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+		"....kkkkkkkk....",
+		"..kkghhgggggkk..",
+		".kgghhggggggggk.",
+		"kggggggggggggggk",
+		"kgggWkggggWkgggk",
+		"kgggkkggggkkgggk",
+		"kggggggggggggGGk",
+		"kGGggggggggGGGGk",
+		".kGGGGGGGGGGGGk.",
+		"..kkkkkkkkkkkk..",
+		"................",
+	],
+	"bat_a": [
+		"................",
+		"................",
+		"................",
+		".kk..........kk.",
+		"kPPk.k....k.kPPk",
+		"kPpPkPk..kPkPpPk",
+		"kPppPPPkkPPPppPk",
+		".kPpPPePPePPpPk.",
+		".kPPqPPPPPPqPPk.",
+		"..kkqkPPPPkqkk..",
+		"....k.kPPk.k....",
+		".......kk.......",
+		"................",
+		"................",
+		"................",
+		"................",
+	],
+	"bat_b": [
+		"................",
+		"................",
+		"................",
+		"................",
+		".....k....k.....",
+		"....kPk..kPk....",
+		"..kkkPPkkPPkkk..",
+		".kPPPPePPePPPPk.",
+		"kPpPPPPPPPPPPpPk",
+		"kPppqPPPPPPqppPk",
+		"kPpk.kPPPPk.kpPk",
+		"kPk...kPPk...kPk",
+		".k.....kk.....k.",
+		"................",
+		"................",
+		"................",
+	],
+	"torch": [
+		"..kkkkkkkkkkkk..",
+		".kZAAAAAAAAAAZk.",
+		".kZXxFxFFxFxXZk.",
+		"..kZZZZZZZZZZk..",
+		"...kkzTTTTzkk...",
+		".....kTttTk.....",
+		".....kTttzk.....",
+		"....kTTtttzk....",
+		"...kTttttttzk...",
+		"...kzzzzzzzzk...",
+		"....kkkkkkkk....",
+	],
+	"flame_l_a": [
+		"......x.....",
+		".....xx.....",
+		".....xFx....",
+		"....xFFx....",
+		"...xxFFxx...",
+		"...xFFFFx.x.",
+		"..xxFffFxxx.",
+		"..xFFffFFx..",
+		".xxFfffFFxx.",
+		".xFFffffFFx.",
+		".xFFffffFFx.",
+		".xxFFffFFxx.",
+		"..xxFFFFxx..",
+		"...xxxxxx...",
+	],
+	"flame_l_b": [
+		"............",
+		".......x....",
+		"......xx....",
+		".....xFx....",
+		".x..xFFxx...",
+		".xx.xFFFx...",
+		".xxxFFfFxx..",
+		"..xFFffFFx..",
+		".xxFFfffFxx.",
+		".xFFffffFFx.",
+		".xFFffffFFx.",
+		".xxFFffFFxx.",
+		"..xxFFFFxx..",
+		"...xxxxxx...",
+	],
+	"flame_m_a": [
+		"....x...",
+		"...xx...",
+		"...xFx..",
+		"..xFFx..",
+		"..xFFxx.",
+		".xFffFx.",
+		".xFffFx.",
+		".xFffFx.",
+		".xxFFxx.",
+		"..xxxx..",
+	],
+	"flame_m_b": [
+		"........",
+		"....x...",
+		"...xx...",
+		"..xFx...",
+		".xxFFx..",
+		".xFFfFx.",
+		".xFffFx.",
+		".xFffFx.",
+		".xxFFxx.",
+		"..xxxx..",
+	],
+	"flame_s_a": [
+		"..x...",
+		"..xx..",
+		".xFx..",
+		".xFFx.",
+		".xFFx.",
+		"..xx..",
+	],
+	"flame_s_b": [
+		"......",
+		"...x..",
+		"..xx..",
+		".xFFx.",
+		".xFFx.",
+		"..xx..",
+	],
+	"log": [
+		"..kkkkkkkkkkk.",
+		".kyyOooooooook",
+		"kyOyOoooonoook",
+		"kyOyOnooooooOk",
+		"kyyyOOOOOOOOOk",
+		".kyynnnnnnnnk.",
+		"..kkkkkkkkkk..",
+	],
+	"sword": [
+		"...Y..........",
+		"...Yaaaaaaaa..",
+		"OOOYaaaaaaaaa.",
+		"...YAAAAAAAA..",
+		"...Y..........",
+	],
+	"shadow": [
+		"..________..",
+		".__________.",
+		"____________",
+		".__________.",
+		"..________..",
+	],
+	"shadow_small": [
+		".______.",
+		"________",
+		".______.",
+	],
+	"tuft_a": [
+		".4...4.",
+		".24.42.",
+		"..242..",
+		"..323..",
+	],
+	"tuft_b": [
+		"..4..",
+		"4.2.4",
+		"24242",
+		".323.",
+	],
+	"flower_a": [
+		".W.",
+		"WYW",
+		".W.",
+		".2.",
+	],
+	"flower_b": [
+		".Y.",
+		"YxY",
+		".Y.",
+		".2.",
+	],
+	"pebble": [
+		".ttT.",
+		"tttTz",
+		".TTz.",
+	],
+	"mushroom": [
+		".rrr.",
+		"rWrWR",
+		"RRRRR",
+		"..c..",
+		"..c..",
+	],
+	"hedge": [
+		"uuuuuuuuuuuuuuuu",
+		"uuUuuuuuuuUuuuuu",
+		"uUUUuuuuuUUUuuuu",
+		"uUvUUuuuUUvUUuuu",
+		"UUUUUUuUUUUUUUuU",
+		"UUvUUUUUUvUUUUUU",
+		"kUUUUUkkUUUUUkkU",
+		".kUUUk..kUUUk..k",
+		"..kkk....kkk....",
+	],
+	"poof_a": [
+		"................",
+		"................",
+		"................",
+		"................",
+		"......WWWW......",
+		".....WWWWWW.....",
+		"....WWWWWWWa....",
+		"....WWWWWWaa....",
+		"....WWWWWWaa....",
+		"....WWWWWaaA....",
+		".....WaaaaA.....",
+		"......aaAA......",
+		"................",
+		"................",
+		"................",
+		"................",
+	],
+	"poof_b": [
+		"................",
+		"................",
+		".....WWW.WW.....",
+		"...WWWWWWWWWW...",
+		"..WWWWWWWWWWWa..",
+		"..WWWW....WWWa..",
+		".WWWW......WWWa.",
+		".WWW........WWa.",
+		".WWW........WWa.",
+		".WWWW......WWaa.",
+		"..WWWW....WWaa..",
+		"..WWWWWWWWWaaA..",
+		"...aWWWaaaaaA...",
+		".....aaa.AA.....",
+		"................",
+		"................",
+	],
+	"poof_c": [
+		"................",
+		"....WW....W.....",
+		"...WWWW..WWW....",
+		"...WWWa...Wa....",
+		"....aa..........",
+		".WW..........WW.",
+		"WWWW........WWWa",
+		"WWWa........WWaa",
+		".aa..........aa.",
+		"................",
+		"..WW.......WW...",
+		".WWWW.....WWWa..",
+		".WWWa.....WWaa..",
+		"..aa...WW..aa...",
+		"......WWWa......",
+		".......aa.......",
+	],
+	"poof_d": [
+		"................",
+		".....a....a.....",
+		"....aa..........",
+		"................",
+		"................",
+		".a............a.",
+		"aa............aa",
+		"................",
+		"................",
+		"................",
+		"..a.........a...",
+		".aa.........aa..",
+		"................",
+		".......a........",
+		".......aa.......",
+		"................",
+	],
+	"icon_slow_burn": [
+		"....L....",
+		"....LL...",
+		"...LlL...",
+		"...LllL..",
+		"..LLllL..",
+		"..LlllLL.",
+		"..LlWlLL.",
+		"..LLlLLL.",
+		"...LLLL..",
+	],
+	"icon_big_logs": [
+		".....Y...",
+		"....YYY..",
+		".....Y...",
+		".kkkkkkk.",
+		"kyyOoooOk",
+		"kyOyoonOk",
+		"kyyyOOOOk",
+		".kkkkkkk.",
+		".........",
+	],
+	"icon_ember_ring": [
+		"...xFx...",
+		".F.....x.",
+		".x.....F.",
+		"x...f...x",
+		"F..fFf..F",
+		"x...f...x",
+		".F.....x.",
+		".x.....F.",
+		"...xFx...",
+	],
+	"icon_warm_glow": [
+		".x..x..x.",
+		"..x..x..x",
+		".x..x..x.",
+		"x..x..x..",
+		".x..x..x.",
+		".........",
+		".XxFFFxX.",
+		"..XxxxX..",
+		".........",
+	],
+	"icon_woodpile": [
+		"...kkk...",
+		"..kyyyk..",
+		"..kyOyk..",
+		"..kyyyk..",
+		".kkkkkkk.",
+		"kyyykyyyk",
+		"kyOykyOyk",
+		"kyyykyyyk",
+		".kkk.kkk.",
+	],
+	"icon_quick_hands": [
+		"......WW.",
+		"....WWWa.",
+		"...WWWWa.",
+		"..WWWWa..",
+		".aWWWa...",
+		".aWWa....",
+		"..aa.....",
+		".A.......",
+		"A........",
+	],
+	"icon_long_blade": [
+		".......aa",
+		"......aaA",
+		".....aaA.",
+		"....aaA..",
+		".Y.aaA...",
+		"..YaA....",
+		"...YY....",
+		"..O..Y...",
+		".O.......",
+	],
+	"icon_bright": [
+		"....Y....",
+		".Y..Y..Y.",
+		"..Y.f.Y..",
+		"...fff...",
+		"YYfffffYY",
+		"...fff...",
+		"..Y.f.Y..",
+		".Y..Y..Y.",
+		"....Y....",
+	],
+	"ember": [
+		".x.",
+		"xFx",
+		".x.",
+	],
+	"ember_hot": [
+		"..F..",
+		".FfF.",
+		"FfffF",
+		".FfF.",
+		"..F..",
+	],
+	"shade_a": [
+		"................",
+		"................",
+		".....kkkkkk.....",
+		"....k888888k....",
+		"...k87888888k...",
+		"...k89999998k...",
+		"...k8l9999l8k...",
+		"...k89999998k...",
+		"...k88999988k...",
+		"...k88888888k...",
+		"..k8888888888k..",
+		"..k8788888888k..",
+		"..k8888888888k..",
+		"..k88k888k888k..",
+		"..kkk.kkk.kkkk..",
+		"................",
+	],
+	"shade_eyes": [
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+		".....l....l.....",
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+		"................",
+	],
+	"big_slime_a": [
+		"........................",
+		"........kkkkkkkk........",
+		"......kkGGGGGGGGkk......",
+		"....kkGGhhGGGGGGGGkk....",
+		"...kGGhhhGGGGGGGGGGGk...",
+		"..kGGhhGGGGGGGGGGGGGGk..",
+		"..kGGkkGGGGGGGGGGkkGGk..",
+		".kGGGGGkkGGGGGGkkGGGGGk.",
+		".kGGGGWkkGGGGGGWkkGGGGk.",
+		".kGGGGkkkGGGGGGkkkGGGGk.",
+		".kGGGGkkkGGGGGGkkkGGGGk.",
+		"kGGGGGGGGGGGGGGGGGGGGGGk",
+		"kGGGGGGGGGkkkkGGGGGGGGGk",
+		"kGGGGGGGGkGGGGkGGGGGGGGk",
+		"kGGGGGGGGGGGGGGGGGGGGjjk",
+		"kjGGGGGGGGGGGGGGGGGGjjjk",
+		"kjjGGGGGGGGGGGGGGGjjjjjk",
+		".kjjjjjjjjjjjjjjjjjjjjk.",
+		"..kkkkkkkkkkkkkkkkkkkk..",
+		"........................",
+	],
+	"thief_a": [
+		"................",
+		"................",
+		"................",
+		"................",
+		".........kkkk...",
+		"........kOOOOk..",
+		"......kkOOOOOOk.",
+		"....kkOOOOkOOkOk",
+		"...kOOOOOOOOOOok",
+		".kkkOOOOOOOOokWk",
+		"knnkOOOOOOOOOkk.",
+		"knnnkOOoOOOOOk..",
+		".knnkOOooOOOk...",
+		"..kkkOkkOOkkOk..",
+		"....kkk.kkk.kk..",
+		"................",
+	],
+	"shadow_big": [
+		"....____________....",
+		".__________________.",
+		"____________________",
+		"____________________",
+		".__________________.",
+		"....____________....",
+	],
+	"berry": [
+		"....44...",
+		"...42....",
+		"...2.2...",
+		".kkk.kkk.",
+		"krWrkrWrk",
+		"krrRkrrRk",
+		"kRRRkRRRk",
+		".kkk.kkk.",
+	],
+	"icon_sturdy": [
+		"......Y..",
+		".ii.iYYY.",
+		"iWiiiiY..",
+		"iiiiiiI..",
+		"iiiiiiI..",
+		".iiiiI...",
+		"..iiI....",
+		"...I.....",
+		".........",
+	],
+	"icon_thorns": [
+		"....a....",
+		".a..a..a.",
+		"..aAAAa..",
+		"..AzzzA..",
+		"aaAzzzAaa",
+		"..AzzzA..",
+		"..aAAAa..",
+		".a..a..a.",
+		"....a....",
+	],
+	"icon_wide_swing": [
+		".........",
+		"..fffff..",
+		".ffFFFff.",
+		"ffF...Fff",
+		"fF.....Ff",
+		"F...a...F",
+		"x..aAa..x",
+		"....a....",
+		".........",
+	],
+	"icon_fire_blade": [
+		".......Ff",
+		"......FfF",
+		".....xFx.",
+		"....xFx..",
+		".Y.xFx...",
+		"..YxX....",
+		"...YY....",
+		"..O..Y...",
+		".O.......",
+	],
+	"heart": [
+		".kkk.kkk.",
+		"kiiikiiIk",
+		"kiWiiiiIk",
+		"kiiiiiiIk",
+		".kiiiiIk.",
+		"..kiiIk..",
+		"...kIk...",
+		"....k....",
+	],
+	"heart_empty": [
+		".kkk.kkk.",
+		"kKKKkKKKk",
+		"kKKKKKKKk",
+		"kKKKKKKKk",
+		".kKKKKKk.",
+		"..kKKKk..",
+		"...kKk...",
+		"....k....",
+	],
+}
+
+## A second frame that is another sprite with a few rows redrawn: name -> [base sprite, { row index: new row }].
+const VARIANTS := {
+	"keeper_down_b": ["keeper_down_a", { 14: "...kbbk..kkkk...", 15: "....kk.........." }],
+	"keeper_up_b": ["keeper_up_a", { 14: "...kbbk..kkkk...", 15: "....kk.........." }],
+	"keeper_side_b": ["keeper_side_a", { 14: "....kbbkkkbbk...", 15: "....kkk...kkk..." }],
+	"torch_out": ["torch", { 2: ".kZKzKKzKKzKKZk." }],
+	"shade_b": ["shade_a", { 13: "..k888k888k88k..", 14: "..kkkk.kkk.kkk.." }],
+	"big_slime_b": ["big_slime_a", {
+		1: "........................", 2: "........kkkkkkkk........", 3: ".....kkkGGGGGGGGkkk.....",
+		4: "...kkGGhhhGGGGGGGGGkk...", 6: ".kGGGkkGGGGGGGGGGkkGGGk.",
+	}],
+	"thief_b": ["thief_a", { 13: "..kkkkOOkkOOkk..", 14: "......kkk.kkk..." }],
+}
+
+
+static var _textures := {} # sprite name plus its flip and white marks -> texture, made the first time it is asked for
+
+
+static func names() -> Array:
+	return SPRITES.keys() + VARIANTS.keys()
+
+
+## The finished rows of a sprite, with a variant's rows put in place.
+static func rows(sprite: String) -> Array:
+	if SPRITES.has(sprite):
+		return SPRITES[sprite]
+	var v: Array = VARIANTS[sprite]
+	var out: Array = SPRITES[v[0]].duplicate()
+	for i in v[1]:
+		out[i] = v[1][i]
+	return out
+
+
+static func image(sprite: String) -> Image:
+	var grid := rows(sprite)
+	var img := Image.create_empty(grid[0].length(), grid.size(), false, Image.FORMAT_RGBA8)
+	for y in grid.size():
+		for x in grid[y].length():
+			img.set_pixel(x, y, PALETTE[grid[y][x]])
+	return img
+
+
+## A sprite as a texture: mirrored left to right when flip, in its hit-flash white when white.
+static func texture(sprite: String, flip := false, white := false) -> Texture2D:
+	var key := "%s%s%s" % [sprite, "<" if flip else "", "!" if white else ""]
+	if not _textures.has(key):
+		var img := image(sprite)
+		if flip:
+			img.flip_x()
+		_textures[key] = ImageTexture.create_from_image(whitened(img) if white else img)
+	return _textures[key]
+
+
+## The same picture with everything inside its outline turned white, for the moment something is hit.
+static func whitened(img: Image) -> Image:
+	var out: Image = img.duplicate()
+	for y in out.get_height():
+		for x in out.get_width():
+			var c := out.get_pixel(x, y)
+			if c.a > 0.5 and not c.is_equal_approx(PALETTE["k"]):
+				out.set_pixel(x, y, Color.WHITE)
+	return out
+
+
+## What is wrong with one grid, as messages; empty when it is fine.
+static func grid_problems(sprite: String, grid: Array) -> Array:
+	var out := []
+	if grid.is_empty():
+		return ["%s: no rows" % sprite]
+	for y in grid.size():
+		var row: String = grid[y]
+		if row.length() != grid[0].length():
+			out.append("%s row %d is %d wide, row 0 is %d. Fix: make every row the same width." % [sprite, y, row.length(), grid[0].length()])
+		for x in row.length():
+			if not PALETTE.has(row[x]):
+				out.append("%s row %d col %d: '%s' is not in PALETTE. Fix: use a PALETTE key or add the colour." % [sprite, y, x, row[x]])
+	return out
+
+
+## Rule A1 over every sprite and variant.
+static func problems() -> Array:
+	var out := []
+	for sprite in VARIANTS:
+		var v: Array = VARIANTS[sprite]
+		if not SPRITES.has(v[0]):
+			out.append("%s: base sprite '%s' does not exist." % [sprite, v[0]])
+			continue
+		for i in v[1]:
+			if i < 0 or i >= SPRITES[v[0]].size():
+				out.append("%s: row %d is outside its base sprite '%s'." % [sprite, i, v[0]])
+	if not out.is_empty():
+		return out
+	for sprite in names():
+		out.append_array(grid_problems(sprite, rows(sprite)))
+	return out
+
+
+## Rule A2: which of these sprite names is not drawn, as messages. The painter asks for some sprites by a name
+## built from rule data (an upgrade's icon), and a missing one would only fail once that upgrade shows up in a game.
+static func missing(wanted: Array) -> Array:
+	var out := []
+	for sprite in wanted:
+		if not names().has(sprite):
+			out.append("'%s' is not drawn. Fix: add a grid with that name to SPRITES." % sprite)
+	return out
+
+
+## A1 and A2 check themselves (G4): a ragged grid, an unknown character and a missing sprite must be caught,
+## a clean grid and a drawn sprite must pass.
+static func selftest() -> Array:
+	var fails := []
+	if missing(["no such sprite"]).is_empty():
+		fails.append("[A2] missed a sprite that is not drawn")
+	if not missing([SPRITES.keys()[0]]).is_empty():
+		fails.append("[A2] flagged a sprite that is drawn")
+	if grid_problems("x", ["kk", "k"]).is_empty():
+		fails.append("[A1] missed a ragged grid")
+	if grid_problems("x", ["k?"]).is_empty():
+		fails.append("[A1] missed a character that is not in PALETTE")
+	if not grid_problems("x", ["k.", ".k"]).is_empty():
+		fails.append("[A1] flagged a clean grid")
+	return fails

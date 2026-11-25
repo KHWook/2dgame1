@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# ./verify                  rules + selftest + replay (done = this passes)
+# ./verify --check          rules + selftest only (fast; the edit hook runs this)
+# ./verify --update-golden  re-record the golden on purpose, then add a docs/DECISIONS.md entry
+# ./verify --balance        bot over many seeds: how nights end (tuning aid)
+# --hook                    for Claude Code hooks: on failure print to stderr and exit 2
+cd "$(dirname "$0")"
+GODOT="${GODOT:-godot}"
+args=(); hook=0
+for a in "$@"; do [ "$a" = "--hook" ] && hook=1 || args+=("$a"); done
+# --quit-after stops Godot if a script fails to compile (it would otherwise idle forever); then there is no
+# "verify: PASS" line, which is what counts as passing.
+out="$("$GODOT" --headless --path . --quit-after 3000 --script res://tools/verify.gd -- "${args[@]}" 2>&1)"
+printf '%s\n' "$out" | grep -q '^verify: PASS$' && code=0 || code=1
+out="$(printf '%s\n' "$out" | grep -v -e '^Godot Engine v' -e '^$')"
+if [ $code -ne 0 ]; then
+  if [ $hook -eq 1 ]; then printf '%s\n' "$out" >&2; exit 2; fi
+  printf '%s\n' "$out"; exit 1
+fi
+[ $hook -eq 1 ] || printf '%s\n' "$out"
+exit 0
