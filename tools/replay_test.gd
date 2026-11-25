@@ -14,7 +14,8 @@ const GOLDEN := "res://tests/golden/replay.json"
 static func digest(w) -> String:
 	var p = w.player
 	var nums := PackedFloat64Array([w.night, w.time, w.steps, w.fuel, w.score, w.picks.size(), w.offer.size(), w.schedule.size(),
-		p.pos.x, p.pos.y, p.vel.x, p.vel.y, p.hp, p.face.x, p.face.y, p.attack_t, 1.0 if p.carrying else 0.0, 1.0 if p.dropped != null else 0.0, w.enemies.size(), w.logs.size(), w.berries.size()])
+		p.pos.x, p.pos.y, p.vel.x, p.vel.y, p.hp, p.face.x, p.face.y, p.attack_t, 1.0 if p.carrying else 0.0, 1.0 if p.dropped != null else 0.0, w.enemies.size(), w.logs.size(), w.berries.size(),
+		w.sparks.size(), p.dash_t, w.blade_kills])
 	for e in w.enemies:
 		nums.append_array([e.pos.x, e.pos.y, e.hp, e.knock.x, e.knock.y, 1.0 if e.carrying else 0.0])
 	for l in w.logs + w.berries:
@@ -31,14 +32,17 @@ static func play(seed_value: int = ReplayScript.SEED, pick_slot: int = ReplayScr
 	var bot = Bot.new(pick_slot)
 	var marks := []
 	var told := {} # how many events of each kind the world reported
+	var kill_worth := 0 # what the kills told were worth: most score SCORE.kill, a boss its own score
 	for s in steps:
 		w.step(bot.frame(w))
 		for ev in w.events:
 			told[ev.kind] = told.get(ev.kind, 0) + 1
+			if ev.kind == "kill":
+				kill_worth += Config.ENEMY_TYPES[ev.enemy].get("score", Config.SCORE.kill)
 		if (s + 1) % 60 == 0:
 			marks.append(digest(w))
 	var p = w.player
-	return { "seed": seed_value, "steps": steps, "summary": { "phase": w.phase, "night": w.night, "time": snappedf(w.time, 0.01), "score": w.score, "hp": p.hp, "fuel": roundi(w.fuel), "picks": w.picks }, "events": told, "marks": marks }
+	return { "seed": seed_value, "steps": steps, "summary": { "phase": w.phase, "night": w.night, "time": snappedf(w.time, 0.01), "score": w.score, "hp": p.hp, "fuel": roundi(w.fuel), "picks": w.picks }, "events": told, "kill_worth": kill_worth, "marks": marks }
 
 
 ## E1: what is wrong with the events of a run, or "" when they are complete. The score counts kills, logs fed and
@@ -47,7 +51,7 @@ static func untold(run: Dictionary) -> String:
 	var kills: int = run.events.get("kill", 0)
 	var fed: int = run.events.get("fed", 0)
 	var dawns: int = run.events.get("dawn", 0)
-	var worth: int = kills * Config.SCORE.kill + fed * Config.SCORE.log + dawns * Config.SCORE.dawn
+	var worth: int = run.kill_worth + fed * Config.SCORE.log + dawns * Config.SCORE.dawn
 	if worth == run.summary.score:
 		return ""
 	return "events: world.events told of %d kills, %d logs fed and %d dawns, worth %d, but the score is %d. Fix: append to world.events wherever a kill, a fed log or a dawn is scored (E1); if the score now counts something new, count its event here too." % [kills, fed, dawns, worth, run.summary.score]

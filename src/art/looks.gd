@@ -24,6 +24,8 @@ const ENEMIES := {
 	"shade": { "steps": 14, "bits": ["7", "8", "l"], "glow": "shade_eyes" },
 	"big_slime": { "steps": 18, "anchor": Vector2(12.0, 13.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 2.0), "bits": ["h", "G", "j"] },
 	"thief": { "steps": 6, "turns": true, "bits": ["o", "O", "n"] },
+	"slime_king": { "steps": 20, "anchor": Vector2(16.0, 17.0), "shadow": "shadow_huge", "shadow_at": Vector2(-14.0, 5.0), "bits": ["h", "g", "Y"] },
+	"shade_lord": { "steps": 16, "anchor": Vector2(12.0, 14.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 6.0), "bits": ["7", "8", "Y"], "glow": "shade_lord_eyes" },
 }
 
 ## One line that says what a thing does, shown the first time it turns up in a game. One per enemy kind, and "berry".
@@ -33,6 +35,8 @@ const HINTS := {
 	"thief": "도둑 비버: 장작을 물고 달아난다",
 	"shade": "그림자: 횃불 빛 안에서만 벨 수 있다",
 	"big_slime": "큰 슬라임: 죽으면 둘로 갈라진다",
+	"slime_king": "슬라임 왕: 쓰러뜨리면 큰 슬라임 둘로 갈라지고, 슬라임을 부른다",
+	"shade_lord": "그림자 군주: 빛 안에서만 벨 수 있고, 그림자를 부른다",
 	"berry": "열매: 다쳤을 때 밟으면 체력이 회복된다",
 }
 

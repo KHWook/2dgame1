@@ -14,6 +14,7 @@ const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
 	KEY_UP: "up", KEY_W: "up", KEY_DOWN: "down", KEY_S: "down",
 	KEY_X: "attack", KEY_J: "attack", KEY_SPACE: "attack",
+	KEY_SHIFT: "dash", KEY_K: "dash",
 	KEY_1: "pick_1", KEY_2: "pick_2", KEY_3: "pick_3", KEY_R: "restart",
 }
 const ENDINGS := { "out": "횃불이 꺼졌다", "dead": "쓰러졌다" }
@@ -36,6 +37,7 @@ const CARD_EDGE := Color("#c8862f")
 const CARD_KEY := Color("#ffc94a")
 const CARD_NAME := Color("#ffe6a8")
 const CARD_TEXT := Color("#e6dcc6")
+const LEVELS := ["", "", " II", " III", " IV", " V"] # after an upgrade's name: the level it would be taken to
 const HINT_STEPS := 60 * 4 # simulation steps a hint stays up
 const BOT_LOOKS := 90 # steps a demo bot leaves an offer on screen before it picks, so a person watching can read it
 
@@ -53,6 +55,7 @@ var title: Label
 var cards: HBoxContainer # the offer cards, side by side
 var offers: Array = [] # one per offer slot: { "card": PanelContainer, "key": Label, "icon": TextureRect, "name": Label, "text": Label }
 var foot: Label # under an ending: the score and how to play again
+var boss_name: Label # over the boss's health bar while a boss is on the field
 var hint_box: PanelContainer # one line about a thing, the first time it turns up
 var hint: Label
 var hints_told := {} # things already explained; each is explained once, however many nights are played
@@ -129,6 +132,9 @@ func _ready() -> void:
 	hint_box.add_theme_stylebox_override("panel", back)
 	layer.add_child(hint_box)
 	hint = _label(hint_box, HORIZONTAL_ALIGNMENT_CENTER)
+	boss_name = _label(layer, HORIZONTAL_ALIGNMENT_CENTER)
+	boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.BOSS_BAR.position.y - 12.0)
+	boss_name.size = Vector2(Painter.BOSS_BAR.size.x, 10.0)
 
 
 ## One offer card: the key that takes it in a badge at the top, the icon enlarged, the name, then what it does.
@@ -219,6 +225,10 @@ func _process(_delta: float) -> void:
 	var left := maxf(0.0, Config.NIGHT.length - world.time)
 	hud.text = "%d번째 밤   새벽까지 %d:%02d   점수 %d" % [world.night, int(left) / 60, int(left) % 60, world.score]
 	_words()
+	var b = Painter.boss(world)
+	boss_name.visible = b != null and world.phase == "night"
+	if b != null:
+		boss_name.text = b.T.name
 	var day: float = painter.daylight(world)
 	sky.color = painter.sky(world)
 	torch_light.texture_scale = world.light_radius() * 2.0 / 128.0
@@ -267,11 +277,12 @@ func _words() -> void:
 		var shown: bool = picking and i < world.offer.size()
 		offers[i].card.visible = shown
 		if shown:
-			var u: Dictionary = Config.UPGRADES[world.offer[i]]
+			var next: int = world.level(world.offer[i]) + 1
+			var u: Dictionary = World.upgrade(world.offer[i], next)
 			var icon: Texture2D = painter.icon(world.offer[i])
 			offers[i].icon.texture = icon
 			offers[i].icon.custom_minimum_size = icon.get_size() * CARD_ICON
-			offers[i].name.text = u.name
+			offers[i].name.text = u.name + LEVELS[mini(next, LEVELS.size() - 1)]
 			offers[i].text.text = _wrap(offers[i].text, u.text, CARD.x - 8.0)
 	box.reset_size()
 	box.position = Vector2(roundf((Painter.VIEW.x - box.size.x) / 2.0), BOX_TOP)

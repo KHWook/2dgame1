@@ -8,8 +8,9 @@
 ## events is how the world tells whoever shows it what happened in the last step. The rules only add to it and
 ## never read it. Kinds: "hit" and "kill" { pos, dir (away from the blow), enemy (its kind) }; "passed", the same
 ## for a blow that went through an enemy the dark protects; "banished", the same for an enemy the dawn clears
-## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten; "dawn" { night } for the
-## night that just ended.
+## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
+## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "boss" { enemy, pos }
+## for a boss that came out of the dark.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -40,6 +41,10 @@ var next_spawn := 0.0
 var next_wood := 0.0
 var next_berry := 0.0
 var next_ember := 0.0
+var next_spark := 0.0
+var sparks: Array = [] # embers the torch fired: { pos, vel, life }
+var boss_due := false # a boss is still to come tonight
+var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
 var events: Array = [] # what happened in the last step; see the top of this file
 
 
@@ -67,6 +72,10 @@ func reset() -> void:
 	next_wood = Config.WOOD.first
 	next_berry = Config.BERRY.first
 	next_ember = 0.0
+	next_spark = 0.0
+	sparks = []
+	blade_kills = 0
+	boss_due = _boss_night()
 	player = Player.new()
 	_offer()
 
@@ -76,19 +85,47 @@ func later(delay: float, fn: Callable) -> void:
 	schedule.append({ "at": time + delay, "fn": fn })
 
 
-## The value an upgrade sets for key, or fallback when no picked upgrade sets it. Multipliers stack by product.
+## The value an upgrade sets for key, at the level you have it, or fallback when no picked upgrade sets it.
+## Multipliers from different upgrades stack by product.
 func mod(key: String, fallback):
 	var v = fallback
-	for id in picks:
-		var u: Dictionary = Config.UPGRADES[id]
+	for id in Config.UPGRADES:
+		var n := level(id)
+		if n == 0:
+			continue
+		var u := upgrade(id, n)
 		if not u.has(key):
 			continue
 		v = v * u[key] if key.ends_with("_mult") or key == "glow_slow" else u[key]
 	return v
 
 
+## How many times you have taken this upgrade: its level, 0 when you do not have it.
+func level(id: String) -> int:
+	return picks.count(id)
+
+
+## An upgrade's row at a level from 1: the row with its levels merged over it up to that one.
+static func upgrade(id: String, at_level: int) -> Dictionary:
+	var u: Dictionary = Config.UPGRADES[id].duplicate()
+	var levels: Array = u.get("levels", [])
+	for i in mini(at_level - 1, levels.size()):
+		u.merge(levels[i], true)
+	return u
+
+
+static func max_level(id: String) -> int:
+	return 1 + Config.UPGRADES[id].get("levels", []).size()
+
+
+## How much fuel the torch holds.
+func max_fuel() -> float:
+	return T.max_fuel + mod("fuel_bonus", 0.0)
+
+
 func light_radius() -> float:
-	return lerpf(T.light_min, T.light_max, fuel / T.max_fuel) * mod("light_mult", 1.0)
+	# A big torch's extra fuel is a reserve: the light is as bright as it gets at the usual full tank.
+	return lerpf(T.light_min, T.light_max, clampf(fuel / T.max_fuel, 0.0, 1.0)) * mod("light_mult", 1.0)
 
 
 func in_light(p: Vector2) -> bool:
@@ -107,6 +144,11 @@ func reach() -> float:
 
 func arc() -> float:
 	return Config.PLAYER.arc + mod("arc_bonus", 0.0)
+
+
+## The arc of the swing under way: all the way round for a spin.
+func blow_arc() -> float:
+	return -1.01 if player.spin else arc()
 
 
 func step(inp) -> void:
@@ -139,27 +181,29 @@ func step(inp) -> void:
 			if thorns > 0:
 				_damage(e, thorns, player.pos)
 	_torch()
+	_sparks()
 	enemies = enemies.filter(func(e): return not e.dead and not e.gone) + born
 	born = []
 	_spawns()
 	_end_or_offer()
 
 
-## Put three upgrades you don't have yet on the table and stop the clock.
+## Put three upgrades on the table, ones you don't have yet or the next level of ones you do, and stop the clock.
 func _offer() -> void:
-	var pool: Array = Config.UPGRADES.keys().filter(func(id): return not picks.has(id))
+	var pool: Array = Config.UPGRADES.keys().filter(func(id): return level(id) < max_level(id))
 	offer = []
 	while offer.size() < N.offer_size and not pool.is_empty():
 		offer.append(pool.pop_at(rng.index(pool.size())))
 	phase = "pick" if not offer.is_empty() else "night"
 
 
-## Take an offered upgrade. Most only change what mod() answers; hp_bonus also heals by that much, now.
+## Take an offered upgrade. Most only change what mod() answers; hp_bonus also heals by as much as it grew, now.
 func _take(id: String) -> void:
+	var before: int = upgrade(id, level(id)).get("hp_bonus", 0) if level(id) > 0 else 0
 	picks.append(id)
 	offer = []
 	phase = "night"
-	player.hp += Config.UPGRADES[id].get("hp_bonus", 0)
+	player.hp += upgrade(id, level(id)).get("hp_bonus", 0) - before
 
 
 func _end_or_offer() -> void:
@@ -193,6 +237,9 @@ func _dawn() -> void:
 	next_wood = Config.WOOD.first
 	next_berry = Config.BERRY.first
 	next_ember = 0.0
+	next_spark = 0.0
+	sparks = []
+	boss_due = _boss_night()
 	player.hp = mini(max_hp(), player.hp + Config.DAWN.heal)
 	fuel = maxf(fuel, T.start_fuel)
 	_offer()
@@ -213,7 +260,7 @@ func _haul() -> void:
 				break
 	elif p.pos.distance_to(T.pos) < T.reach + Config.PLAYER.radius:
 		p.carrying = false
-		fuel = minf(T.max_fuel, fuel + T.log_fuel + mod("log_bonus", 0.0))
+		fuel = minf(max_fuel(), fuel + T.log_fuel + mod("log_bonus", 0.0))
 		score += Config.SCORE.log
 		events.append({ "kind": "fed", "pos": T.pos })
 
@@ -247,6 +294,30 @@ func _torch() -> void:
 		for e in enemies:
 			if e.pos.distance_to(T.pos) <= ring:
 				_damage(e, 1, T.pos)
+	var every: float = mod("spark_every", 0.0)
+	if every > 0.0 and time >= next_spark:
+		var target = null # the nearest enemy in the light
+		for e in enemies:
+			if not e.dead and in_light(e.pos) and (target == null or e.pos.distance_to(T.pos) < target.pos.distance_to(T.pos)):
+				target = e
+		if target != null:
+			next_spark = time + every
+			var from: Vector2 = T.pos + Config.SPARK.mouth
+			sparks.append({ "pos": from, "vel": (target.pos - from).normalized() * Config.SPARK.speed, "life": Config.SPARK.life })
+			events.append({ "kind": "shot", "pos": from })
+
+
+## Sparks fly straight and burn the first enemy they touch.
+func _sparks() -> void:
+	for sp in sparks:
+		sp.pos += sp.vel * Config.STEP
+		sp.life -= Config.STEP
+		for e in enemies:
+			if not e.dead and sp.pos.distance_to(e.pos) < e.T.radius + Config.SPARK.radius:
+				_damage(e, Config.SPARK.damage, sp.pos - sp.vel * Config.STEP)
+				sp.life = 0.0
+				break
+	sparks = sparks.filter(func(sp): return sp.life > 0.0)
 
 
 ## A swing turns toward the nearest enemy within aim range, so backing off and swinging works. Otherwise it keeps face.
@@ -265,13 +336,14 @@ func melee(p) -> void:
 	var dmg: int = 1 + (mod("lit_damage", 0) if in_light(p.pos) else 0)
 	for e in enemies:
 		var to: Vector2 = e.pos - p.pos
-		if to.length() < reach() + e.T.radius and to.normalized().dot(p.face) > arc():
-			_damage(e, dmg, p.pos)
+		if to.length() < reach() + e.T.radius and to.normalized().dot(p.face) > blow_arc():
+			_damage(e, dmg, p.pos, true)
 
 
-## A blow of n lands on e, struck from from. The dark protects some enemies; a thief drops its log when it dies; a
-## big slime breaks into smaller ones, which join the fight at the end of the step.
-func _damage(e, n: int, from: Vector2) -> void:
+## A blow of n lands on e, struck from from (by the sword when blade). The dark protects some enemies; a thief drops
+## its log when it dies; a big slime breaks into smaller ones, which join the fight at the end of the step; with the
+## vampire upgrade enough sword kills heal you.
+func _damage(e, n: int, from: Vector2, blade := false) -> void:
 	if e.dead:
 		return
 	var dir: Vector2 = (e.pos - from).normalized()
@@ -282,7 +354,14 @@ func _damage(e, n: int, from: Vector2) -> void:
 	events.append({ "kind": "kill" if e.dead else "hit", "pos": e.pos, "dir": dir, "enemy": e.kind })
 	if not e.dead:
 		return
-	score += Config.SCORE.kill
+	score += e.T.get("score", Config.SCORE.kill)
+	var thirst: int = mod("vamp_kills", 0)
+	if blade and thirst > 0:
+		blade_kills = mini(blade_kills + 1, thirst)
+		if blade_kills >= thirst and player.hp < max_hp() and not player.dead:
+			blade_kills = 0
+			player.hp += 1
+			events.append({ "kind": "healed", "pos": player.pos })
 	if e.carrying:
 		logs.append(e.pos)
 	for i in e.T.get("split_count", 0):
@@ -296,8 +375,13 @@ func _spawns() -> void:
 	if time >= next_spawn:
 		var row := _night_row()
 		var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(time / N.length, 0.0, 1.0))
-		next_spawn = time + apart * pow(Config.LATER_NIGHTS.spawn, _nights_past())
+		next_spawn = time + apart * pow(Config.LATER_NIGHTS.spawn, _nights_past()) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
 		enemies.append(Enemy.new(_who(row.who), _edge_point()))
+	if boss_due and time >= N.length * Config.BOSS.at:
+		boss_due = false
+		var boss = Enemy.new(boss_kind(), _edge_point())
+		enemies.append(boss)
+		events.append({ "kind": "boss", "enemy": boss.kind, "pos": boss.pos })
 	if time >= next_wood:
 		next_wood = time + Config.WOOD.every * mod("wood_mult", 1.0)
 		if logs.size() < Config.WOOD.max_on_ground + mod("wood_extra", 0):
@@ -310,6 +394,17 @@ func _spawns() -> void:
 			var spot = _free_spot(Config.BERRY.keep_away)
 			if spot != null:
 				berries.append(spot)
+
+
+## Whether a boss comes tonight.
+func _boss_night() -> bool:
+	return night % Config.BOSS.every == 0
+
+
+## Which boss comes on this boss night: they take turns.
+func boss_kind() -> String:
+	var kinds: Array = Config.BOSS.kinds
+	return kinds[(night / Config.BOSS.every - 1) % kinds.size()]
 
 
 ## This night's row of Config.NIGHTS; nights past the table use its last row.
