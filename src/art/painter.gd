@@ -8,6 +8,7 @@ const Sprites := preload("res://src/art/sprites.gd")
 const SimRng := preload("res://src/sim/rng.gd")
 const Effects := preload("res://src/art/effects.gd")
 const Looks := preload("res://src/art/looks.gd")
+const Juice := preload("res://src/art/juice.gd")
 const T := Config.TORCH
 
 const VIEW: Vector2 = Config.VIEW
@@ -117,6 +118,7 @@ var effects # short-lived pictures that answer what happens in the world
 var scenery: Array = [] # [texture, top-left]
 var clearing: Texture2D
 var hedges := {} # side -> texture: the treetops along each screen edge
+var shake := Vector2.ZERO # set by main.gd: how far the field is drawn off its place right now (src/art/juice.gd)
 
 
 ## The ground is laid out from the night's seed with its own generator, so it never draws from world.rng.
@@ -169,6 +171,7 @@ func sky(w) -> Color:
 
 
 func paint(c: CanvasItem, w) -> void:
+	c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"]) # the hedge goes on past the view, for a shake
 	c.draw_rect(Rect2(Vector2.ZERO, VIEW), GROUND)
 	c.draw_texture(clearing, (T.pos + CLEARING_DROP - Vector2(CLEARING) / 2.0).round())
 	for s in scenery:
@@ -192,12 +195,14 @@ func paint(c: CanvasItem, w) -> void:
 
 
 func paint_overlay(c: CanvasItem, w) -> void:
+	c.draw_set_transform(shake) # what glows in the field shakes with it (main.gd moves the field); the HUD does not
 	effects.paint(c)
 	_slash(c, w)
 	for e in w.enemies:
 		var look := Looks.enemy(e.kind)
 		if look.glow != "":
 			c.draw_texture(Sprites.texture(look.glow), (e.pos - look.anchor).round())
+	c.draw_set_transform(Vector2.ZERO)
 	_hud_panels(c, w)
 	for i in w.max_hp():
 		c.draw_texture(Sprites.texture("heart" if i < w.player.hp else "heart_empty"), HUD_HEARTS + Vector2(i * HUD_HEART_STEP, 0.0))
