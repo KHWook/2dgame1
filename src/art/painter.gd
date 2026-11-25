@@ -79,8 +79,18 @@ const HUD_HEART_STEP := 10.0
 const HUD_FUEL := Rect2(13.0, 16.0, 50.0, 4.0)
 const HUD_LOW := 0.25 # the fuel bar turns red and blinks below this share
 const HUD_BLINK_STEPS := 10
-const HUD_PICKS := Vector2(4.0, 25.0) # the upgrades you hold, in the order you took them
+const HUD_PICKS := Vector2(4.0, 25.0) # the upgrades you hold, in the order you first took them
 const HUD_PICK_STEP := 11.0
+const HUD_LEVEL := Vector2(0.0, 10.0) # under an icon, a dot per level from the second, this far from its top-left
+const HUD_LEVEL_STEP := 2.0
+const BOSS_BAR := Rect2(160.0, 254.0, 160.0, 3.0) # a boss's health, along the bottom; main.gd writes its name above
+const BOSS_BAR_COLOUR := "i"
+
+## The dash: copies of the keeper trail behind while it dashes, fading, this far apart along the dash.
+const DASH_GHOSTS := 3
+const DASH_GHOST_GAP := 6.0
+const DASH_GHOST := Color(0.65, 0.85, 1.0, 0.45)
+const SPARK_TAIL := [[0.012, "F"], [0.024, "x"], [0.036, "X"]] # pixels behind a spark: [seconds back along its flight, colour]
 
 ## How upgrades show in the world. The rest show only as their icon.
 const WARMED := Color(1.0, 0.74, 0.5) # tint of an enemy the warm glow is slowing
@@ -175,17 +185,54 @@ func paint_overlay(c: CanvasItem, w) -> void:
 			c.draw_texture(Sprites.texture(look.glow), (e.pos - look.anchor).round())
 	for i in w.max_hp():
 		c.draw_texture(Sprites.texture("heart" if i < w.player.hp else "heart_empty"), HUD_HEARTS + Vector2(i * HUD_HEART_STEP, 0.0))
-	var share := clampf(w.fuel / T.max_fuel, 0.0, 1.0)
+	var share := clampf(w.fuel / w.max_fuel(), 0.0, 1.0)
 	var low: bool = share < HUD_LOW
+	var bar := Rect2(HUD_FUEL.position, Vector2(roundf(HUD_FUEL.size.x * w.max_fuel() / T.max_fuel), HUD_FUEL.size.y)) # a big torch has a longer bar
 	c.draw_texture(Sprites.texture("flame_s_a"), Vector2(HUD_HEARTS.x, HUD_FUEL.position.y - 2.0))
-	c.draw_rect(HUD_FUEL.grow(1.0), Sprites.PALETTE["k"])
-	c.draw_rect(HUD_FUEL, Sprites.PALETTE["K"])
+	c.draw_rect(bar.grow(1.0), Sprites.PALETTE["k"])
+	c.draw_rect(bar, Sprites.PALETTE["K"])
 	if not (low and (w.steps / HUD_BLINK_STEPS) % 2 == 0):
-		var fill := Rect2(HUD_FUEL.position, Vector2(ceilf(HUD_FUEL.size.x * share), HUD_FUEL.size.y))
+		var fill := Rect2(bar.position, Vector2(ceilf(bar.size.x * share), bar.size.y))
 		c.draw_rect(fill, Sprites.PALETTE["X" if low else "x"])
 		c.draw_rect(Rect2(fill.position, Vector2(fill.size.x, 1.0)), Sprites.PALETTE["x" if low else "F"])
-	for i in w.picks.size():
-		c.draw_texture(icon(w.picks[i]), HUD_PICKS + Vector2(i * HUD_PICK_STEP, 0.0))
+	var held := []
+	for id in w.picks:
+		if not held.has(id):
+			held.append(id)
+	for i in held.size():
+		var at := HUD_PICKS + Vector2(i * HUD_PICK_STEP, 0.0)
+		c.draw_texture(icon(held[i]), at)
+		var n: int = w.level(held[i])
+		for d in n - 1 if n > 1 else 0:
+			c.draw_rect(Rect2(at + HUD_LEVEL + Vector2(d * HUD_LEVEL_STEP, 0.0), Vector2.ONE), Sprites.PALETTE["Y"])
+	_sparks(c, w)
+	_boss_bar(c, w)
+
+
+## The embers the spark upgrade fires: they glow, so they are painted where the night does not dim them.
+func _sparks(c: CanvasItem, w) -> void:
+	var tex := Sprites.texture("spark")
+	for sp in w.sparks:
+		for t in SPARK_TAIL:
+			c.draw_rect(Rect2((sp.pos - sp.vel * t[0]).round(), Vector2.ONE), Sprites.PALETTE[t[1]])
+		c.draw_texture(tex, (sp.pos - tex.get_size() / 2.0).round())
+
+
+## The first boss on the field, or null.
+static func boss(w):
+	for e in w.enemies:
+		if e.T.get("boss", false) and not e.dead:
+			return e
+	return null
+
+
+func _boss_bar(c: CanvasItem, w) -> void:
+	var b = boss(w)
+	if b == null:
+		return
+	c.draw_rect(BOSS_BAR.grow(1.0), Sprites.PALETTE["k"])
+	c.draw_rect(BOSS_BAR, Sprites.PALETTE["K"])
+	c.draw_rect(Rect2(BOSS_BAR.position, Vector2(ceilf(BOSS_BAR.size.x * float(b.hp) / b.T.hp), BOSS_BAR.size.y)), Sprites.PALETTE[BOSS_BAR_COLOUR])
 
 
 func _shadows(c: CanvasItem, w) -> void:
@@ -252,6 +299,10 @@ func _standing(w) -> Array:
 		_put(out, p.pos.y + 5.0, "keeper_dead", p.pos, BODY)
 	elif _keeper_shows(w):
 		var look := _keeper(w)
+		for g in DASH_GHOSTS if p.dash_t > 0.0 else 0:
+			var ghost := DASH_GHOST
+			ghost.a *= 1.0 - float(g) / DASH_GHOSTS
+			_put(out, p.pos.y + 4.8, look[0], p.pos - p.dash_dir * DASH_GHOST_GAP * (g + 1), BODY, look[1], true, ghost)
 		_put(out, p.pos.y + 5.0, look[0], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
 		if w.mod("thorns", 0) > 0: # the thorn cloak: behind the keeper, except seen from behind
 			_put(out, p.pos.y + (5.05 if look[2] == "up" else 4.95), "thorns_%s" % look[2], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
@@ -323,7 +374,7 @@ func _lean(w) -> Vector2:
 ## The angles of the swing: [start of the arc, end of the arc, wound up]. The sweep turns counter-clockwise on the
 ## screen and starts on the hand side, the side the facing turned a quarter clockwise points to.
 func _arc(w) -> Array:
-	var half := acos(clampf(w.arc(), -1.0, 1.0))
+	var half := acos(clampf(w.blow_arc(), -1.0, 1.0)) # a spin goes all the way round
 	var start: float = w.player.face.angle() + half
 	return [start, start - 2.0 * half, start + WIND_BACK]
 
