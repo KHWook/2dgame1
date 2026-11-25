@@ -25,6 +25,7 @@ static func run() -> Array:
 	out.append_array(_upgrades())
 	out.append_array(_levels())
 	out.append_array(_new_upgrades())
+	out.append_array(_rebalanced())
 	out.append_array(_bosses())
 	out.append_array(_logs())
 	out.append_array(_nights())
@@ -155,6 +156,7 @@ static func _upgrades() -> Array:
 	_play(w, 1, "pick_1")
 	_expect(out, "sturdy raises max hp and heals by one", [w.max_hp(), w.player.hp], [Config.PLAYER.hp + 1, Config.PLAYER.hp + 1])
 	w = _night(DARK, ["thorns"])
+	w.next_thorn = NEVER # only the blow back, not the prickling (that has its own scene)
 	var slime = _add(w, "slime", Vector2(8.0, 0.0))
 	_play(w, 1)
 	_expect(out, "with thorns the enemy that hurts you is hurt too", [w.player.hp, slime.hp], [Config.PLAYER.hp - 1, Config.ENEMY_TYPES.slime.hp - 1])
@@ -256,6 +258,75 @@ static func _new_upgrades() -> Array:
 	w.player.pos = Config.TORCH.pos
 	_play(w, 1)
 	_expect(out, "a big torch takes fuel past the usual full tank", w.fuel > Config.TORCH.max_fuel, true)
+	return out
+
+
+## An enemy that stays where it is put.
+static func _still(e):
+	e.T = e.T.duplicate()
+	e.T.speed = 0.0
+	e.T.heavy = 0.0
+	return e
+
+
+## What the upgrade rebalance asks of the ember ring, bright fire, thorn cloak and big torch.
+static func _rebalanced() -> Array:
+	var out := []
+	var er: Dictionary = Config.UPGRADES.ember_ring
+	# ember ring: scorches down to 1 hp, never kills, once every ember_every
+	var w = _night(Vector2(0.0, 60.0), ["ember_ring"])
+	var big = _still(Enemy.new("big_slime", Config.TORCH.pos + Vector2(20.0, 0.0)))
+	var slime = _still(Enemy.new("slime", Config.TORCH.pos + Vector2(-20.0, 0.0)))
+	w.enemies.append_array([big, slime])
+	w.fuel = 1.0e6 # the big slime smothers the torch the whole time; keep it lit
+	_play(w, 1)
+	_expect(out, "the ember ring scorches what is beside the torch", [big.hp, slime.hp], [Config.ENEMY_TYPES.big_slime.hp - 1, 1])
+	_play(w, int(er.ember_every / Config.STEP) - 2)
+	_expect(out, "the ember ring waits ember_every before it scorches again", big.hp, Config.ENEMY_TYPES.big_slime.hp - 1)
+	_play(w, int(10.0 / Config.STEP))
+	_expect(out, "the ember ring never kills: the last point is left to you", [big.hp, slime.hp, big.dead or slime.dead, w.score, w.phase], [1, 1, false, 0, "night"])
+	# ember ring: smotherers at the torch smother less
+	for has in [false, true]:
+		w = _night(DARK, ["ember_ring"] if has else [])
+		w.next_ember = NEVER
+		w.enemies.append(Enemy.new("slime", Config.TORCH.pos + Vector2(19.0, 0.0)))
+		var before: float = w.fuel
+		_play(w, 1)
+		var want: float = (Config.NIGHTS[0].burn + Config.TORCH.smother * (er.smother_mult if has else 1.0)) * Config.STEP
+		_expect(out, "a slime at the torch smothers less with the ember ring (%s)" % has, is_equal_approx(before - w.fuel, want), true)
+	# bright fire: faster on foot in the light, the usual speed outside it
+	for at in [LIT, DARK]:
+		for has in [false, true]:
+			w = _night(at, ["bright"] if has else [])
+			var from: Vector2 = w.player.pos
+			_play(w, 10, "", "up")
+			var want: float = Config.PLAYER.speed * Config.STEP * 10.0 * (Config.UPGRADES.bright.lit_speed_mult if has and at == LIT else 1.0)
+			_expect(out, "bright fire speeds you up only in the light (%s, %s)" % ["lit" if at == LIT else "dark", has], is_equal_approx(from.y - w.player.pos.y, want), true)
+	# thorn cloak: an enemy pressed up against you, not touching, is pricked every thorn_every
+	var th: Dictionary = Config.UPGRADES.thorns
+	for has in [false, true]:
+		w = _night(DARK, ["thorns"] if has else [])
+		var gap: float = Config.ENEMY_TYPES.slime.radius + Config.PLAYER.radius + th.thorn_reach * 0.5
+		slime = _still(_add(w, "slime", Vector2(gap, 0.0)))
+		slime.hp = 99
+		_play(w, 1)
+		_expect(out, "the thorn cloak pricks an enemy close by without being hit (%s)" % has, [slime.hp, w.player.hp], [98 if has else 99, Config.PLAYER.hp])
+		_play(w, int(th.thorn_every / Config.STEP) - 2)
+		_expect(out, "the thorn cloak waits thorn_every before it pricks again (%s)" % has, slime.hp, 98 if has else 99)
+		_play(w, 3)
+		_expect(out, "the thorn cloak pricks again after thorn_every (%s)" % has, slime.hp, 97 if has else 99)
+	w = _night(DARK, ["thorns"])
+	slime = _still(_add(w, "slime", Vector2(Config.ENEMY_TYPES.slime.radius + Config.PLAYER.radius + th.thorn_reach + 2.0, 0.0)))
+	_play(w, 1)
+	_expect(out, "the thorn cloak does not reach an enemy farther off", slime.hp, Config.ENEMY_TYPES.slime.hp)
+	# big torch: dawn tops it up in proportion to the tank
+	for picks in [[], ["big_torch"], ["big_torch", "big_torch"]]:
+		w = _night(DARK, picks)
+		w.fuel = 1.0
+		w.time = Config.NIGHT.length - Config.STEP * 0.5
+		_play(w, 1)
+		var want: float = Config.TORCH.start_fuel * w.max_fuel() / Config.TORCH.max_fuel
+		_expect(out, "dawn tops the torch up to its share of the tank (big torch level %d)" % picks.size(), [is_equal_approx(w.fuel, want), w.fuel > Config.TORCH.start_fuel], [true, not picks.is_empty()])
 	return out
 
 
