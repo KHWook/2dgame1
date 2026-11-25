@@ -25,7 +25,7 @@ const BERRY_ANCHOR := Vector2(4.0, 6.0)
 const CARRY := Vector2(0.0, -13.0) # a carried log rides above the keeper's head
 const THIEF_CARRY := Vector2(0.0, -9.0) # and on a thief's back
 const SHADOW := Vector2(-6.0, 1.0) # where the keeper's shadow's top-left sits, from the keeper's position
-const HAND := Vector2(0.0, -2.0) # the sword turns around this point of the keeper
+const SLASH_AT := Vector2(0.0, -2.0) # the middle of the swing's trail, from the keeper's position
 const GHOST := 0.45 # how solid an enemy looks while the dark protects it from blows
 
 ## Simulation steps per animation frame. Enemies have theirs in looks.gd.
@@ -40,6 +40,27 @@ const CLEARING := Vector2i(60, 38) # the bare earth around the torch
 const CLEARING_DROP := Vector2(0.0, 5.0)
 const HEDGE_SIDES := { "top": 0, "right": 1, "bottom": 2, "left": 3 } # quarter turns from the sprite, which faces down
 const HEDGE_DEPTH := 9
+
+## The sword. The swing sweeps the arc the simulation hits (world.arc()), always turning the same way, and the
+## picture runs through four stages, as shares of Config.PLAYER.attack_time: it winds up past the start of the arc,
+## strikes across it (the blow lands at PLAYER.attack_hit_at, in the middle of this), holds at the end while the
+## trail fades, and goes back to rest in the hand.
+const SWING_WIND := 0.18
+const SWING_STRIKE := 0.46
+const SWING_HOLD := 0.64
+const WIND_BACK := 0.5 # radians the blade is pulled back past the start of the arc
+const OVERSHOOT := 0.25 # radians it flies past the end before it settles
+const LUNGE := 1.0 # pixels the keeper leans into the blow while it strikes and holds
+const SHOULDER := Vector2(0.0, -3.0) # the sword hand turns around this point of the keeper
+const ARM := 5.0 # pixels from the shoulder to the hand while swinging
+const GRIP := Vector2(1.5, 2.5) # the pixel of the sword sprite held in the hand: the middle of the fist
+const BLADE := 17.0 # pixels from the fist to the tip at the base reach; a longer reach stretches the sword
+## At rest the sword hangs from the hand on the side the swing starts from, pointing down and a little ahead.
+const REST_HAND := Vector2(5.5, 1.0) # where that hand is, along the side and down from it
+const REST_DROP := Vector2(0.0, 1.5)
+const REST_LENGTH := 0.7 # how long the sword looks at rest, hanging toward the viewer, against its length out
+const REST_POINT := [0.7, 0.7, 0.8] # the rest direction: this much of the hand side, the facing, and down
+const BEHIND := -0.25 # the sword is painted behind the keeper while it points up more than this (sine of its angle)
 
 ## The swing's trail: arcs just inside the reach, each [pixels inside the reach, share of the sweep it trails, colour].
 const SLASH := [[0.0, 1.0, Color("#fff6c0")], [1.0, 0.7, Color("#fff6c0")], [2.0, 0.45, Color("#ffc94a")], [3.0, 0.25, Color("#f58230")]]
@@ -123,8 +144,10 @@ func paint(c: CanvasItem, w) -> void:
 	var standing := _standing(w)
 	standing.sort_custom(func(a, b): return a[0] < b[0])
 	for s in standing:
-		c.draw_texture(s[1], s[2], s[3])
-	_sword(c, w)
+		if s[1] == null:
+			_sword(c, w)
+		else:
+			c.draw_texture(s[1], s[2], s[3])
 	_fliers(c, w)
 	for x in range(0, int(VIEW.x), 16):
 		c.draw_texture(hedges.top, Vector2(x, 0.0))
@@ -220,9 +243,12 @@ func _standing(w) -> Array:
 		_put(out, p.pos.y + 5.0, "keeper_dead", p.pos, BODY)
 	elif _keeper_shows(w):
 		var look := _keeper(w)
-		_put(out, p.pos.y + 5.0, look[0], p.pos, BODY, look[1], p.hurt_t > 0.0)
+		_put(out, p.pos.y + 5.0, look[0], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
 		if p.carrying:
 			_put(out, p.pos.y + 5.1, "log", p.pos + CARRY, LOG_ANCHOR)
+		else:
+			var behind: bool = sin(_blade(w)[1]) < BEHIND
+			out.append([p.pos.y + (4.9 if behind else 5.2), null]) # the sword: paint() draws it at this depth
 	return out
 
 
@@ -252,44 +278,105 @@ func _keeper(w) -> Array:
 		dir = "side"
 	elif p.face.y < 0.0:
 		dir = "up"
+	if _swinging(w):
+		return ["keeper_%s_atk" % dir, dir == "side" and p.face.x < 0.0]
 	var walking: bool = p.vel.length() > 1.0 and p.hurt_t <= 0.0
 	var beat: int = (w.steps / WALK_STEPS) % 4 if walking else 0 # stand, step, stand, other step
 	var frame := "b" if beat % 2 == 1 else "a"
 	var flip: bool = p.face.x < 0.0 if dir == "side" else beat == 3
-	return ["keeper_%s_%s" % [dir, frame], flip]
-
-
-## Where the swing is: [hand position, reach, angle it started at, angle it is at now, share of the swing done].
-## The sweep is the arc the simulation hits (world.arc() and world.reach()), so the picture shows the real reach.
-func _sweep(w) -> Array:
-	var p = w.player
-	var k := clampf(p.attack_t / Config.PLAYER.attack_time, 0.0, 1.0)
-	var half := acos(clampf(w.arc(), -1.0, 1.0))
-	var from: float = p.face.angle() - half
-	return [(p.pos + HAND).round(), w.reach(), from, from + 2.0 * half * (1.0 - pow(1.0 - k, 3.0)), k]
+	return ["keeper_%s%s_%s" % [dir, "_lift" if p.carrying else "", frame], flip]
 
 
 func _swinging(w) -> bool:
 	return w.player.attack_t >= 0.0 and not w.player.dead
 
 
+## How far into the swing it is, 0 to 1, or -1 when the keeper is not swinging.
+func _swing_share(w) -> float:
+	return clampf(w.player.attack_t / Config.PLAYER.attack_time, 0.0, 1.0) if _swinging(w) else -1.0
+
+
+## Where along a stage of the swing k is, 0 to 1.
+func _stage(k: float, from: float, to: float) -> float:
+	return clampf((k - from) / (to - from), 0.0, 1.0)
+
+
+## How far the keeper leans into the blow: a pixel toward the facing while the swing strikes and holds.
+func _lean(w) -> Vector2:
+	var k := _swing_share(w)
+	if k < SWING_WIND or k >= SWING_HOLD:
+		return Vector2.ZERO
+	return (w.player.face * LUNGE).round()
+
+
+## The angles of the swing: [start of the arc, end of the arc, wound up]. The sweep turns counter-clockwise on the
+## screen and starts on the hand side, the side the facing turned a quarter clockwise points to.
+func _arc(w) -> Array:
+	var half := acos(clampf(w.arc(), -1.0, 1.0))
+	var start: float = w.player.face.angle() + half
+	return [start, start - 2.0 * half, start + WIND_BACK]
+
+
+## Where the sword rests: [hand position, angle], the angle unwound to lie near near_angle.
+func _rest(w, near_angle: float) -> Array:
+	var p = w.player
+	var side: Vector2 = p.face.rotated(PI / 2.0)
+	var point: Vector2 = side * REST_POINT[0] + p.face * REST_POINT[1] + Vector2.DOWN * REST_POINT[2]
+	var hand: Vector2 = p.pos + REST_DROP + side * REST_HAND
+	return [hand, near_angle + wrapf(point.angle() - near_angle, -PI, PI)]
+
+
+## Where the sword is now: [hand position, angle, how far the hand is out from rest, 0 to 1]. The hand goes from its resting place out to ARM from the
+## shoulder while winding up, and back while recovering.
+func _blade(w) -> Array:
+	var p = w.player
+	var k := _swing_share(w)
+	var arc := _arc(w)
+	if k < 0.0:
+		return _rest(w, arc[0]) + [0.0]
+	var shoulder: Vector2 = p.pos + _lean(w) + SHOULDER
+	var a: float
+	var out := 1.0 # how far the hand is from rest toward the arm's length out
+	if k < SWING_WIND:
+		var rest := _rest(w, arc[2])
+		out = ease(_stage(k, 0.0, SWING_WIND), 0.4)
+		a = lerpf(rest[1], arc[2], out)
+	elif k < SWING_STRIKE:
+		a = lerpf(arc[2], arc[1] - OVERSHOOT, smoothstep(0.0, 1.0, _stage(k, SWING_WIND, SWING_STRIKE)))
+	elif k < SWING_HOLD:
+		a = lerpf(arc[1] - OVERSHOOT, arc[1], ease(_stage(k, SWING_STRIKE, SWING_HOLD), 0.5))
+	else:
+		var rest := _rest(w, arc[1])
+		out = 1.0 - smoothstep(0.0, 1.0, _stage(k, SWING_HOLD, 1.0))
+		a = lerpf(rest[1], arc[1], out)
+	var rest_hand: Vector2 = _rest(w, a)[0]
+	return [rest_hand.lerp(shoulder + Vector2.from_angle(a) * ARM, out), a, out]
+
+
 func _sword(c: CanvasItem, w) -> void:
-	if not _swinging(w):
-		return
-	var sweep := _sweep(w)
+	var blade := _blade(w)
 	var sword := Sprites.texture("sword")
-	c.draw_set_transform(sweep[0], sweep[3], Vector2(sweep[1] / Config.PLAYER.reach, 1.0)) # a longer reach stretches the blade
-	c.draw_texture(sword, Vector2(3.0, -sword.get_height() / 2.0))
+	var stretch: float = (w.reach() - Config.PLAYER.reach + BLADE) / BLADE # a longer reach stretches the blade
+	stretch *= lerpf(REST_LENGTH, 1.0, blade[2])
+	c.draw_set_transform(blade[0].round(), blade[1], Vector2(stretch, 1.0))
+	c.draw_texture(sword, -GRIP)
 	c.draw_set_transform(Vector2.ZERO)
 
 
+## The trail follows the blade through the strike at the reach the simulation hits (world.reach()), then shrinks
+## into the blade and fades while the swing holds.
 func _slash(c: CanvasItem, w) -> void:
-	if not _swinging(w):
+	var k := _swing_share(w)
+	if k < SWING_WIND or k >= SWING_HOLD:
 		return
-	var sweep := _sweep(w)
-	for arc in SLASH:
-		var tail: float = lerpf(sweep[3], sweep[2], arc[1])
-		c.draw_arc(sweep[0], sweep[1] - arc[0], tail, sweep[3], 12, Color(arc[2], 1.0 - sweep[4] * sweep[4]), 1.0)
+	var arc := _arc(w)
+	var a: float = _blade(w)[1]
+	var hold := _stage(k, SWING_STRIKE, SWING_HOLD)
+	var at: Vector2 = (w.player.pos + _lean(w) + SLASH_AT).round()
+	for t in SLASH:
+		var tail: float = lerpf(a, arc[2], t[1] * (1.0 - hold))
+		if absf(tail - a) > 0.05:
+			c.draw_arc(at, w.reach() - t[0], tail, a, 12, Color(t[2], 1.0 - hold * hold), 1.0)
 
 
 func _put(list: Array, depth: float, sprite: String, at: Vector2, anchor: Vector2, flip := false, white := false, tint := Color.WHITE) -> void:
