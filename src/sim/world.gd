@@ -282,12 +282,17 @@ func _forage() -> void:
 			break
 
 
-func _torch() -> void:
+## Fuel the torch uses per second right now: tonight's burn with upgrades, plus whatever is smothering it.
+func burn_rate() -> float:
 	var smothering := 0.0
 	for e in enemies:
 		if e.at_torch and not e.dead:
 			smothering += e.T.get("smother", 1.0)
-	fuel -= (burn() * mod("burn_mult", 1.0) + T.smother * smothering) * Config.STEP
+	return burn() * mod("burn_mult", 1.0) + T.smother * smothering
+
+
+func _torch() -> void:
+	fuel -= burn_rate() * Config.STEP
 	var ring: float = mod("ember_radius", 0.0)
 	if ring > 0.0 and time >= next_ember:
 		next_ember = time + mod("ember_every", 1.0)

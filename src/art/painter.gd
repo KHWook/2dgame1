@@ -74,16 +74,29 @@ const SWORD_FLAMES := 4 # flames shed along the trail of a burning blade
 const FLAME_RISE := 7.0 # pixels they rise while the swing holds
 const FLAME_STEPS_FAST := 3 # simulation steps per frame of the flames on the blade
 
-const HUD_HEARTS := Vector2(4.0, 4.0)
+## The HUD sits on three dark panels so it reads over grass, light and day alike: top left (hearts, fuel, upgrades),
+## top middle (the clock until dawn, which main.gd writes, over the night's progress) and top right (the night and the
+## score, written by main.gd, which tells the painter how wide its words are).
+const HUD_PANEL := Color(0.08, 0.06, 0.12, 0.62)
+const HUD_PAD := 3.0 # panel edge to what it holds
+const HUD_HEARTS := Vector2(5.0, 5.0)
 const HUD_HEART_STEP := 10.0
-const HUD_FUEL := Rect2(13.0, 16.0, 50.0, 4.0)
+const HUD_FUEL := Rect2(15.0, 17.0, 60.0, 6.0) # main.gd writes how long the fuel lasts just past its end
+const HUD_FUEL_TEXT := 4.0 # from the end of the fuel bar to those words
 const HUD_LOW := 0.25 # the fuel bar turns red and blinks below this share
+const HUD_LOW_SECONDS := 10.0 # ... or when it would go out within this many seconds
 const HUD_BLINK_STEPS := 10
-const HUD_PICKS := Vector2(4.0, 25.0) # the upgrades you hold, in the order you first took them
-const HUD_PICK_STEP := 11.0
-const HUD_LEVEL := Vector2(0.0, 10.0) # under an icon, a dot per level from the second, this far from its top-left
-const HUD_LEVEL_STEP := 2.0
-const BOSS_BAR := Rect2(160.0, 254.0, 160.0, 3.0) # a boss's health, along the bottom; main.gd writes its name above
+const HUD_PICKS := Vector2(5.0, 28.0) # the upgrades you hold, in the order you first took them
+const HUD_PICK_STEP := Vector2(12.0, 14.0) # icon to icon along a row, row to row
+const HUD_PICKS_PER_ROW := 8
+const ICON_SIZE := 9.0 # upgrade icons are 9x9
+const HUD_LEVEL := Vector2(0.0, 10.0) # under an icon, a pip per level, this far from its top-left
+const HUD_LEVEL_PIP := Vector2(2.0, 2.0)
+const HUD_LEVEL_STEP := 3.0
+## The night's progress towards dawn, under the clock that main.gd writes at the top in the middle.
+const NIGHT_BAR := Rect2(195.0, 18.0, 90.0, 3.0)
+const CLOCK_PANEL := Rect2(185.0, 1.0, 110.0, 23.0)
+const BOSS_BAR := Rect2(140.0, 254.0, 200.0, 5.0) # a boss's health, along the bottom; main.gd writes its name above
 const BOSS_BAR_COLOUR := "i"
 
 ## The dash: copies of the keeper trail behind while it dashes, fading, this far apart along the dash.
@@ -98,6 +111,8 @@ const EMBERS := 14 # embers in the ember ring
 const EMBER_TURN := 0.4 # radians per second the ring drifts round
 const EMBER_PULSE := 0.2 # seconds the embers flare after the ring burns what is inside it
 
+var fuel_text_width := 0.0 # set by main.gd: the words after the fuel bar, 0 when they are hidden
+var score_text_width := 0.0 # set by main.gd: the night and the score, top right
 var effects # short-lived pictures that answer what happens in the world
 var scenery: Array = [] # [texture, top-left]
 var clearing: Texture2D
@@ -183,30 +198,91 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		var look := Looks.enemy(e.kind)
 		if look.glow != "":
 			c.draw_texture(Sprites.texture(look.glow), (e.pos - look.anchor).round())
+	_hud_panels(c, w)
 	for i in w.max_hp():
 		c.draw_texture(Sprites.texture("heart" if i < w.player.hp else "heart_empty"), HUD_HEARTS + Vector2(i * HUD_HEART_STEP, 0.0))
 	var share := clampf(w.fuel / w.max_fuel(), 0.0, 1.0)
-	var low: bool = share < HUD_LOW
-	var bar := Rect2(HUD_FUEL.position, Vector2(roundf(HUD_FUEL.size.x * w.max_fuel() / T.max_fuel), HUD_FUEL.size.y)) # a big torch has a longer bar
-	c.draw_texture(Sprites.texture("flame_s_a"), Vector2(HUD_HEARTS.x, HUD_FUEL.position.y - 2.0))
+	var low: bool = fuel_low(w)
+	var bar := fuel_bar(w)
+	c.draw_texture(Sprites.texture("flame_s_a"), Vector2(HUD_HEARTS.x, HUD_FUEL.position.y - 1.0))
 	c.draw_rect(bar.grow(1.0), Sprites.PALETTE["k"])
 	c.draw_rect(bar, Sprites.PALETTE["K"])
 	if not (low and (w.steps / HUD_BLINK_STEPS) % 2 == 0):
 		var fill := Rect2(bar.position, Vector2(ceilf(bar.size.x * share), bar.size.y))
 		c.draw_rect(fill, Sprites.PALETTE["X" if low else "x"])
 		c.draw_rect(Rect2(fill.position, Vector2(fill.size.x, 1.0)), Sprites.PALETTE["x" if low else "F"])
-	var held := []
-	for id in w.picks:
-		if not held.has(id):
-			held.append(id)
-	for i in held.size():
-		var at := HUD_PICKS + Vector2(i * HUD_PICK_STEP, 0.0)
-		c.draw_texture(icon(held[i]), at)
-		var n: int = w.level(held[i])
-		for d in n - 1 if n > 1 else 0:
-			c.draw_rect(Rect2(at + HUD_LEVEL + Vector2(d * HUD_LEVEL_STEP, 0.0), Vector2.ONE), Sprites.PALETTE["Y"])
+	var ids := held(w)
+	for i in ids.size():
+		var at := _pick_at(i)
+		c.draw_texture(icon(ids[i]), at)
+		var n: int = w.level(ids[i])
+		for d in n if n > 1 else 0: # one pip per level once there is more than one
+			c.draw_rect(Rect2(at + HUD_LEVEL + Vector2(d * HUD_LEVEL_STEP, 0.0), HUD_LEVEL_PIP), Sprites.PALETTE["Y"])
 	_sparks(c, w)
 	_boss_bar(c, w)
+	_night_bar(c, w)
+
+
+## The upgrades held, each once, in the order first taken.
+static func held(w) -> Array:
+	var out := []
+	for id in w.picks:
+		if not out.has(id):
+			out.append(id)
+	return out
+
+
+static func _pick_at(i: int) -> Vector2:
+	return HUD_PICKS + Vector2(i % HUD_PICKS_PER_ROW * HUD_PICK_STEP.x, i / HUD_PICKS_PER_ROW * HUD_PICK_STEP.y)
+
+
+## The dark panels behind the HUD. The words' widths come from main.gd, which writes them.
+func _hud_panels(c: CanvasItem, w) -> void:
+	var right := fuel_bar(w).end.x + (HUD_FUEL_TEXT + fuel_text_width if fuel_text_width > 0.0 else 0.0)
+	right = maxf(right, HUD_HEARTS.x + w.max_hp() * HUD_HEART_STEP - 1.0)
+	var bottom := fuel_bar(w).end.y
+	var n := held(w).size()
+	if n > 0:
+		right = maxf(right, _pick_at(mini(n, HUD_PICKS_PER_ROW) - 1).x + ICON_SIZE)
+		bottom = _pick_at(n - 1).y + HUD_LEVEL.y + HUD_LEVEL_PIP.y
+	c.draw_rect(Rect2(Vector2(HUD_HEARTS.x - HUD_PAD, 1.0), Vector2(right - HUD_HEARTS.x + 2.0 * HUD_PAD, bottom + HUD_PAD - 1.0)), HUD_PANEL)
+	if w.phase == "night":
+		c.draw_rect(CLOCK_PANEL, HUD_PANEL)
+	if score_text_width > 0.0:
+		c.draw_rect(Rect2(VIEW.x - score_text_width - 4.0 - HUD_PAD * 2.0, 1.0, score_text_width + HUD_PAD * 2.0 + 2.0, 14.0), HUD_PANEL)
+
+
+## Whether anything is smothering the torch right now, so its fuel runs out faster.
+static func smothered(w) -> bool:
+	for e in w.enemies:
+		if e.at_torch and not e.dead:
+			return true
+	return false
+
+
+## Where the fuel bar is: a big torch has a longer one.
+static func fuel_bar(w) -> Rect2:
+	return Rect2(HUD_FUEL.position, Vector2(roundf(HUD_FUEL.size.x * w.max_fuel() / T.max_fuel), HUD_FUEL.size.y))
+
+
+## Seconds until the torch goes out at the rate it burns right now (smothering included).
+static func fuel_left(w) -> float:
+	var rate: float = w.burn_rate()
+	return w.fuel / rate if rate > 0.0 else INF
+
+
+## Whether the fuel is low enough to warn about: under a quarter of the tank, or out before ten seconds pass.
+static func fuel_low(w) -> bool:
+	return w.fuel / w.max_fuel() < HUD_LOW or fuel_left(w) < HUD_LOW_SECONDS
+
+
+func _night_bar(c: CanvasItem, w) -> void:
+	if w.phase != "night":
+		return
+	var share := clampf(w.time / Config.NIGHT.length, 0.0, 1.0)
+	c.draw_rect(NIGHT_BAR.grow(1.0), Sprites.PALETTE["k"])
+	c.draw_rect(NIGHT_BAR, Sprites.PALETTE["K"])
+	c.draw_rect(Rect2(NIGHT_BAR.position, Vector2(ceilf(NIGHT_BAR.size.x * share), NIGHT_BAR.size.y)), Sprites.PALETTE["Y"])
 
 
 ## The embers the spark upgrade fires: they glow, so they are painted where the night does not dim them.
@@ -230,6 +306,7 @@ func _boss_bar(c: CanvasItem, w) -> void:
 	var b = boss(w)
 	if b == null:
 		return
+	c.draw_rect(BOSS_BAR.grow(2.0), HUD_PANEL)
 	c.draw_rect(BOSS_BAR.grow(1.0), Sprites.PALETTE["k"])
 	c.draw_rect(BOSS_BAR, Sprites.PALETTE["K"])
 	c.draw_rect(Rect2(BOSS_BAR.position, Vector2(ceilf(BOSS_BAR.size.x * float(b.hp) / b.T.hp), BOSS_BAR.size.y)), Sprites.PALETTE[BOSS_BAR_COLOUR])

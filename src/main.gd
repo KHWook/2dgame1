@@ -9,6 +9,7 @@ const Config := preload("res://src/sim/config.gd")
 const Bot := preload("res://src/bot.gd")
 const Painter := preload("res://src/art/painter.gd")
 const Looks := preload("res://src/art/looks.gd")
+const Records := preload("res://src/records.gd")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -25,11 +26,22 @@ const FLARE_ENERGY := 0.5 # how much brighter the torch burns for a moment when 
 const KEEPER_ENERGY := 0.45 # the keeper's own small glow, so you can see yourself out in the dark
 const KEEPER_GLOW := 0.35 # its size, as a scale of the 128px glow texture
 const PANEL := Color(0.1, 0.08, 0.14, 0.78) # behind the words in the middle of the screen
-const BOX_TOP := 12.0 # where those words and the hints start, clear of the torch
+const BOX_TOP := 12.0 # where those words start, clear of the torch
+const HINT_TOP := 30.0 # where the hints start, under the clock
 const FONT_SIZE := 8
+## The HUD's words: a dark outline so they read over grass and light, the clock until dawn bigger than the rest,
+## and how long the torch lasts, which turns red when the fuel is low (Painter.fuel_low).
+const OUTLINE := Color("#1a1423")
+const OUTLINE_SIZE := 3
+const CLOCK_SIZE := 12
+const HUD_TEXT := Color("#f3ead2")
+const DAWN_SOON := Color("#ffd84a") # the clock in the night's last seconds
+const DAWN_SOON_SECONDS := 10.0
+const FUEL_LOW := Color("#ff5a4a")
+const KEY_TEXT := Color("#ffc94a") # the key to press, under an ending
 ## The upgrades on offer are cards side by side: their size, the gap between them, how much the icon is enlarged,
 ## and their colours (background, border, the key badge, the name, the text).
-const CARD := Vector2(104.0, 0.0) # as tall as the tallest card's words
+const CARD := Vector2(100.0, 0.0) # as tall as the tallest card's words
 const CARD_GAP := 6
 const CARD_ICON := 2.0
 const CARD_BACK := Color(0.16, 0.12, 0.2, 0.95)
@@ -49,12 +61,18 @@ var held := {}
 var pending := {} # presses since the last step; each counts for exactly one step (D6)
 var sky: CanvasModulate
 var overlay: Node2D # above the night and the lights: what glows by itself, and the HUD pictures
-var hud: Label
+var hud: Label # the night and the score, top right
+var clock: Label # time until dawn, top middle, over Painter.NIGHT_BAR
+var fuel_time: Label # how long the torch lasts, just past the fuel bar
+var records # src/records.gd: the best runs on disk
+var seed_value := 1
 var box: PanelContainer # the words in the middle of the screen: what the torch offers, or how the night ended
 var title: Label
 var cards: HBoxContainer # the offer cards, side by side
 var offers: Array = [] # one per offer slot: { "card": PanelContainer, "key": Label, "icon": TextureRect, "name": Label, "text": Label }
-var foot: Label # under an ending: the score and how to play again
+var foot: Label # under an ending: this run's night and score, and where it landed among the records
+var board: Label # under that: the best runs
+var again: Label # last: how to play again
 var boss_name: Label # over the boss's health bar while a boss is on the field
 var hint_box: PanelContainer # one line about a thing, the first time it turns up
 var hint: Label
@@ -66,7 +84,6 @@ var player_light: PointLight2D
 
 
 func _ready() -> void:
-	var seed_value := 1
 	var skip := 0
 	var slot := 1
 	for a in OS.get_cmdline_user_args():
@@ -79,6 +96,7 @@ func _ready() -> void:
 	if OS.get_cmdline_user_args().has("--bot"):
 		bot = Bot.new(slot)
 	world = World.new(seed_value)
+	records = Records.new()
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
 		world.step(bot.frame(world))
 	painter = Painter.new(seed_value)
@@ -111,6 +129,15 @@ func _ready() -> void:
 	hud = _label(layer, HORIZONTAL_ALIGNMENT_RIGHT)
 	hud.position = Vector2(0, 2)
 	hud.size = Vector2(Painter.VIEW.x - 4.0, 12.0)
+	_outline(hud)
+	clock = _label(layer, HORIZONTAL_ALIGNMENT_CENTER)
+	clock.add_theme_font_size_override("font_size", CLOCK_SIZE)
+	clock.position = Vector2(0, 0)
+	clock.size = Vector2(Painter.VIEW.x, Painter.NIGHT_BAR.position.y - 1.0)
+	_outline(clock)
+	fuel_time = _label(layer, HORIZONTAL_ALIGNMENT_LEFT)
+	fuel_time.size = Vector2(60.0, 10.0)
+	_outline(fuel_time)
 	box = PanelContainer.new()
 	var back := StyleBoxFlat.new()
 	back.bg_color = PANEL
@@ -128,13 +155,20 @@ func _ready() -> void:
 	for i in Config.NIGHT.offer_size:
 		offers.append(_card(i))
 	foot = _label(lines, HORIZONTAL_ALIGNMENT_CENTER)
+	foot.add_theme_font_size_override("font_size", CLOCK_SIZE)
+	board = _label(lines, HORIZONTAL_ALIGNMENT_CENTER)
+	board.add_theme_color_override("font_color", CARD_TEXT)
+	again = _label(lines, HORIZONTAL_ALIGNMENT_CENTER)
+	again.add_theme_color_override("font_color", KEY_TEXT)
+	again.text = "R 다시 하기"
 	hint_box = PanelContainer.new()
 	hint_box.add_theme_stylebox_override("panel", back)
 	layer.add_child(hint_box)
 	hint = _label(hint_box, HORIZONTAL_ALIGNMENT_CENTER)
 	boss_name = _label(layer, HORIZONTAL_ALIGNMENT_CENTER)
-	boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.BOSS_BAR.position.y - 12.0)
+	boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.BOSS_BAR.position.y - 13.0)
 	boss_name.size = Vector2(Painter.BOSS_BAR.size.x, 10.0)
+	_outline(boss_name)
 
 
 ## One offer card: the key that takes it in a badge at the top, the icon enlarged, the name, then what it does.
@@ -215,6 +249,8 @@ func _physics_process(_delta: float) -> void:
 	if bot_looked > 0 and bot_looked < BOT_LOOKS:
 		return
 	world.step(bot.frame(world) if bot != null else f)
+	if bot == null: # the demo bot's runs are not the player's records
+		records.step(world, seed_value, Time.get_datetime_string_from_system(false, true))
 	painter.step(world)
 	_hints()
 	queue_redraw()
@@ -223,7 +259,19 @@ func _physics_process(_delta: float) -> void:
 
 func _process(_delta: float) -> void:
 	var left := maxf(0.0, Config.NIGHT.length - world.time)
-	hud.text = "%d번째 밤   새벽까지 %d:%02d   점수 %d" % [world.night, int(left) / 60, int(left) % 60, world.score]
+	hud.text = "%d번째 밤   점수 %d" % [world.night, world.score]
+	var night: bool = world.phase == "night"
+	clock.visible = night
+	clock.text = "새벽까지 " + _clock(left)
+	clock.add_theme_color_override("font_color", DAWN_SOON if left < DAWN_SOON_SECONDS else HUD_TEXT)
+	fuel_time.visible = night
+	var bar: Rect2 = Painter.fuel_bar(world)
+	fuel_time.position = Vector2(bar.end.x + 4.0, bar.position.y + bar.size.y / 2.0 - 6.0)
+	var smothered: bool = Painter.smothered(world)
+	fuel_time.text = ("꺼지기까지 " + _clock(Painter.fuel_left(world)) + ("  덮였다!" if smothered else "")) if world.fuel > 0.0 else "꺼졌다"
+	fuel_time.add_theme_color_override("font_color", FUEL_LOW if Painter.fuel_low(world) or smothered else HUD_TEXT)
+	painter.fuel_text_width = _width(fuel_time) if night else 0.0
+	painter.score_text_width = _width(hud)
 	_words()
 	var b = Painter.boss(world)
 	boss_name.visible = b != null and world.phase == "night"
@@ -255,7 +303,7 @@ func _hints() -> void:
 			hint_steps = HINT_STEPS
 	hint_box.visible = hint_steps > 0 and world.phase == "night"
 	hint_box.reset_size()
-	hint_box.position = Vector2(roundf((Painter.VIEW.x - hint_box.size.x) / 2.0), BOX_TOP)
+	hint_box.position = Vector2(roundf((Painter.VIEW.x - hint_box.size.x) / 2.0), HINT_TOP)
 
 
 ## Fills the box in the middle of the screen: what the torch offers while you pick, the result once the night is over.
@@ -270,8 +318,13 @@ func _words() -> void:
 		title.text = dusk + "횃불이 힘을 하나 내어 준다"
 	elif ended:
 		title.text = ENDINGS[world.phase]
-		foot.text = "%d번째 밤 · 점수 %d\nR 다시 하기" % [world.night, world.score]
+		foot.text = "%d번째 밤 · 점수 %d" % [world.night, world.score] + (" · 새 기록!" if records.place == 1 else (" · %d위" % records.place if records.place > 1 else ""))
+		foot.add_theme_color_override("font_color", KEY_TEXT if records.place == 1 else HUD_TEXT)
+		board.text = _board()
+	title.add_theme_font_size_override("font_size", CLOCK_SIZE if ended else FONT_SIZE)
 	foot.visible = ended
+	board.visible = ended and board.text != ""
+	again.visible = ended
 	cards.visible = picking
 	for i in offers.size():
 		var shown: bool = picking and i < world.offer.size()
@@ -286,6 +339,41 @@ func _words() -> void:
 			offers[i].text.text = _wrap(offers[i].text, u.text, CARD.x - 8.0)
 	box.reset_size()
 	box.position = Vector2(roundf((Painter.VIEW.x - box.size.x) / 2.0), BOX_TOP)
+
+
+## Seconds as m:ss, rounded up so the clock reads 0:00 only when the time is really out.
+static func _clock(seconds: float) -> String:
+	if is_inf(seconds):
+		return "-:--"
+	var s := int(ceilf(seconds))
+	return "%d:%02d" % [s / 60, s % 60]
+
+
+## How wide a label's words are on screen.
+static func _width(label: Label) -> float:
+	return label.get_theme_font("font").get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.get_theme_font_size("font_size")).x
+
+
+func _outline(label: Label) -> void:
+	label.add_theme_color_override("font_color", HUD_TEXT)
+	label.add_theme_color_override("font_outline_color", OUTLINE)
+	label.add_theme_constant_override("outline_size", OUTLINE_SIZE)
+
+
+## The best runs, one per line, the one that just ended marked; empty when there are none yet.
+func _board() -> String:
+	var lines := []
+	for i in mini(records.runs.size(), Records.SHOWN):
+		var r: Dictionary = records.runs[i]
+		var mark := "  ◀ 이번" if is_same(r, records.latest) else ""
+		lines.append("%d위   %d점 · %d번째 밤 · %s%s" % [i + 1, r.score, r.night, _day(r.date), mark])
+	return ("최고 기록\n" + "\n".join(lines)) if not lines.is_empty() else ""
+
+
+## A record's date as month and day, from the "YYYY-MM-DD hh:mm:ss" the clock gave.
+static func _day(date: String) -> String:
+	var parts := date.split(" ")[0].split("-")
+	return "%d월 %d일" % [int(parts[1]), int(parts[2])] if parts.size() == 3 else ""
 
 
 func _draw() -> void:
