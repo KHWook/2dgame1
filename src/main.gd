@@ -26,6 +26,16 @@ const KEEPER_GLOW := 0.35 # its size, as a scale of the 128px glow texture
 const PANEL := Color(0.1, 0.08, 0.14, 0.78) # behind the words in the middle of the screen
 const BOX_TOP := 12.0 # where those words and the hints start, clear of the torch
 const FONT_SIZE := 8
+## The upgrades on offer are cards side by side: their size, the gap between them, how much the icon is enlarged,
+## and their colours (background, border, the key badge, the name, the text).
+const CARD := Vector2(104.0, 0.0) # as tall as the tallest card's words
+const CARD_GAP := 6
+const CARD_ICON := 2.0
+const CARD_BACK := Color(0.16, 0.12, 0.2, 0.95)
+const CARD_EDGE := Color("#c8862f")
+const CARD_KEY := Color("#ffc94a")
+const CARD_NAME := Color("#ffe6a8")
+const CARD_TEXT := Color("#e6dcc6")
 const HINT_STEPS := 60 * 4 # simulation steps a hint stays up
 const BOT_LOOKS := 90 # steps a demo bot leaves an offer on screen before it picks, so a person watching can read it
 
@@ -40,7 +50,8 @@ var overlay: Node2D # above the night and the lights: what glows by itself, and 
 var hud: Label
 var box: PanelContainer # the words in the middle of the screen: what the torch offers, or how the night ended
 var title: Label
-var offers: Array = [] # one per offer slot: { "row": HBoxContainer, "icon": TextureRect, "text": Label }
+var cards: HBoxContainer # the offer cards, side by side
+var offers: Array = [] # one per offer slot: { "card": PanelContainer, "key": Label, "icon": TextureRect, "name": Label, "text": Label }
 var foot: Label # under an ending: the score and how to play again
 var hint_box: PanelContainer # one line about a thing, the first time it turns up
 var hint: Label
@@ -107,19 +118,60 @@ func _ready() -> void:
 	lines.add_theme_constant_override("separation", 1)
 	box.add_child(lines)
 	title = _label(lines, HORIZONTAL_ALIGNMENT_CENTER)
+	cards = HBoxContainer.new()
+	cards.add_theme_constant_override("separation", CARD_GAP)
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	lines.add_child(cards)
 	for i in Config.NIGHT.offer_size:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 4)
-		lines.add_child(row)
-		var icon := TextureRect.new()
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-		row.add_child(icon)
-		offers.append({ "row": row, "icon": icon, "text": _label(row, HORIZONTAL_ALIGNMENT_LEFT) })
+		offers.append(_card(i))
 	foot = _label(lines, HORIZONTAL_ALIGNMENT_CENTER)
 	hint_box = PanelContainer.new()
 	hint_box.add_theme_stylebox_override("panel", back)
 	layer.add_child(hint_box)
 	hint = _label(hint_box, HORIZONTAL_ALIGNMENT_CENTER)
+
+
+## One offer card: the key that takes it in a badge at the top, the icon enlarged, the name, then what it does.
+func _card(i: int) -> Dictionary:
+	var card := PanelContainer.new()
+	card.custom_minimum_size = CARD
+	var style := StyleBoxFlat.new()
+	style.bg_color = CARD_BACK
+	style.border_color = CARD_EDGE
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(3)
+	style.set_content_margin_all(3.0)
+	card.add_theme_stylebox_override("panel", style)
+	cards.add_child(card)
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 1)
+	card.add_child(stack)
+	var key := _label(stack, HORIZONTAL_ALIGNMENT_CENTER)
+	key.text = "[ %d ]" % (i + 1)
+	key.add_theme_color_override("font_color", CARD_KEY)
+	var icon := TextureRect.new()
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	stack.add_child(icon)
+	var heading := _label(stack, HORIZONTAL_ALIGNMENT_CENTER)
+	heading.add_theme_color_override("font_color", CARD_NAME)
+	var text := _label(stack, HORIZONTAL_ALIGNMENT_CENTER)
+	text.add_theme_color_override("font_color", CARD_TEXT)
+	return { "card": card, "key": key, "icon": icon, "name": heading, "text": text }
+
+
+## The words broken into lines at spaces only, each no wider than width in label's font. The label's own autowrap
+## would also break inside a Korean word.
+func _wrap(label: Label, words: String, width: float) -> String:
+	var font := label.get_theme_font("font")
+	var lines: Array = []
+	for word in words.split(" "):
+		var longer: String = word if lines.is_empty() else lines[-1] + " " + word
+		if not lines.is_empty() and font.get_string_size(longer, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x <= width:
+			lines[-1] = longer
+		else:
+			lines.append(word)
+	return "\n".join(lines)
 
 
 func _label(parent: Node, align: HorizontalAlignment) -> Label:
@@ -205,18 +257,22 @@ func _words() -> void:
 		var dusk := ""
 		if world.time == 0.0: # the offer at dusk, between two nights; the one in the middle of a night has no heading
 			dusk = ("새벽이 왔다! " if world.night > 1 else "") + "%d번째 밤이 온다\n" % world.night
-		title.text = dusk + "횃불이 힘을 고른다 (1/2/3)"
+		title.text = dusk + "횃불이 힘을 하나 내어 준다"
 	elif ended:
 		title.text = ENDINGS[world.phase]
 		foot.text = "%d번째 밤 · 점수 %d\nR 다시 하기" % [world.night, world.score]
 	foot.visible = ended
+	cards.visible = picking
 	for i in offers.size():
 		var shown: bool = picking and i < world.offer.size()
-		offers[i].row.visible = shown
+		offers[i].card.visible = shown
 		if shown:
 			var u: Dictionary = Config.UPGRADES[world.offer[i]]
-			offers[i].icon.texture = painter.icon(world.offer[i])
-			offers[i].text.text = "%d  %s: %s" % [i + 1, u.name, u.text]
+			var icon: Texture2D = painter.icon(world.offer[i])
+			offers[i].icon.texture = icon
+			offers[i].icon.custom_minimum_size = icon.get_size() * CARD_ICON
+			offers[i].name.text = u.name
+			offers[i].text.text = _wrap(offers[i].text, u.text, CARD.x - 8.0)
 	box.reset_size()
 	box.position = Vector2(roundf((Painter.VIEW.x - box.size.x) / 2.0), BOX_TOP)
 
