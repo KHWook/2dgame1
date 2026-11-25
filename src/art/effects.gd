@@ -1,5 +1,5 @@
 ## Short-lived pictures that answer what just happened in the world (world.events): pixels that fly off an enemy
-## that is hit, a puff where one dies, sparks, a ring of embers and a brighter torch when it is fed, and hearts
+## that is hit (and fire, from a blade that burns), a puff where one dies, sparks, a ring of embers and a brighter torch when it is fed, and hearts
 ## rising off a keeper who ate a berry.
 ## View only (D4): it reads the world and never writes to it. It runs on simulation steps with its own seeded
 ## generator, so the same night always shows the same effects.
@@ -18,6 +18,7 @@ const BURSTS := {
 	"sparks": { "count": 14, "fan": 0.8, "speed": [20.0, 70.0], "life": [0.4, 0.9], "keep": 0.15 }, # rise off the fed flame
 	"wave": { "count": 24, "fan": PI, "speed": [130.0, 150.0], "life": [0.3, 0.4], "keep": 0.1 }, # embers ringing out from it
 	"passed": { "count": 3, "fan": 0.5, "speed": [40.0, 80.0], "life": [0.15, 0.3], "keep": 0.05 }, # a blow went through
+	"burn": { "count": 8, "fan": 1.2, "speed": [30.0, 90.0], "life": [0.25, 0.5], "keep": 0.05 }, # a fire blade's blow
 	"heal": { "count": 9, "fan": 1.0, "speed": [20.0, 55.0], "life": [0.4, 0.8], "keep": 0.15 }, # rise off the keeper
 }
 ## PALETTE keys of flying pixels that are not an enemy's own (those are in looks.gd).
@@ -47,7 +48,11 @@ func step(w) -> void:
 		match ev.kind:
 			"hit", "passed":
 				_burst(BURSTS[ev.kind], ev.pos, ev.dir, Looks.enemy(ev.enemy).bits)
+				if ev.kind == "hit" and _burning(w):
+					_burst(BURSTS.burn, ev.pos, ev.dir, FIRE)
 			"kill", "banished":
+				if ev.kind == "kill" and _burning(w):
+					_burst(BURSTS.burn, ev.pos, ev.dir, FIRE)
 				_burst(BURSTS.kill, ev.pos, ev.dir, Looks.enemy(ev.enemy).bits)
 				poofs.append({ "pos": ev.pos, "age": 0 })
 			"fed":
@@ -65,6 +70,12 @@ func step(w) -> void:
 		p.age += 1
 	poofs = poofs.filter(func(p): return p.age < POOF.size() * POOF_STEPS)
 	flare = maxf(0.0, flare - Config.STEP / FLARE_TIME)
+
+
+## True while a blow does the fire blade's extra damage: it is held and the keeper stands in the light, as
+## world.melee() decides it.
+func _burning(w) -> bool:
+	return w.mod("lit_damage", 0) > 0 and w.in_light(w.player.pos)
 
 
 func paint(c: CanvasItem) -> void:

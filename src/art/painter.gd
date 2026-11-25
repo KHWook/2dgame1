@@ -22,7 +22,7 @@ const BODY := Vector2(8.0, 10.0) # the keeper
 const TORCH_ANCHOR := Vector2(8.0, 3.0) # the middle of the bowl
 const LOG_ANCHOR := Vector2(7.0, 4.0)
 const BERRY_ANCHOR := Vector2(4.0, 6.0)
-const CARRY := Vector2(0.0, -13.0) # a carried log rides above the keeper's head
+const CARRY := Vector2(0.0, -11.0) # a carried log rides on the keeper's raised hands, over the hair
 const THIEF_CARRY := Vector2(0.0, -9.0) # and on a thief's back
 const SHADOW := Vector2(-6.0, 1.0) # where the keeper's shadow's top-left sits, from the keeper's position
 const SLASH_AT := Vector2(0.0, -2.0) # the middle of the swing's trail, from the keeper's position
@@ -51,19 +51,28 @@ const SWING_HOLD := 0.64
 const WIND_BACK := 0.5 # radians the blade is pulled back past the start of the arc
 const OVERSHOOT := 0.25 # radians it flies past the end before it settles
 const LUNGE := 1.0 # pixels the keeper leans into the blow while it strikes and holds
-const SHOULDER := Vector2(0.0, -3.0) # the sword hand turns around this point of the keeper
+const SHOULDER := Vector2(0.0, 0.5) # the sword hand turns around this point of the keeper
 const ARM := 5.0 # pixels from the shoulder to the hand while swinging
 const GRIP := Vector2(1.5, 2.5) # the pixel of the sword sprite held in the hand: the middle of the fist
-const BLADE := 17.0 # pixels from the fist to the tip at the base reach; a longer reach stretches the sword
 ## At rest the sword hangs from the hand on the side the swing starts from, pointing down and a little ahead.
-const REST_HAND := Vector2(5.5, 1.0) # where that hand is, along the side and down from it
-const REST_DROP := Vector2(0.0, 1.5)
+const REST_HAND := Vector2(3.5, 1.0) # where that hand is, along the side and down from it
+const REST_DROP := Vector2(0.0, 2.5)
 const REST_LENGTH := 0.7 # how long the sword looks at rest, hanging toward the viewer, against its length out
 const REST_POINT := [0.7, 0.7, 0.8] # the rest direction: this much of the hand side, the facing, and down
 const BEHIND := -0.25 # the sword is painted behind the keeper while it points up more than this (sine of its angle)
 
 ## The swing's trail: arcs just inside the reach, each [pixels inside the reach, share of the sweep it trails, colour].
-const SLASH := [[0.0, 1.0, Color("#fff6c0")], [1.0, 0.7, Color("#fff6c0")], [2.0, 0.45, Color("#ffc94a")], [3.0, 0.25, Color("#f58230")]]
+## Each line is [share of the sweep it trails, PALETTE key], outermost first. The upgrades that change the swing
+## show in it: the fire blade, where it does its extra damage (in the light), burns the trail and the blade; the
+## long blade adds a cold gleam outside the reach; the wide swing draws every line twice as thick.
+const SLASH := [[1.0, "W"], [0.7, "a"], [0.4, "A"]]
+const SLASH_FIRE := [[1.0, "f"], [0.85, "F"], [0.65, "F"], [0.45, "x"], [0.25, "X"]]
+const SLASH_GLEAM := [0.6, "l"] # outside the reach, with the long blade
+const WIDE_LINE := 2.0 # pixels per trail line with the wide swing
+const SWORD := "sword%s%s" # + "_long" with the long blade, + "_fire" while the fire blade burns
+const SWORD_FLAMES := 4 # flames shed along the trail of a burning blade
+const FLAME_RISE := 7.0 # pixels they rise while the swing holds
+const FLAME_STEPS_FAST := 3 # simulation steps per frame of the flames on the blade
 
 const HUD_HEARTS := Vector2(4.0, 4.0)
 const HUD_HEART_STEP := 10.0
@@ -353,30 +362,69 @@ func _blade(w) -> Array:
 	return [rest_hand.lerp(shoulder + Vector2.from_angle(a) * ARM, out), a, out]
 
 
+## True while the fire blade does its extra damage: it is held and the keeper stands in the light.
+func _burning(w) -> bool:
+	return w.mod("lit_damage", 0) > 0 and w.in_light(w.player.pos)
+
+
+func _sword_texture(w) -> Texture2D:
+	return Sprites.texture(SWORD % ["_long" if w.mod("reach_bonus", 0.0) > 0.0 else "", "_fire" if _burning(w) else ""])
+
+
+## How much the sword sprite is stretched along its length, so that at full length its tip reaches as far past the
+## base sword's as world.reach() goes past the base reach, and it looks shorter at rest.
+func _stretch(w, sword: Texture2D, out: float) -> float:
+	var base := Sprites.texture("sword").get_width() - GRIP.x
+	var stretch: float = (w.reach() - Config.PLAYER.reach + base) / (sword.get_width() - GRIP.x)
+	return stretch * lerpf(REST_LENGTH, 1.0, out)
+
+
 func _sword(c: CanvasItem, w) -> void:
 	var blade := _blade(w)
-	var sword := Sprites.texture("sword")
-	var stretch: float = (w.reach() - Config.PLAYER.reach + BLADE) / BLADE # a longer reach stretches the blade
-	stretch *= lerpf(REST_LENGTH, 1.0, blade[2])
-	c.draw_set_transform(blade[0].round(), blade[1], Vector2(stretch, 1.0))
+	var sword := _sword_texture(w)
+	c.draw_set_transform(blade[0].round(), blade[1], Vector2(_stretch(w, sword, blade[2]), 1.0))
 	c.draw_texture(sword, -GRIP)
 	c.draw_set_transform(Vector2.ZERO)
 
 
 ## The trail follows the blade through the strike at the reach the simulation hits (world.reach()), then shrinks
-## into the blade and fades while the swing holds.
+## into the blade and fades while the swing holds. A burning blade sheds flames that rise off it.
 func _slash(c: CanvasItem, w) -> void:
+	var p = w.player
+	if p.dead or p.carrying:
+		return
+	var burning := _burning(w)
+	var blade := _blade(w)
+	if burning: # a flame licks the tip whenever the blade burns, swinging or not
+		var sword := _sword_texture(w)
+		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - GRIP.x - 1.0) * _stretch(w, sword, blade[2])
+		var lick := Sprites.texture("flame_s_%s" % ("a" if (w.steps / FLAME_STEPS_FAST) % 2 == 0 else "b"))
+		c.draw_texture(lick, (tip - Vector2(3.0, 5.0)).round())
 	var k := _swing_share(w)
 	if k < SWING_WIND or k >= SWING_HOLD:
 		return
 	var arc := _arc(w)
-	var a: float = _blade(w)[1]
+	var a: float = blade[1]
 	var hold := _stage(k, SWING_STRIKE, SWING_HOLD)
-	var at: Vector2 = (w.player.pos + _lean(w) + SLASH_AT).round()
-	for t in SLASH:
-		var tail: float = lerpf(a, arc[2], t[1] * (1.0 - hold))
+	var fade := Color(1.0, 1.0, 1.0, 1.0 - hold * hold)
+	var at: Vector2 = (p.pos + _lean(w) + SLASH_AT).round()
+	var lines: Array = (SLASH_FIRE if burning else SLASH).duplicate()
+	var r: float = w.reach()
+	if w.mod("reach_bonus", 0.0) > 0.0:
+		lines.push_front(SLASH_GLEAM)
+		r += 1.0
+	var width: float = WIDE_LINE if w.mod("arc_bonus", 0.0) < 0.0 else 1.0
+	for i in lines.size():
+		var tail: float = lerpf(a, arc[2], lines[i][0] * (1.0 - hold))
 		if absf(tail - a) > 0.05:
-			c.draw_arc(at, w.reach() - t[0], tail, a, 12, Color(t[2], 1.0 - hold * hold), 1.0)
+			c.draw_arc(at, r - (i + 0.5) * width + 0.5, tail, a, 12, Sprites.PALETTE[lines[i][1]] * fade, width)
+	if burning:
+		for j in SWORD_FLAMES:
+			var share := (j + 1.0) / (SWORD_FLAMES + 1.0)
+			var spot: float = lerpf(a, arc[2], share * (1.0 - hold * 0.5))
+			var flame := Sprites.texture("flame_s_%s" % ("a" if (w.steps / FLAME_STEPS_FAST + j) % 2 == 0 else "b"))
+			var rise := Vector2(0.0, -FLAME_RISE * hold - j)
+			c.draw_texture(flame, (at + Vector2.from_angle(spot) * (r - 3.0) + rise - Vector2(3.0, 5.0)).round(), fade)
 
 
 func _put(list: Array, depth: float, sprite: String, at: Vector2, anchor: Vector2, flip := false, white := false, tint := Color.WHITE) -> void:
