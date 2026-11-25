@@ -253,6 +253,8 @@ func _standing(w) -> Array:
 	elif _keeper_shows(w):
 		var look := _keeper(w)
 		_put(out, p.pos.y + 5.0, look[0], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
+		if w.mod("thorns", 0) > 0: # the thorn cloak: behind the keeper, except seen from behind
+			_put(out, p.pos.y + (5.05 if look[2] == "up" else 4.95), "thorns_%s" % look[2], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
 		if p.carrying:
 			_put(out, p.pos.y + 5.1, "log", p.pos + CARRY, LOG_ANCHOR)
 		else:
@@ -279,7 +281,7 @@ func _keeper_shows(w) -> bool:
 	return p.dead or not (p.invuln > 0.0 and int(p.invuln * 16.0) % 2 == 0)
 
 
-## Which keeper sprite to show and whether to mirror it: [sprite, flip].
+## Which keeper sprite to show, whether to mirror it, and which way it faces: [sprite, flip, "down"/"up"/"side"].
 func _keeper(w) -> Array:
 	var p = w.player
 	var dir := "down"
@@ -288,12 +290,12 @@ func _keeper(w) -> Array:
 	elif p.face.y < 0.0:
 		dir = "up"
 	if _swinging(w):
-		return ["keeper_%s_atk" % dir, dir == "side" and p.face.x < 0.0]
+		return ["keeper_%s_atk" % dir, dir == "side" and p.face.x < 0.0, dir]
 	var walking: bool = p.vel.length() > 1.0 and p.hurt_t <= 0.0
 	var beat: int = (w.steps / WALK_STEPS) % 4 if walking else 0 # stand, step, stand, other step
 	var frame := "b" if beat % 2 == 1 else "a"
 	var flip: bool = p.face.x < 0.0 if dir == "side" else beat == 3
-	return ["keeper_%s%s_%s" % [dir, "_lift" if p.carrying else "", frame], flip]
+	return ["keeper_%s%s_%s" % [dir, "_lift" if p.carrying else "", frame], flip, dir]
 
 
 func _swinging(w) -> bool:
