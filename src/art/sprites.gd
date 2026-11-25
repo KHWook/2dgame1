@@ -933,14 +933,14 @@ const SPRITES := {
 		"....k....",
 	],
 	"heart_empty": [
-		".kkk.kkk.",
-		"kKKKkKKKk",
-		"kKKKKKKKk",
-		"kKKKKKKKk",
-		".kKKKKKk.",
-		"..kKKKk..",
-		"...kKk...",
-		"....k....",
+		".TTT.TTT.",
+		"TzzzTzzzT",
+		"TzzzzzzzT",
+		"TzzzzzzzT",
+		".TzzzzzT.",
+		"..TzzzT..",
+		"...TzT...",
+		"....T....",
 	],
 }
 
