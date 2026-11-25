@@ -9,6 +9,7 @@ const Balance := preload("res://tools/balance.gd")
 const Sprites := preload("res://src/art/sprites.gd")
 const Looks := preload("res://src/art/looks.gd")
 const RulesTest := preload("res://tools/rules_test.gd")
+const RecordsTest := preload("res://tools/records_test.gd")
 
 
 func _initialize() -> void:
@@ -41,6 +42,13 @@ func _initialize() -> void:
 		printerr("rules: " + line)
 	if rules.is_empty():
 		print("rules: every scene holds")
+	else:
+		failed = true
+	var records: Array = RecordsTest.run()
+	for line in records:
+		printerr("records: " + line)
+	if records.is_empty():
+		print("records: kept best first, once per run, and read back as saved")
 	else:
 		failed = true
 	if not args.has("--check"):
