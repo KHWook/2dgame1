@@ -12,6 +12,9 @@ for a in "$@"; do [ "$a" = "--hook" ] && hook=1 || args+=("$a"); done
 # "verify: PASS" line, which is what counts as passing.
 out="$("$GODOT" --headless --path . --quit-after 3000 --script res://tools/verify.gd -- "${args[@]}" 2>&1)"
 printf '%s\n' "$out" | grep -q '^verify: PASS$' && code=0 || code=1
+# A runtime script error fails verify even where verify.gd did not hear it (G5): a function that errors returns an
+# empty value, which reads as "no failures".
+printf '%s\n' "$out" | grep -q '^SCRIPT ERROR' && code=1
 out="$(printf '%s\n' "$out" | grep -v -e '^Godot Engine v' -e '^$')"
 if [ $code -ne 0 ]; then
   if [ $hook -eq 1 ]; then printf '%s\n' "$out" >&2; exit 2; fi

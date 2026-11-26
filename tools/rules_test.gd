@@ -7,6 +7,7 @@ const World := preload("res://src/sim/world.gd")
 const Enemy := preload("res://src/sim/enemy.gd")
 const InputFrame := preload("res://src/sim/input_frame.gd")
 const Config := preload("res://src/sim/config.gd")
+const Ui := preload("res://src/ui.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -32,6 +33,7 @@ static func run() -> Array:
 	out.append_array(_charger())
 	out.append_array(_logs())
 	out.append_array(_nights())
+	out.append_array(_company())
 	out.append_array(_setup())
 	return out
 
@@ -603,6 +605,43 @@ static func _nights() -> Array:
 	return out
 
 
+## NIGHTS with: on a night whose row says a kind comes with others, each of that kind comes out of the dark with
+## them, beside it on the same edge (a thief with the shade that guards it, a boar with bats at its side). Kinds the
+## row does not name in with, and every kind on a night without it, come alone.
+static func _company() -> Array:
+	var out := []
+	var seen := {} # night -> kinds that came with company
+	for night in range(1, Config.NIGHTS.size() + 2):
+		var company: Dictionary = Config.NIGHTS[mini(night, Config.NIGHTS.size()) - 1].get("with", {})
+		var w = _night(DARK)
+		w.night = night
+		for i in 200:
+			w.enemies = []
+			w.next_spawn = 0.0
+			_play(w, 1)
+			var lead = w.enemies[0]
+			var want: Array = [lead.kind] + company.get(lead.kind, [])
+			var came: Array = w.enemies.map(func(e): return e.kind)
+			if came != want:
+				_expect(out, "night %d: a %s comes with exactly what the row says" % [night, lead.kind], came, want)
+				break
+			if want.size() > 1:
+				seen[night] = seen.get(night, {})
+				seen[night][lead.kind] = true
+			for k in range(1, w.enemies.size()):
+				var off: Vector2 = w.enemies[k].pos - lead.pos
+				var gap: float = Config.ENEMY.with_gap * (int((k - 1) / 2) + 1)
+				_expect(out, "night %d: the %s with a %s comes beside it, out of the dark" % [night, w.enemies[k].kind, lead.kind],
+					[absf(off.length() - gap) < 3.0, Config.FIELD.has_point(w.enemies[k].pos)], [true, false])
+			if w.enemies.size() > 2:
+				_expect(out, "night %d: the company of a %s comes on both sides of it" % [night, lead.kind],
+					(w.enemies[1].pos - lead.pos).dot(w.enemies[2].pos - lead.pos) < 0.0, true)
+		for kind in company:
+			_expect(out, "night %d: a %s came with company at least once in 200 spawns" % [night, kind], seen.get(night, {}).has(kind), true)
+	_expect(out, "some night brings company (NIGHTS with)", seen.is_empty(), false)
+	return out
+
+
 ## Not rules, but what the rules lean on: the tables agree with each other and with the project's settings.
 static func _setup() -> Array:
 	var out := []
@@ -611,6 +650,9 @@ static func _setup() -> Array:
 		for kind in row.who:
 			named[kind] = true
 			_expect(out, "NIGHTS names a real enemy kind (%s)" % kind, Config.ENEMY_TYPES.has(kind), true)
+		for kind in row.get("with", {}):
+			for other in [kind] + row.with[kind]:
+				_expect(out, "a kind in NIGHTS with is one its row names (%s)" % other, row.who.has(other), true)
 	for kind in Config.BOSS.kinds:
 		_expect(out, "BOSS names a boss (%s)" % kind, Config.ENEMY_TYPES.get(kind, {}).get("boss", false), true)
 		named[kind] = true
@@ -620,6 +662,7 @@ static func _setup() -> Array:
 			_expect(out, "a boss summons a real enemy kind (%s)" % kind, Config.ENEMY_TYPES.has(Config.ENEMY_TYPES[kind].summon.kind), true)
 	var viewport := Vector2(ProjectSettings.get_setting("display/window/size/viewport_width"), ProjectSettings.get_setting("display/window/size/viewport_height"))
 	_expect(out, "project.godot's viewport is Config.VIEW", viewport, Config.VIEW)
+	_expect(out, "the web page's title (project.godot config/name.web) is the first screen's title", ProjectSettings.get_setting("application/config/name.web"), Ui.INTRO_TITLE)
 	_expect(out, "the field lies inside the view", Rect2(Vector2.ZERO, Config.VIEW).encloses(Config.FIELD), true)
 	_expect(out, "the torch and the player start on the field", [Config.FIELD.has_point(Config.TORCH.pos), Config.FIELD.has_point(Config.PLAYER.start)], [true, true])
 	return out

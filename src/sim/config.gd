@@ -39,7 +39,9 @@ const NIGHT := { "length": 60.0, "picks_at": [0.5], "offer_size": 3, "first_spaw
 
 ## The nights, one row each. burn: fuel the torch uses per second. spawn: seconds between enemies at dusk and
 ## just before dawn. who: each enemy kind's share of them; a kind first shows up on the night whose row first names
-## it. Nights after the last row use it again, each one harder than the one before by LATER_NIGHTS.
+## it. with (optional): kinds that come along with a kind, from the same spot on the edge (a thief guarded by a shade,
+## a boar with bats at its side); each must be one the row names. Nights after the last row use it again, each one
+## harder than the one before by LATER_NIGHTS.
 const NIGHTS := [
 	{ "burn": 2.0, "spawn": [3.0, 2.0], "who": { "slime": 0.8, "bat": 0.2 } },
 	{ "burn": 2.4, "spawn": [2.5, 1.7], "who": { "slime": 0.6, "bat": 0.2, "thief": 0.2 } },
@@ -47,6 +49,12 @@ const NIGHTS := [
 	{ "burn": 3.2, "spawn": [2.0, 1.3], "who": { "slime": 0.45, "bat": 0.2, "thief": 0.1, "shade": 0.15, "big_slime": 0.1 } },
 	{ "burn": 3.5, "spawn": [1.75, 1.15], "who": { "slime": 0.45, "bat": 0.2, "thief": 0.1, "shade": 0.15, "big_slime": 0.1 } },
 	{ "burn": 3.75, "spawn": [1.6, 1.05], "who": { "slime": 0.4, "bat": 0.17, "thief": 0.08, "shade": 0.13, "big_slime": 0.1, "boar": 0.12 } },
+	{ "burn": 4.05, "spawn": [1.4, 0.92], "who": { "slime": 0.33, "bat": 0.17, "thief": 0.14, "shade": 0.14, "big_slime": 0.1, "boar": 0.12 },
+		"with": { "thief": ["shade"], "boar": ["bat"] } },
+	{ "burn": 4.35, "spawn": [1.25, 0.84], "who": { "slime": 0.28, "bat": 0.16, "thief": 0.15, "shade": 0.13, "big_slime": 0.1, "boar": 0.18 },
+		"with": { "thief": ["shade"], "boar": ["bat", "bat"] } },
+	{ "burn": 4.65, "spawn": [1.05, 0.7], "who": { "slime": 0.24, "bat": 0.14, "thief": 0.16, "shade": 0.14, "big_slime": 0.1, "boar": 0.22 },
+		"with": { "thief": ["shade", "shade"], "boar": ["bat", "bat"], "big_slime": ["boar"] } },
 ]
 const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82 } # per night past the table: fuel per second added, spawn gap multiplied
 
@@ -64,6 +72,7 @@ const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 const ENEMY := {
 	"knock": 150.0, "knock_decay": 0.002, "knock_stop": 4.0, "flash": 0.12, "edge": 12.0,
 	"steal": 8.0, "split_spread": 6.0, "split_knock": 70.0, "summon_gap": 6.0,
+	"with_gap": 10.0, # pixels apart along the edge that a kind and those coming with it (NIGHTS with) appear
 	"orbit_lead": 0.4, # radians ahead on its circle a boss that circles the light aims for: it goes round, not in
 	"orbit_top": 64.0, # it keeps this far below the top of the field, where the HUD would hide it
 }

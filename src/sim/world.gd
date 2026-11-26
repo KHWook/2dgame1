@@ -403,7 +403,13 @@ func _spawns() -> void:
 		var row := _night_row()
 		var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(time / N.length, 0.0, 1.0))
 		next_spawn = time + apart * pow(Config.LATER_NIGHTS.spawn, _nights_past()) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
-		enemies.append(Enemy.new(_who(row.who), _edge_point()))
+		var kind := _who(row.who)
+		var at := _edge_point()
+		enemies.append(Enemy.new(kind, at))
+		var along := _along_edge(at)
+		var company: Array = row.get("with", {}).get(kind, [])
+		for i in company.size(): # beside it on the edge, one each side in turn
+			enemies.append(Enemy.new(company[i], at + along * Config.ENEMY.with_gap * (i / 2 + 1) * (1.0 if i % 2 == 0 else -1.0)))
 	if boss_due and time >= N.length * Config.BOSS.at - Config.BOSS.warn:
 		boss_due = false
 		boss_from = _edge_point()
@@ -464,6 +470,12 @@ func _who(shares: Dictionary) -> String:
 		if roll < 0.0:
 			return kind
 	return shares.keys()[-1]
+
+
+## Which way a point from _edge_point() runs along its edge: across on the top and bottom, down on the sides.
+func _along_edge(at: Vector2) -> Vector2:
+	var f := Config.FIELD.grow(Config.ENEMY.edge)
+	return Vector2.RIGHT if is_equal_approx(at.y, f.position.y) or is_equal_approx(at.y, f.end.y) else Vector2.DOWN
 
 
 ## A point just outside a random screen edge.

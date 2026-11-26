@@ -1,5 +1,6 @@
 ## Touch controls for playing on a phone: a stick that appears where the left thumb lands, a sword button and (once
-## the dash upgrade is held) a dash button on the right, a pause button, and a tap that restarts after the end. Part of
+## the dash upgrade is held) a dash button on the right, a pause button, a "?" button beside it that brings the start
+## screen back (the H key), and a tap that restarts after the end. Part of
 ## the bridge with src/main.gd: it turns screen touches into the same action names the keys give ("left", "attack",
 ## ...), so the simulation cannot tell a touch from a key (S1), and each tap counts for exactly one step (D6: take()).
 ## The start screen and the cards are tapped through Godot's mouse emulation (src/main.gd, src/ui.gd).
@@ -13,6 +14,7 @@ const Config := preload("res://src/sim/config.gd")
 const Ui := preload("res://src/ui.gd")
 
 signal pause_pressed # the pause button, or a tap anywhere while paused
+signal help_pressed # the "?" button, while playing or paused: the start screen again
 
 const VIEW: Vector2 = Config.VIEW
 const DEAD := 4.0 # pixels the thumb moves from where it landed before the keeper walks
@@ -21,9 +23,11 @@ const STICK_TOP := 60.0 # the stick starts only below the HUD's top-left panel, 
 const ATTACK := Vector2(VIEW.x - 34.0, VIEW.y - 36.0) # the sword button's middle
 const DASH := Vector2(VIEW.x - 76.0, VIEW.y - 22.0)
 const PAUSE := Vector2(VIEW.x - 14.0, 44.0) # under the score and the night, clear of the "+10" that rises there
+const HELP := PAUSE - Vector2(26.0, 0.0) # left of the pause button
 const ATTACK_REACH := 22.0 # touch radius: a little bigger than the drawn button, so a thumb that is close counts
 const DASH_REACH := 17.0
 const PAUSE_REACH := 13.0
+const HELP_REACH := 12.0 # a little smaller than the pause button's, so the two never both answer one tap
 const LOOK := 0.45 # how solid the controls are while untouched
 const LOOK_DOWN := 0.85 # and while pressed
 const REST := 0.8 # seconds after the end before a tap restarts, so a thumb still swinging does not skip the end screen
@@ -40,6 +44,8 @@ var stick := -1 # the touch index steering, -1 when none
 var stick_from := Vector2.ZERO # the ring's middle
 var stick_at := Vector2.ZERO # the thumb
 var buttons := {} # touch index -> the action it holds down: "attack" or "dash"
+var help_touch := -1 # the touch index on the "?" button, -1 when none. It answers when lifted, so the tap that
+# opens the start screen is not also the click that closes it (Godot turns a touch into a mouse click as it lands)
 var presses := {} # actions pressed since main.gd last took them
 var ended_for := 0.0 # real seconds in "ended"
 var rotate_label: Label
@@ -94,6 +100,13 @@ func handle(event: InputEvent) -> bool:
 		if t.index == stick:
 			stick = -1
 		buttons.erase(t.index)
+		if t.index == help_touch:
+			help_touch = -1
+			if t.position.distance_to(HELP) <= HELP_REACH: # slid off the button first: nothing
+				help_pressed.emit()
+		return true
+	if (mode == "play" or mode == "paused") and t.position.distance_to(HELP) <= HELP_REACH:
+		help_touch = t.index
 		return true
 	match mode:
 		"paused":
@@ -126,6 +139,7 @@ func _press(index: int, action: String) -> void:
 func release() -> void:
 	stick = -1
 	buttons.clear()
+	help_touch = -1
 
 
 ## The actions held right now: the stick's direction (one of eight, none inside the dead zone) and the buttons down.
@@ -174,7 +188,9 @@ func upright() -> bool:
 func frame(delta: float) -> void:
 	ended_for = ended_for + delta if mode == "ended" else 0.0
 	if mode != "play":
+		var help := help_touch if mode == "paused" else -1 # the "?" button also answers on the pause screen
 		release()
+		help_touch = help
 	if rotate_label != null: # made in _ready, so not there for a test that never adds this to a tree
 		rotate_label.visible = upright()
 	queue_redraw()
@@ -188,6 +204,8 @@ func _draw() -> void:
 		return
 	_sprite("button_small", PAUSE, mode == "paused")
 	_sprite("pause_bars", PAUSE, mode == "paused")
+	_sprite("button_small", HELP, help_touch >= 0)
+	_sprite("help_mark", HELP, help_touch >= 0)
 	if mode != "play":
 		return
 	var attacking := buttons.values().has("attack")

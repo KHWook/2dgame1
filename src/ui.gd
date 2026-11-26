@@ -103,7 +103,7 @@ const INTRO_START := "아무 키나 눌러 시작"
 const INTRO_BACK := "아무 키나 눌러 돌아가기"
 ## The same lines for a phone (src/touch.gd), shown while the touch controls are.
 const TOUCH_KEYS := "이동 왼쪽 아무 데나 끌기     베기 오른쪽 아래 칼     돌진 그 옆 (힘을 얻은 뒤)"
-const TOUCH_MORE := "일시정지 오른쪽 위 버튼"
+const TOUCH_MORE := "일시정지 오른쪽 위 버튼     이 설명 다시 보기 그 옆 ?"
 const TOUCH_START := "눌러서 시작"
 const TOUCH_BACK := "눌러서 돌아가기"
 const PICK_KEYS := "1 · 2 · 3 키 또는 클릭으로 고르기"
@@ -111,7 +111,7 @@ const PICK_TOUCH := "카드를 눌러 고르기"
 const AGAIN_KEYS := "R 다시 하기"
 const AGAIN_TOUCH := "눌러서 다시 하기"
 const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
-const PAUSE_TOUCH := "눌러서 계속하기"
+const PAUSE_TOUCH := "눌러서 계속하기 · ? 설명 보기"
 const INTRO_NAME := 30.0 # the width kept for a line's name, so what follows lines up
 const INTRO_BLINK := 3.0 # radians per second the last line breathes
 const INTRO_SCRIM := 0.7

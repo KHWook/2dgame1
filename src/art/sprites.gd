@@ -1115,6 +1115,17 @@ const SPRITES := {
 		"kwk.kwk",
 		"kkk.kkk",
 	],
+	"help_mark": [
+		".kkkkk.",
+		"kkwwwkk",
+		"kwkkkwk",
+		"kkk.kwk",
+		"..kkwkk",
+		"..kwkk.",
+		"..kkk..",
+		"..kwk..",
+		"..kkk..",
+	],
 }
 
 ## A second frame that is another sprite with a few rows redrawn: name -> [base sprite, { row index: new row }].
