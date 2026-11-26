@@ -10,6 +10,7 @@ const Sprites := preload("res://src/art/sprites.gd")
 const Looks := preload("res://src/art/looks.gd")
 const RulesTest := preload("res://tools/rules_test.gd")
 const RecordsTest := preload("res://tools/records_test.gd")
+const Ui := preload("res://src/ui.gd")
 
 
 func _initialize() -> void:
@@ -35,6 +36,13 @@ func _initialize() -> void:
 		printerr("art: " + line)
 	if art.is_empty():
 		print("art: %d sprites are well formed" % Sprites.names().size())
+	else:
+		failed = true
+	var fonts: Array = Ui.font_problems()
+	for line in fonts:
+		printerr("fonts: " + line)
+	if fonts.is_empty():
+		print("fonts: every character the game writes is in the pixel font (selftest ok)")
 	else:
 		failed = true
 	var rules: Array = RulesTest.run()

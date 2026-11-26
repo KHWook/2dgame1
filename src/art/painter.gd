@@ -87,13 +87,34 @@ const HUD_FUEL_TEXT := 4.0 # from the end of the fuel bar to those words
 const HUD_LOW := 0.25 # the fuel bar turns red and blinks below this share
 const HUD_LOW_SECONDS := 10.0 # ... or when it would go out within this many seconds
 const HUD_BLINK_STEPS := 10
-const HUD_PICKS := Vector2(5.0, 28.0) # the upgrades you hold, in the order you first took them
-const HUD_PICK_STEP := Vector2(12.0, 14.0) # icon to icon along a row, row to row
-const HUD_PICKS_PER_ROW := 8
+## The upgrades you hold: each on a tile, one row per side (looks.gd's SIDES: the torch's, then the keeper's), in the
+## order first taken. A tile's colour says the side; under the icon a pip per level it can reach, the reached ones
+## gold; a tile at its last level gets a gold edge. main.gd's ui names them on the pause and end screens.
+const HUD_PICKS := Vector2(5.0, 28.0) # the first tile's top-left
+const TILE := Vector2(13.0, 15.0)
+const TILE_STEP := Vector2(14.0, 17.0) # tile to tile along a row, row to row
+const TILE_ICON := Vector2(2.0, 2.0) # the icon's top-left in its tile
 const ICON_SIZE := 9.0 # upgrade icons are 9x9
-const HUD_LEVEL := Vector2(0.0, 10.0) # under an icon, a pip per level, this far from its top-left
-const HUD_LEVEL_PIP := Vector2(2.0, 2.0)
-const HUD_LEVEL_STEP := 3.0
+const TILE_PIP := Vector2(3.0, 2.0) # a level pip, its row this far from the tile's top
+const TILE_PIP_Y := 12.0
+const TILE_BACK := { "torch": Color("#43281a"), "keeper": Color("#1f2d4a") }
+const TILE_EDGE := { "torch": Color("#8a5430"), "keeper": Color("#46619a") }
+const TILE_FULL := "Y" # PALETTE key of a reached pip, and of the edge of a tile at its last level
+const TILE_EMPTY := "K"
+const TILE_FLASH := 3.0 # pixels the white ring grows out from a tile that just got its upgrade
+## Logs and berries keep a lit ring the night does not dim (Sprites.rim), stronger in the dark, breathing, with a glint
+## now and then, so they read on the dark grass; a berry also bobs. Each thing has its own phase, from where it lies.
+const LOG_RIM := "F"
+const BERRY_RIM := "W"
+const RIM_DARK := [0.45, 0.9] # its alpha out of the light, as it breathes
+const RIM_LIT := [0.3, 0.55] # and in the light, where the thing shows anyway
+const RIM_BREATH := 0.09 # radians per step
+const SELF_LIT := 0.7 # out of the light the thing itself is also painted unlit, this much of the ring's alpha
+const GLINT_EVERY := 150 # steps between two glints on one thing
+const GLINT_STEPS := 14 # how long one lasts
+const BERRY_BOB_STEPS := 20 # steps per half bob
+## The dim over the field while a box asks something (main.gd's ui sets how strong).
+const SCRIM := Color(0.03, 0.02, 0.07)
 ## The night's progress towards dawn, under the clock that main.gd writes at the top in the middle.
 const NIGHT_BAR := Rect2(195.0, 18.0, 90.0, 3.0)
 const CLOCK_PANEL := Rect2(185.0, 1.0, 110.0, 23.0)
@@ -151,12 +172,16 @@ const EMBER_TURN := 0.4 # radians per second the ring drifts round
 const EMBER_PULSE := 0.2 # seconds the embers flare after the ring burns what is inside it
 
 var fuel_text_width := 0.0 # set by main.gd: the words after the fuel bar, 0 when they are hidden
-var score_text_width := 0.0 # set by main.gd: the night and the score, top right
 var effects # short-lived pictures that answer what happens in the world
 var scenery: Array = [] # [texture, top-left]
 var clearing: Texture2D
 var hedges := {} # side -> texture: the treetops along each screen edge
 var shake := Vector2.ZERO # set by main.gd: how far the field is drawn off its place right now (src/art/juice.gd)
+var scrim := 0.0 # set by main.gd's ui: how dark the dim over the field is, 0 to 1
+var hidden_pick := "" # set by the ui: an upgrade whose icon is still flying to its tile, drawn empty until it lands
+var flash_pick := "" # set by the ui: the tile that just got its upgrade, ringed while flash runs from 1 to 0
+var flash := 0.0
+var score_panel := Vector2.ZERO # set by the ui: the size of the night and score words, top right
 
 
 ## The ground is laid out from the night's seed with its own generator, so it never draws from world.rng.
@@ -249,8 +274,10 @@ func paint_overlay(c: CanvasItem, w) -> void:
 			var stars := Sprites.texture("dazed", (w.steps / DAZED_STEPS) % 2 == 1)
 			c.draw_texture(stars, (e.pos + DAZED_AT).round())
 	_dash_bar(c, w)
+	_beacons(c, w)
 	c.draw_set_transform(Vector2.ZERO)
-	_edge_arrows(c, w)
+	if scrim > 0.0:
+		c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Color(SCRIM, scrim))
 	_hud_panels(c, w)
 	for i in w.max_hp():
 		c.draw_texture(Sprites.texture("heart" if i < w.player.hp else "heart_empty"), HUD_HEARTS + Vector2(i * HUD_HEART_STEP, 0.0))
@@ -264,20 +291,14 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		var fill := Rect2(bar.position, Vector2(ceilf(bar.size.x * share), bar.size.y))
 		c.draw_rect(fill, Sprites.PALETTE["X" if low else "x"])
 		c.draw_rect(Rect2(fill.position, Vector2(fill.size.x, 1.0)), Sprites.PALETTE["x" if low else "F"])
-	var ids := held(w)
-	for i in ids.size():
-		var at := _pick_at(i)
-		c.draw_texture(icon(ids[i]), at)
-		if ids[i] == "dash" and w.player.dash_wait > 0.0: # shaded over the share of the wait still to go
-			var left: float = w.player.dash_wait / w.mod("dash_every", 1.0)
-			c.draw_rect(Rect2(at, Vector2(ICON_SIZE, ceilf(ICON_SIZE * left))), ICON_WAIT)
-		var n: int = w.level(ids[i])
-		for d in n if n > 1 else 0: # one pip per level once there is more than one
-			c.draw_rect(Rect2(at + HUD_LEVEL + Vector2(d * HUD_LEVEL_STEP, 0.0), HUD_LEVEL_PIP), Sprites.PALETTE["Y"])
+	var tiles := tiles(w)
+	for id in tiles:
+		_tile(c, w, id, tiles[id])
 	_sparks(c, w)
 	_coming(c, w)
 	_boss_bar(c, w)
 	_night_bar(c, w)
+	_edge_arrows(c, w) # over the HUD panels, so one under the top corners still shows
 
 
 ## The upgrades held, each once, in the order first taken.
@@ -289,24 +310,105 @@ static func held(w) -> Array:
 	return out
 
 
-static func _pick_at(i: int) -> Vector2:
-	return HUD_PICKS + Vector2(i % HUD_PICKS_PER_ROW * HUD_PICK_STEP.x, i / HUD_PICKS_PER_ROW * HUD_PICK_STEP.y)
+## Where each held upgrade's tile is: id -> top-left. One row per side, a side with nothing held takes no row.
+static func tiles(w) -> Dictionary:
+	var out := {}
+	var row := 0
+	for side in Looks.SIDES:
+		var ids := held(w).filter(func(id): return Looks.side(id) == side)
+		for i in ids.size():
+			out[ids[i]] = HUD_PICKS + Vector2(i * TILE_STEP.x, row * TILE_STEP.y)
+		row += 1 if not ids.is_empty() else 0
+	return out
+
+
+## The middle of an upgrade's icon on its tile, where the ui flies a picked card's icon to.
+static func icon_spot(w, id: String) -> Vector2:
+	return tiles(w).get(id, HUD_PICKS) + TILE_ICON + Vector2(ICON_SIZE, ICON_SIZE) / 2.0
+
+
+## The lowest pixel of the HUD's top-left panel, so a box in the middle can keep clear of it.
+static func hud_bottom(w) -> float:
+	var bottom := fuel_bar(w).end.y
+	for at in tiles(w).values():
+		bottom = maxf(bottom, at.y + TILE.y)
+	return bottom + HUD_PAD
+
+
+## The right edge of the HUD's top-left panel.
+func hud_right(w) -> float:
+	var right := fuel_bar(w).end.x + (HUD_FUEL_TEXT + fuel_text_width if fuel_text_width > 0.0 else 0.0)
+	right = maxf(right, HUD_HEARTS.x + w.max_hp() * HUD_HEART_STEP - 1.0)
+	for at in tiles(w).values():
+		right = maxf(right, at.x + TILE.x)
+	return right + HUD_PAD
+
+
+## One held upgrade on its tile: the side's colour, the icon, a pip per level it can reach (the reached ones gold),
+## a gold edge at its last level, the dash's wait shaded over it, and a white ring growing off it when just taken.
+func _tile(c: CanvasItem, w, id: String, at: Vector2) -> void:
+	var level: int = w.level(id)
+	var most: int = w.max_level(id)
+	var side := Looks.side(id)
+	c.draw_rect(Rect2(at, TILE).grow(1.0), Sprites.PALETTE["k"])
+	c.draw_rect(Rect2(at, TILE), Sprites.PALETTE[TILE_FULL] if level >= most else TILE_EDGE[side])
+	c.draw_rect(Rect2(at + Vector2.ONE, TILE - Vector2(2.0, 2.0)), TILE_BACK[side])
+	if id != hidden_pick:
+		c.draw_texture(icon(id), at + TILE_ICON)
+		if id == "dash" and w.player.dash_wait > 0.0: # shaded over the share of the wait still to go
+			var left: float = w.player.dash_wait / w.mod("dash_every", 1.0)
+			c.draw_rect(Rect2(at + TILE_ICON, Vector2(ICON_SIZE, ceilf(ICON_SIZE * left))), ICON_WAIT)
+	var pips_w := most * TILE_PIP.x + (most - 1)
+	var x0 := at.x + floorf((TILE.x - pips_w) / 2.0)
+	for d in most:
+		c.draw_rect(Rect2(Vector2(x0 + d * (TILE_PIP.x + 1.0), at.y + TILE_PIP_Y), TILE_PIP), Sprites.PALETTE[TILE_FULL if d < level else TILE_EMPTY])
+	if id == flash_pick and flash > 0.0:
+		var ring := Rect2(at, TILE).grow(1.0 + TILE_FLASH * (1.0 - flash))
+		c.draw_rect(ring, Color(1.0, 1.0, 1.0, flash), false, 1.0)
+		c.draw_rect(Rect2(at + Vector2.ONE, TILE - Vector2(2.0, 2.0)), Color(1.0, 1.0, 1.0, 0.5 * flash * flash))
+
+
+## The lit ring round each log and berry on the ground (and each log a thief carries off), and now and then a glint.
+func _beacons(c: CanvasItem, w) -> void:
+	var day := daylight(w)
+	var things := []
+	for l in w.logs:
+		things.append(["log", l - LOG_ANCHOR, LOG_RIM])
+	for e in w.enemies:
+		if e.carrying:
+			things.append(["log", e.pos + THIEF_CARRY - LOG_ANCHOR, LOG_RIM])
+	for b in w.berries:
+		things.append(["berry", b - BERRY_ANCHOR + _berry_bob(w, b), BERRY_RIM])
+	for t in things:
+		var at: Vector2 = t[1].round()
+		var phase := _hash(int(at.x), int(at.y))
+		var breath: float = 0.5 + 0.5 * sin(w.steps * RIM_BREATH + phase % 64 * 0.1)
+		var lit: bool = w.in_light(at)
+		var band: Array = RIM_LIT if lit else RIM_DARK
+		var alpha: float = lerpf(band[0], band[1], breath) * (1.0 - day * 0.7)
+		if not lit: # out in the dark the thing itself glows a little too, so it keeps its colour, not just a ring
+			c.draw_texture(Sprites.texture(t[0]), at, Color(1.0, 1.0, 1.0, alpha * SELF_LIT))
+		c.draw_texture(Sprites.rim(t[0]), at - Vector2.ONE, Color(Sprites.PALETTE[t[2]], alpha))
+		var since: int = (w.steps + phase) % GLINT_EVERY
+		if since < GLINT_STEPS:
+			var glint := Sprites.texture("glint_b" if since > GLINT_STEPS / 4 and since < GLINT_STEPS * 3 / 4 else "glint_a")
+			var size := Sprites.texture(t[0]).get_size()
+			c.draw_texture(glint, (at + Vector2(size.x - 2.0, -1.0) - glint.get_size() / 2.0).round())
+
+
+## A berry's bob: up a pixel every other half beat, each on its own beat.
+static func _berry_bob(w, b: Vector2) -> Vector2:
+	return Vector2(0.0, -1.0 if ((w.steps + _hash(int(b.x), int(b.y)) % 40) / BERRY_BOB_STEPS) % 2 == 0 else 0.0)
 
 
 ## The dark panels behind the HUD. The words' widths come from main.gd, which writes them.
 func _hud_panels(c: CanvasItem, w) -> void:
-	var right := fuel_bar(w).end.x + (HUD_FUEL_TEXT + fuel_text_width if fuel_text_width > 0.0 else 0.0)
-	right = maxf(right, HUD_HEARTS.x + w.max_hp() * HUD_HEART_STEP - 1.0)
-	var bottom := fuel_bar(w).end.y
-	var n := held(w).size()
-	if n > 0:
-		right = maxf(right, _pick_at(mini(n, HUD_PICKS_PER_ROW) - 1).x + ICON_SIZE)
-		bottom = _pick_at(n - 1).y + HUD_LEVEL.y + HUD_LEVEL_PIP.y
-	c.draw_rect(Rect2(Vector2(HUD_HEARTS.x - HUD_PAD, 1.0), Vector2(right - HUD_HEARTS.x + 2.0 * HUD_PAD, bottom + HUD_PAD - 1.0)), HUD_PANEL)
+	var left := HUD_HEARTS.x - HUD_PAD
+	c.draw_rect(Rect2(left, 1.0, hud_right(w) - left, hud_bottom(w) - 1.0), HUD_PANEL)
 	if w.phase == "night":
 		c.draw_rect(CLOCK_PANEL, HUD_PANEL)
-	if score_text_width > 0.0:
-		c.draw_rect(Rect2(VIEW.x - score_text_width - 4.0 - HUD_PAD * 2.0, 1.0, score_text_width + HUD_PAD * 2.0 + 2.0, 14.0), HUD_PANEL)
+	if score_panel.x > 0.0:
+		c.draw_rect(Rect2(VIEW.x - score_panel.x - 4.0 - HUD_PAD * 2.0, 1.0, score_panel.x + HUD_PAD * 2.0 + 2.0, score_panel.y), HUD_PANEL)
 
 
 ## Whether anything is smothering the torch right now, so its fuel runs out faster.
@@ -420,7 +522,7 @@ func _standing(w) -> Array:
 	for l in w.logs:
 		_put(out, l.y + 2.0, "log", l, LOG_ANCHOR)
 	for b in w.berries:
-		_put(out, b.y + 2.0, "berry", b, BERRY_ANCHOR)
+		_put(out, b.y + 2.0, "berry", b + _berry_bob(w, b), BERRY_ANCHOR)
 	for i in w.enemies.size():
 		var e = w.enemies[i]
 		var look := Looks.enemy(e.kind)

@@ -315,7 +315,7 @@ const SPRITES := {
 	],
 	"log": [
 		"..kkkkkkkkkkk.",
-		".kyyOooooooook",
+		".kyyyoyoooyook",
 		"kyOyOoooonoook",
 		"kyOyOnooooooOk",
 		"kyyyOOOOOOOOOk",
@@ -546,6 +546,18 @@ const SPRITES := {
 		"...TtT...",
 		"..TttzT..",
 	],
+	"glint_a": [
+		".W.",
+		"WfW",
+		".W.",
+	],
+	"glint_b": [
+		"..W..",
+		"..f..",
+		"WfWfW",
+		"..f..",
+		"..W..",
+	],
 	"spark": [
 		".xFx.",
 		"xFfFx",
@@ -595,9 +607,9 @@ const SPRITES := {
 		".TTz.",
 	],
 	"mushroom": [
-		".rrr.",
-		"rWrWR",
-		"RRRRR",
+		".mmm.",
+		"mcmcM",
+		"MMMMM",
 		"..c..",
 		"..c..",
 	],
@@ -915,9 +927,9 @@ const SPRITES := {
 		"...42....",
 		"...2.2...",
 		".kkk.kkk.",
-		"krWrkrWrk",
-		"krrRkrrRk",
-		"kRRRkRRRk",
+		"kiWikiWik",
+		"kiiIkiiIk",
+		"kIIIkIIIk",
 		".kkk.kkk.",
 	],
 	"icon_sturdy": [
@@ -1047,6 +1059,29 @@ static func texture(sprite: String, flip := false, white := false) -> Texture2D:
 			img.flip_x()
 		_textures[key] = ImageTexture.create_from_image(whitened(img) if white else img)
 	return _textures[key]
+
+
+## A one-pixel ring just outside a sprite's shape, in white, one pixel bigger on every side: the painter tints it and
+## draws it where the night does not dim it, so a thing on the ground keeps its silhouette in the dark.
+static func rim(sprite: String) -> Texture2D:
+	var key := sprite + "#rim"
+	if not _textures.has(key):
+		var img := image(sprite)
+		var out := Image.create_empty(img.get_width() + 2, img.get_height() + 2, false, Image.FORMAT_RGBA8)
+		for y in out.get_height():
+			for x in out.get_width():
+				if _solid(img, x - 1, y - 1):
+					continue
+				for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+					if _solid(img, x - 1 + d.x, y - 1 + d.y):
+						out.set_pixel(x, y, Color.WHITE)
+						break
+		_textures[key] = ImageTexture.create_from_image(out)
+	return _textures[key]
+
+
+static func _solid(img: Image, x: int, y: int) -> bool:
+	return x >= 0 and y >= 0 and x < img.get_width() and y < img.get_height() and img.get_pixel(x, y).a > 0.5
 
 
 ## The same picture with everything inside its outline turned white, for the moment something is hit.
