@@ -91,7 +91,8 @@ const ENEMY := {
 ## takes), summon (every so many seconds it calls count enemies of kind around itself), score (worth more than a kill),
 ## dark_speed_mult (how much faster it moves outside the torch's light: the dark is where it hunts).
 ## leap (the slime king): every so many seconds, when the player is within range, it marks the spot where the player
-## stands, crouches there for warn seconds, flies for air seconds and lands on the mark; a player within shock of the
+## stands (but never closer to the torch than torch_gap beyond where it would smother it), crouches there for warn
+## seconds, flies for air seconds and lands on the mark; a player within shock of the
 ## mark is hurt. lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
 ## every so many seconds it stops for warn seconds, then rushes to the torch at speed, smothers it for stay seconds
 ## (in the light, so it can be cut) and walks back out into the dark.
@@ -107,9 +108,9 @@ const ENEMY_TYPES := {
 	"boar": { "hp": 3, "speed": 18.0, "radius": 7.0, "target": "player",
 		"charge": { "every": 3.5, "range": 110.0, "warn": 0.8, "speed": 170.0, "dist": 150.0, "rest": 1.2 } },
 	"slime_king": {
-		"hp": 16, "speed": 9.0, "radius": 13.0, "target": "torch", "smother": 2.5, "split_count": 2, "splits_into": "big_slime",
+		"hp": 16, "speed": 9.0, "radius": 13.0, "target": "torch", "smother": 1.2, "split_count": 2, "splits_into": "big_slime",
 		"boss": true, "name": "슬라임 왕", "heavy": 0.15, "summon": { "kind": "slime", "every": 8.0, "count": 2 }, "score": 150,
-		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0 },
+		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0, "torch_gap": 24.0 },
 	},
 	"shade_lord": {
 		"hp": 18, "speed": 28.0, "radius": 10.0, "target": "torch", "smother": 2.0, "dark_proof": true,
