@@ -53,13 +53,16 @@ const DAWN := { "heal": 1 }
 
 ## Every few nights a boss comes, partway through the night, besides the usual enemies (which come a little less
 ## often that night). kinds take turns: the first boss night brings the first, the next the second, and so on.
-const BOSS := { "every": 5, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35 }
+## warn: seconds before it comes that the world picks the edge it comes from and says so (the screen points there).
+const BOSS := { "every": 5, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35, "warn": 2.0 }
 
 const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 
 const ENEMY := {
 	"knock": 150.0, "knock_decay": 0.002, "knock_stop": 4.0, "flash": 0.12, "edge": 12.0,
 	"steal": 8.0, "split_spread": 6.0, "split_knock": 70.0, "summon_gap": 6.0,
+	"orbit_lead": 0.4, # radians ahead on its circle a boss that circles the light aims for: it goes round, not in
+	"orbit_top": 64.0, # it keeps this far below the top of the field, where the HUD would hide it
 }
 
 ## Enemy kinds: add a row to add an enemy (and draw <kind>_a and <kind>_b in src/art/sprites.gd).
@@ -69,6 +72,11 @@ const ENEMY := {
 ## boss (comes on boss nights only, see BOSS; name is what the screen calls it), heavy (share of a blow's knockback it
 ## takes), summon (every so many seconds it calls count enemies of kind around itself), score (worth more than a kill),
 ## dark_speed_mult (how much faster it moves outside the torch's light: the dark is where it hunts).
+## leap (the slime king): every so many seconds, when the player is within range, it marks the spot where the player
+## stands, crouches there for warn seconds, flies for air seconds and lands on the mark; a player within shock of the
+## mark is hurt. lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
+## every so many seconds it stops for warn seconds, then rushes to the torch at speed, smothers it for stay seconds
+## (in the light, so it can be cut) and walks back out into the dark.
 const ENEMY_TYPES := {
 	"slime": { "hp": 2, "speed": 16.0, "radius": 7.0, "target": "torch" },
 	"bat": { "hp": 1, "speed": 26.0, "radius": 5.0, "target": "player", "dark_speed_mult": 1.5 },
@@ -78,10 +86,12 @@ const ENEMY_TYPES := {
 	"slime_king": {
 		"hp": 16, "speed": 9.0, "radius": 13.0, "target": "torch", "smother": 2.5, "split_count": 2, "splits_into": "big_slime",
 		"boss": true, "name": "슬라임 왕", "heavy": 0.15, "summon": { "kind": "slime", "every": 8.0, "count": 2 }, "score": 150,
+		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0 },
 	},
 	"shade_lord": {
-		"hp": 18, "speed": 13.0, "radius": 10.0, "target": "torch", "smother": 3.0, "dark_proof": true,
+		"hp": 18, "speed": 28.0, "radius": 10.0, "target": "torch", "smother": 2.0, "dark_proof": true,
 		"boss": true, "name": "그림자 군주", "heavy": 0.2, "summon": { "kind": "shade", "every": 7.0, "count": 2 }, "score": 150,
+		"lunge": { "every": 7.0, "warn": 1.0, "speed": 110.0, "stay": 3.5, "ring": 16.0 },
 	},
 }
 

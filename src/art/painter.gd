@@ -112,6 +112,20 @@ const DARK_STREAK := 3
 const DARK_STREAK_GAP := 3.0
 const DARK_STREAK_FADE := 0.7
 
+## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing: a ring at the shock
+## that fills in as the landing nears, blinking, with the king crouched and flashing while it waits and lifted off
+## its shadow in the air. The shade lord, about to rush, flashes and lays a dashed line from itself to the torch.
+const MARK := "i" # PALETTE key of the marked landing and the rush line
+const MARK_FILL := 0.35 # how solid the ring's inside is the moment it lands
+const MARK_BLINK_STEPS := 4
+const LEAP_HEIGHT := 26.0 # pixels the king rises at the top of its leap
+const RUSH_DASH := 4.0 # pixels per dash of the rush line, and per gap
+## A boss on its way: Config.BOSS.warn seconds ahead, the edge it comes from glows and an arrow there points out at it.
+const COMING_BAND := Vector2(70.0, 4.0) # along the edge, into the field
+const COMING_ARROW := 7.0 # pixels from the arrow's tip to its back
+const COMING_IN := 12.0 # from the edge to the arrow's tip
+const COMING_BLINK_STEPS := 8
+
 ## How upgrades show in the world. The rest show only as their icon.
 const WARMED := Color(1.0, 0.74, 0.5) # tint of an enemy the warm glow is slowing
 const EMBERS := 14 # embers in the ember ring
@@ -202,12 +216,13 @@ func paint(c: CanvasItem, w) -> void:
 
 func paint_overlay(c: CanvasItem, w) -> void:
 	c.draw_set_transform(shake) # what glows in the field shakes with it (main.gd moves the field); the HUD does not
+	_telegraphs(c, w)
 	effects.paint(c)
 	_slash(c, w)
 	for i in w.enemies.size():
 		var e = w.enemies[i]
 		var look := Looks.enemy(e.kind)
-		var at: Vector2 = e.pos + _bob(w, i, look) - look.anchor
+		var at: Vector2 = e.pos + _bob(w, i, look) + _lift(e) - look.anchor
 		if look.glow != "":
 			c.draw_texture(Sprites.texture(look.glow), at.round())
 		if look.dark_glow != "" and not w.in_light(e.pos):
@@ -234,6 +249,7 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		for d in n if n > 1 else 0: # one pip per level once there is more than one
 			c.draw_rect(Rect2(at + HUD_LEVEL + Vector2(d * HUD_LEVEL_STEP, 0.0), HUD_LEVEL_PIP), Sprites.PALETTE["Y"])
 	_sparks(c, w)
+	_coming(c, w)
 	_boss_bar(c, w)
 	_night_bar(c, w)
 
@@ -384,7 +400,8 @@ func _standing(w) -> Array:
 		var look := Looks.enemy(e.kind)
 		if look.flies:
 			continue
-		_put(out, e.pos.y + 4.0, Looks.frame(e.kind, w.steps, i), e.pos, look.anchor, look.turns and e.vel.x < 0.0, e.flash > 0.0, _tint(w, e, warms))
+		var white: bool = e.flash > 0.0 or (e.move == "warn" and (w.steps / MARK_BLINK_STEPS) % 2 == 0)
+		_put(out, e.pos.y + 4.0, Looks.frame(e.kind, w.steps, i), e.pos + _lift(e), look.anchor, look.turns and e.vel.x < 0.0, white, _tint(w, e, warms))
 		if e.carrying:
 			_put(out, e.pos.y + 4.1, "log", e.pos + THIEF_CARRY, LOG_ANCHOR)
 	if p.dead:
@@ -404,6 +421,60 @@ func _standing(w) -> Array:
 			var behind: bool = sin(_blade(w)[1]) < BEHIND
 			out.append([p.pos.y + (4.9 if behind else 5.2), null]) # the sword: paint() draws it at this depth
 	return out
+
+
+## How far a leaping boss is lifted off the ground (and off its shadow) right now.
+static func _lift(e) -> Vector2:
+	if e.move != "air":
+		return Vector2.ZERO
+	var k: float = clampf(1.0 - e.move_t / e.T.leap.air, 0.0, 1.0)
+	return Vector2(0.0, -roundf(sin(k * PI) * LEAP_HEIGHT))
+
+
+## Where a boss is about to strike: the slime king's marked landing, the shade lord's line to the torch.
+func _telegraphs(c: CanvasItem, w) -> void:
+	var colour: Color = Sprites.PALETTE[MARK]
+	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
+	for e in w.enemies:
+		if e.T.has("leap") and e.move in ["warn", "air"]:
+			var L: Dictionary = e.T.leap
+			var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
+			var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
+			var at: Vector2 = e.move_to.round()
+			c.draw_circle(at, L.shock, Color(colour, MARK_FILL * k))
+			c.draw_arc(at, L.shock, 0.0, TAU, 32, Color(colour, 1.0 if blink else 0.6), 1.0)
+			c.draw_arc(at, L.shock * (1.0 - k), 0.0, TAU, 24, Color(colour, 0.8), 1.0) # closes in on the edge as it falls
+		elif e.T.has("lunge") and e.move == "warn":
+			var to: Vector2 = e.move_to - e.pos
+			var n := int(to.length() / (RUSH_DASH * 2.0))
+			for d in n:
+				var a: Vector2 = e.pos + to.normalized() * RUSH_DASH * 2.0 * d
+				c.draw_line(a.round(), (a + to.normalized() * RUSH_DASH).round(), Color(colour, 0.9 if blink else 0.5), 1.0)
+
+
+## A boss on its way: the edge it will come from glows and an arrow points at it, blinking.
+func _coming(c: CanvasItem, w) -> void:
+	if w.boss_from == null or w.phase != "night":
+		return
+	var f: Vector2 = w.boss_from
+	var out := Vector2.ZERO # which edge: the one it is past
+	if f.x < Config.FIELD.position.x: out = Vector2.LEFT
+	elif f.x > Config.FIELD.end.x: out = Vector2.RIGHT
+	elif f.y < Config.FIELD.position.y: out = Vector2.UP
+	else: out = Vector2.DOWN
+	var spot: Vector2 = f.clamp(Vector2.ZERO, VIEW)
+	var on: bool = (w.steps / COMING_BLINK_STEPS) % 2 == 0
+	var colour: Color = Sprites.PALETTE[MARK]
+	var band_size := COMING_BAND if out.y != 0.0 else Vector2(COMING_BAND.y, COMING_BAND.x)
+	var band_at := spot - band_size / 2.0 - out * band_size / 2.0
+	var band := Rect2(band_at, band_size).intersection(Rect2(Vector2.ZERO, VIEW))
+	c.draw_rect(band, Color(colour, 0.85 if on else 0.4))
+	var tip: Vector2 = (spot - out * COMING_IN).clamp(Vector2(COMING_IN, COMING_IN), VIEW - Vector2(COMING_IN, COMING_IN))
+	var back: Vector2 = tip - out * COMING_ARROW
+	var side: Vector2 = out.orthogonal() * COMING_ARROW * 0.7
+	var arrow := PackedVector2Array([tip.round(), (back + side).round(), (back - side).round()])
+	c.draw_colored_polygon(arrow, Color(colour, 1.0 if on else 0.6))
+	c.draw_polyline(PackedVector2Array([arrow[0], arrow[1], arrow[2], arrow[0]]), Sprites.PALETTE["k"], 1.0)
 
 
 ## What flies is painted above everything that stands, bobbing.
