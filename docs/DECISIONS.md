@@ -3,6 +3,14 @@
 새 결정은 위에 추가한다. 형식: 날짜 · 무엇을 · 왜 · 어디에 반영했는지(검사/코드/글).
 콘셉트를 정한 과정(장르, 아트 세대, 세대별 능력, 에셋 조사, 엔진 선택)은 `../pixelfx-starter/docs/DECISIONS.md`에 있다.
 
+## 2026-11-26 · 실행 중 스크립트 오류는 `./verify` 실패 (G5)
+- 일어난 일: 보스 패턴 작업에서 버그를 심어 보다가 `_patterns` 장면이 `Vector2.distance_to(null)`로 실행 중 오류를 냈다. Godot는 `SCRIPT ERROR`를 찍었지만 `./verify`는 `verify: PASS`였고, 장면을 null에 안전하게 고칠 때까지 심은 버그가 보고되지 않았다.
+- 원인: GDScript 함수는 실행 중 오류가 나면 그 자리에서 멈추고 반환형의 빈 값을 돌려준다(`Array`면 `[]`). 장면은 실패를 목록으로 돌려주므로 터진 장면과 통과한 장면이 똑같이 `[]`다. `run()`도 계속 돌고 "rules: every scene holds"를 찍는다. records와 리플레이도 같다(리플레이는 요약 문자열이 빈 채로 "matches golden"이 나왔다).
+- 결정: `tools/verify.gd`가 시작할 때 Godot 4.5+의 `Logger`(`ScriptErrors`)를 `OS.add_logger`로 달고, `ERROR_TYPE_SCRIPT` 오류를 모두 모은다. 하나라도 있으면 파일:줄과 함수를 찍고 FAIL. 검사, 스프라이트, 장면, 기록, 리플레이 어디서 났든 같다. 그리고 `./verify` 셸 스크립트도 출력에 `^SCRIPT ERROR` 줄이 있으면 실패시킨다(로거를 달기 전, 예를 들어 preload 중에 난 오류까지).
+- 고르지 않은 것: 장면마다 마지막에 "done" 표지를 넣고 `run()`이 확인하는 방식. 장면을 더할 때마다 잊을 수 있고 records와 리플레이는 덮지 못한다. 로거는 어디서 났든 잡고 장면 쪽에 할 일이 없다. 셸의 grep만 두면 Godot가 출력 형식을 바꿀 때 조용히 꺼지므로 둘 다 둔다.
+- 검사: 자체 테스트 대신 심어 본 오류로 확인했다(일부러 오류를 내는 자체 테스트는 통과하는 실행에도 `SCRIPT ERROR`를 찍어 셸 검사에 걸린다). `var v = null; v.length()`를 `rules_test._shade`, `records_test._order`, `replay_test._say`에 심으면 세 경우 모두 `script error: res://tools/...:줄 in 함수(): ...`와 `verify: FAIL`, 종료 코드 1(`--hook`이면 2). 셸의 grep을 빼고 Godot만 돌려도 `verify: FAIL`. `var v: Vector2 = null`은 실행 중 오류가 아니라 파싱 오류라 원래도 PASS 줄이 없어 실패했다.
+- 반영: `tools/verify.gd`(`ScriptErrors`), `verify`, `docs/PRINCIPLES.md`(G5).
+
 ## 2026-11-26 · 휴대폰으로 웹에서: 터치 조작, 웹 내보내기, GitHub Pages 배포
 - 사용자 요청: 휴대폰에서 웹으로 하고 싶다. GitHub Actions로 GitHub Pages에 올린다.
 - 터치 조작(`src/touch.gd`, 입력 다리의 일부): 화면 왼쪽 절반(HUD 왼쪽 위 판 아래, `STICK_TOP`)에 엄지가 닿은 자리에 조이스틱이 나타난다. 4픽셀 데드존 밖에서 8방향 중 하나로 읽어 키와 같은 `left/right/up/down`을 누르고 있는 것으로 넘긴다. 13픽셀보다 멀리 끌면 고리가 엄지를 따라와서 반대로 돌리면 바로 반대로 간다. 오른쪽 아래 칼 버튼(베기), 그 왼쪽 작은 버튼(돌진, `dash_every` 강화가 있을 때만 보이고 받는다), 오른쪽 위 점수 아래 일시정지 버튼(일시정지 중에는 아무 데나 누르면 계속). 끝 화면은 0.8초 뒤부터 누르면 다시 하기(마지막에 휘두르던 엄지가 끝 화면을 건너뛰지 않게). 터치마다 index를 따로 들고 있어서 이동하면서 벨 수 있다. 첫 화면과 카드는 Godot의 터치→마우스 흉내로 눌린다. 카드는 이제 마우스 위치가 아니라 클릭 이벤트의 자리로 고른다(탭은 마우스를 옮기지 않는다).
