@@ -503,6 +503,25 @@ static func _patterns() -> Array:
 	king.move_t = 0.0
 	_play(w, 10)
 	_expect(out, "the slime king does not leap at you from out of range", king.move, "")
+	# guarding the torch: the king's mark is pushed out so it never lands on the torch
+	var keep: float = Config.TORCH.reach + K.radius + L.torch_gap
+	for guard in [Vector2(0.0, 10.0), Vector2.ZERO]:
+		w = _night(guard)
+		w.fuel = 1.0e6
+		king = _add(w, "slime_king", Vector2(-80.0, 0.0) - guard)
+		king.move_t = 0.0
+		_play(w, 1)
+		_expect(out, "a king leaping at a player by the torch marks a spot torch_gap past smothering (guard %s)" % guard, snappedf(king.move_to.distance_to(Config.TORCH.pos), 0.01), snappedf(keep, 0.01))
+		_play(w, airborne + 2)
+		_expect(out, "the king lands off the torch, not smothering it (guard %s)" % guard, [king.move, king.at_torch], ["", false])
+	w = _night(Vector2(0.0, keep + 30.0))
+	w.fuel = 1.0e6
+	king = _add(w, "slime_king", Vector2(-60.0, 0.0))
+	king.move_t = 0.0
+	var mark_far: Vector2 = w.player.pos
+	_play(w, 1)
+	_expect(out, "away from the torch the king still marks exactly where you stand", king.move_to, mark_far)
+	_expect(out, "a slime king at the torch smothers less than two slimes (it cannot end the night in seconds)", K.smother < 2.0 * Config.ENEMY_TYPES.slime.get("smother", 1.0), true)
 	# shade lord: circles in the dark, blows pass through it there
 	var SL: Dictionary = Config.ENEMY_TYPES.shade_lord
 	var R: Dictionary = SL.lunge

@@ -113,7 +113,7 @@ func _leap(world) -> void:
 				move = "warn"
 				move_t = L.warn
 				move_from = pos
-				move_to = p.pos
+				move_to = _off_torch(p.pos, L.torch_gap)
 				world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
 		"warn":
 			move_t -= Config.STEP
@@ -131,6 +131,19 @@ func _leap(world) -> void:
 				world.events.append({ "kind": "landed", "pos": pos, "enemy": kind })
 				if pos.distance_to(p.pos) < L.shock + Config.PLAYER.radius:
 					p.hurt(pos)
+
+
+## Where the king may land: never on the torch. A mark closer than gap pixels beyond where it would start smothering
+## is pushed straight out from the torch to that distance, so the leap is an attack on the player, not a way in: a
+## player guarding the torch would otherwise bring the king onto it in one leap, and the torch went out seconds later.
+func _off_torch(at: Vector2, gap: float) -> Vector2:
+	var keep: float = Config.TORCH.reach + T.radius + gap
+	var away: Vector2 = at - Config.TORCH.pos
+	if away.length() >= keep:
+		return at
+	if away.length() < 0.001:
+		away = pos - Config.TORCH.pos
+	return Config.TORCH.pos + away.normalized() * keep
 
 
 ## The shade lord's rush. Circling, it counts down to the next one; then it stops and looks at the torch, rushes it,
