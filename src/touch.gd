@@ -1,8 +1,10 @@
-## Touch controls for playing on a phone: a stick that appears where the left thumb lands, a sword button and (once
-## the dash upgrade is held) a dash button on the right, a pause button, a "?" button beside it that brings the start
+## Touch controls for playing on a phone: a stick that appears where the left thumb lands and steers in any of
+## Config.STICK_DIRECTIONS directions, a sword button and (once the dash upgrade is held) a dash button on the right,
+## a pause button, a "?" button beside it that brings the start
 ## screen back (the H key), and a tap that restarts after the end. Part of
-## the bridge with src/main.gd: it turns screen touches into the same action names the keys give ("left", "attack",
-## ...), so the simulation cannot tell a touch from a key (S1), and each tap counts for exactly one step (D6: take()).
+## the bridge with src/main.gd: it turns screen touches into the same action names the keys give ("attack", "dash")
+## and the stick into a direction number (InputFrame.stick), so the simulation reads no screen (S1), and each tap
+## counts for exactly one step (D6: take()).
 ## The start screen and the cards are tapped through Godot's mouse emulation (src/main.gd, src/ui.gd).
 ## Shown once the screen is touched (or the device says it has a touch screen) and hidden again by a key press.
 ## Also decides how the 480x270 field is scaled to the window on web and mobile (stretch_for), and asks a phone held
@@ -18,7 +20,9 @@ signal help_pressed # the "?" button, while playing or paused: the start screen 
 
 const VIEW: Vector2 = Config.VIEW
 const DEAD := 4.0 # pixels the thumb moves from where it landed before the keeper walks
-const REACH := 13.0 # how far the knob goes from the ring's middle; past it the ring follows the thumb
+const DEAD_STOP := 2.5 # once walking, it stops only when the thumb comes back this close, so a still thumb does not stutter
+const REACH := 16.0 # how far the knob goes from the ring's middle; past it the ring follows the thumb
+const TURN_HOLD := 0.7 # a thumb must turn this many direction steps away before the direction changes
 const STICK_TOP := 60.0 # the stick starts only below the HUD's top-left panel, so it never covers it
 const ATTACK := Vector2(VIEW.x - 34.0, VIEW.y - 36.0) # the sword button's middle
 const DASH := Vector2(VIEW.x - 76.0, VIEW.y - 22.0)
@@ -31,7 +35,6 @@ const HELP_REACH := 12.0 # a little smaller than the pause button's, so the two 
 const LOOK := 0.45 # how solid the controls are while untouched
 const LOOK_DOWN := 0.85 # and while pressed
 const REST := 0.8 # seconds after the end before a tap restarts, so a thumb still swinging does not skip the end screen
-const DIRECTIONS := [["right"], ["right", "down"], ["down"], ["down", "left"], ["left"], ["left", "up"], ["up"], ["up", "right"]]
 ## Integer scaling keeps every pixel the same size, but on some phones it leaves the field small inside wide borders
 ## (1280x720: 2x of 2.67x fits). Below this share of the size that would fit, scale by a fraction instead.
 const WHOLE_ENOUGH := 0.85
@@ -43,6 +46,7 @@ var dash_shown := false # set by main.gd: the dash upgrade is held
 var stick := -1 # the touch index steering, -1 when none
 var stick_from := Vector2.ZERO # the ring's middle
 var stick_at := Vector2.ZERO # the thumb
+var heading := -1 # the direction the stick gives now, one of Config.STICK_DIRECTIONS, -1 while it is not pushed
 var buttons := {} # touch index -> the action it holds down: "attack" or "dash"
 var help_touch := -1 # the touch index on the "?" button, -1 when none. It answers when lifted, so the tap that
 # opens the start screen is not also the click that closes it (Godot turns a touch into a mouse click as it lands)
@@ -95,10 +99,12 @@ func handle(event: InputEvent) -> bool:
 		var off := stick_at - stick_from
 		if off.length() > REACH: # the ring follows the thumb, so turning back answers at once
 			stick_from = stick_at - off.normalized() * REACH
+		heading = direction(stick_at - stick_from, heading)
 		return true
 	if not t.pressed:
 		if t.index == stick:
 			stick = -1
+			heading = -1
 		buttons.erase(t.index)
 		if t.index == help_touch:
 			help_touch = -1
@@ -125,6 +131,7 @@ func handle(event: InputEvent) -> bool:
 				stick = t.index
 				stick_from = t.position
 				stick_at = t.position
+				heading = -1
 		_:
 			return false # the start screen and the cards are tapped as mouse clicks
 	return true
@@ -138,21 +145,24 @@ func _press(index: int, action: String) -> void:
 ## Lets go of everything, as when the window loses focus.
 func release() -> void:
 	stick = -1
+	heading = -1
 	buttons.clear()
 	help_touch = -1
 
 
-## The actions held right now: the stick's direction (one of eight, none inside the dead zone) and the buttons down.
+## The actions held right now: the buttons down.
 func held() -> Dictionary:
 	var out := {}
 	if not on or mode != "play":
 		return out
 	for action in buttons.values():
 		out[action] = true
-	if stick >= 0:
-		for action in direction(stick_at - stick_from):
-			out[action] = true
 	return out
+
+
+## The way the stick steers right now, for InputFrame.stick: one of Config.STICK_DIRECTIONS, -1 when it is not pushed.
+func steer() -> int:
+	return heading if on and mode == "play" and stick >= 0 else -1
 
 
 ## The actions pressed since the last call, each once (D6).
@@ -162,11 +172,17 @@ func take() -> Dictionary:
 	return out if on else {}
 
 
-## The keys a stick pushed this far stand for: none inside the dead zone, else one of eight directions.
-static func direction(off: Vector2) -> Array:
-	if off.length() < DEAD:
-		return []
-	return DIRECTIONS[posmod(roundi(off.angle() / (PI / 4.0)), 8)]
+## The direction a stick pushed this far gives, counted clockwise on the screen from right, or -1 inside the dead
+## zone. was is the direction it gave last: it keeps walking down to DEAD_STOP, and keeps its direction until the
+## thumb has turned TURN_HOLD steps from it, so a thumb resting on a boundary does not flicker between two.
+static func direction(off: Vector2, was := -1) -> int:
+	if off.length() < (DEAD_STOP if was >= 0 else DEAD):
+		return -1
+	var n: int = Config.STICK_DIRECTIONS
+	var step := TAU / n
+	if was >= 0 and absf(angle_difference(was * step, off.angle())) < TURN_HOLD * step:
+		return was
+	return posmod(roundi(off.angle() / step), n)
 
 
 ## How to scale the field to a window this size: integer while that fills enough of it, else fractional.
@@ -221,8 +237,9 @@ func _draw() -> void:
 		_sprite("pad_knob", knob, true)
 
 
-## A sprite centred on a point, on whole pixels, see-through unless pressed (a pressed one also sits a pixel lower).
-func _sprite(name: String, at: Vector2, down: bool) -> void:
+## A sprite centred on a point, on whole pixels, see-through unless pressed (a pressed one also sits a pixel lower),
+## drawn scale times its size (a whole number, so its pixels stay square).
+func _sprite(name: String, at: Vector2, down: bool, scale := 1) -> void:
 	var tex := Sprites.texture(name)
-	var top := (at - tex.get_size() / 2.0).round() + (Vector2(0.0, 1.0) if down and name != "pad_ring" and name != "pad_knob" else Vector2.ZERO)
-	draw_texture(tex, top, Color(1.0, 1.0, 1.0, LOOK_DOWN if down else LOOK))
+	var top := (at - tex.get_size() * scale / 2.0).round() + (Vector2(0.0, 1.0) if down and name != "pad_ring" and name != "pad_knob" else Vector2.ZERO)
+	draw_texture_rect(tex, Rect2(top, tex.get_size() * scale), false, Color(1.0, 1.0, 1.0, LOOK_DOWN if down else LOOK))

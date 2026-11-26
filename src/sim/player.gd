@@ -1,4 +1,4 @@
-## The player, seen from above: walks in 8 directions, swings in the facing direction, carries one log. With the
+## The player, seen from above: walks in 8 directions with the keys (any of Config.STICK_DIRECTIONS with the touch stick), swings in the facing direction, carries one log. With the
 ## dash upgrade it can dash; with the spin upgrade every few swings go all the way round.
 extends RefCounted
 
@@ -37,6 +37,8 @@ func step(world, inp) -> void:
 		var dir := Vector2(
 			(1.0 if inp.is_held("right") else 0.0) - (1.0 if inp.is_held("left") else 0.0),
 			(1.0 if inp.is_held("down") else 0.0) - (1.0 if inp.is_held("up") else 0.0)).normalized()
+		if inp.stick >= 0: # the touch stick, at full speed whichever way it points
+			dir = Vector2.from_angle(TAU * inp.stick / Config.STICK_DIRECTIONS)
 		var slow: bool = carrying and not world.mod("carry_full", false)
 		var lit: float = world.mod("lit_speed_mult", 1.0) if world.in_light(pos) else 1.0 # the bright fire upgrade
 		vel = dir * (P.carry_speed if slow else P.speed) * lit

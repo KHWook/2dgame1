@@ -165,6 +165,7 @@ func _physics_process(_delta: float) -> void:
 	var f := InputFrame.new()
 	f.held = held.duplicate()
 	f.held.merge(touch.held())
+	f.stick = touch.steer()
 	pending.merge(touch.take())
 	f.pressed = pending
 	pending = {}

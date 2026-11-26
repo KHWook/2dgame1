@@ -1,11 +1,15 @@
-## The touch controls (src/touch.gd) give the actions they claim: the stick's eight directions and dead zone, the ring
-## following the thumb, the sword held while a second thumb steers, each tap pressed once (D6), dash only with the
-## upgrade, nothing steered while the cards are up, the tap that restarts only after the end has shown a moment, the
-## "?" button bringing the start screen back (as H does) while playing or paused, a key press hiding it all, and the
-## scaling chosen for common phone screens.
+## The touch controls (src/touch.gd) give the actions they claim: the stick's directions (all of
+## Config.STICK_DIRECTIONS, not snapped to eight), its dead zone and the way it holds a direction and a walk against a
+## trembling thumb, the ring following the thumb, the keeper walking at full speed the way it points, the sword held
+## while a second thumb steers, each tap pressed once (D6), dash only with the upgrade, nothing steered while the cards
+## are up, the tap that restarts only after the end has shown a moment, the "?" button bringing the start screen back
+## (as H does) while playing or paused, a key press hiding it all, and the scaling chosen for common phone screens.
 extends RefCounted
 
 const Touch := preload("res://src/touch.gd")
+const Config := preload("res://src/sim/config.gd")
+const World := preload("res://src/sim/world.gd")
+const InputFrame := preload("res://src/sim/input_frame.gd")
 
 const AT := Vector2(100.0, 180.0) # where the left thumb lands
 
@@ -51,44 +55,87 @@ static func _held(t) -> Array:
 static func _stick() -> Array:
 	var out := []
 	var t = _fresh()
+	var n: int = Config.STICK_DIRECTIONS
 	if t.on:
 		out.append("the controls show before any touch on a device without a touch screen")
-	var want := { Vector2(1, 0): ["right"], Vector2(1, 1): ["down", "right"], Vector2(0, 1): ["down"],
-		Vector2(-1, 1): ["down", "left"], Vector2(-1, 0): ["left"], Vector2(-1, -1): ["left", "up"],
-		Vector2(0, -1): ["up"], Vector2(1, -1): ["right", "up"] }
-	for dir in want:
+	for i in n: # every direction the stick has, pushed straight at it
 		_touch(t, 0, AT)
-		_drag(t, 0, AT + dir.normalized() * 10.0)
-		if _held(t) != want[dir]:
-			out.append("the stick pushed %s holds %s, not %s" % [dir, _held(t), want[dir]])
+		_drag(t, 0, AT + Vector2.from_angle(TAU * i / n) * 10.0)
+		if t.steer() != i:
+			out.append("the stick pushed at direction %d steers %d" % [i, t.steer()])
+		if not _held(t).is_empty():
+			out.append("the stick also holds actions: %s" % [_held(t)])
 		_touch(t, 0, AT, false)
 	if not t.on:
 		out.append("a touch does not show the controls")
 	_touch(t, 0, AT)
 	_drag(t, 0, AT + Vector2(Touch.DEAD - 1.0, 0.0))
-	if not _held(t).is_empty():
-		out.append("a thumb inside the dead zone walks: %s" % [_held(t)])
-	_drag(t, 0, AT + Vector2(0.0, -10.0).rotated(0.3)) # a little right of straight up still reads as up
-	if _held(t) != ["up"]:
-		out.append("a thumb pushed nearly straight up holds %s" % [_held(t)])
+	if t.steer() != -1:
+		out.append("a thumb inside the dead zone walks: %d" % t.steer())
+	_drag(t, 0, AT + Vector2(0.0, -10.0).rotated(0.3)) # a little right of straight up: that way, not snapped to up
+	var up_right := posmod(roundi((-PI / 2.0 + 0.3) / (TAU / n)), n)
+	if t.steer() != up_right:
+		out.append("a thumb pushed a little right of straight up steers %d, not %d" % [t.steer(), up_right])
+	_drag(t, 0, AT + Vector2(Touch.DEAD_STOP + 0.5, 0.0)) # back nearly to the middle, but past DEAD_STOP: still walks
+	if t.steer() != 0:
+		out.append("a walking thumb drawn back inside the start dead zone stops (or turns): %d" % t.steer())
+	_drag(t, 0, AT + Vector2(Touch.DEAD_STOP - 0.5, 0.0))
+	if t.steer() != -1:
+		out.append("a thumb back inside DEAD_STOP still walks: %d" % t.steer())
+	_drag(t, 0, AT + Vector2(10.0, 0.0))
+	var step := TAU / n
+	_drag(t, 0, AT + Vector2(10.0, 0.0).rotated(step * 0.55)) # past the half-way line to the next, short of TURN_HOLD
+	if t.steer() != 0:
+		out.append("a thumb resting just past the boundary to the next direction flips to it: %d" % t.steer())
+	_drag(t, 0, AT + Vector2(10.0, 0.0).rotated(step * (Touch.TURN_HOLD + 0.1)))
+	if t.steer() != 1:
+		out.append("a thumb turned past TURN_HOLD does not turn: %d" % t.steer())
 	_drag(t, 0, AT + Vector2(60.0, 0.0)) # far right: the ring follows, so turning back answers at once
 	_drag(t, 0, AT + Vector2(60.0 - Touch.REACH - Touch.DEAD - 1.0, 0.0))
-	if _held(t) != ["left"]:
-		out.append("after a long push right, turning back does not walk left at once: %s" % [_held(t)])
+	if t.steer() != n / 2:
+		out.append("after a long push right, turning back does not walk left at once: %d" % t.steer())
 	_touch(t, 0, AT, false)
-	if not _held(t).is_empty():
-		out.append("letting go of the stick still walks: %s" % [_held(t)])
+	if t.steer() != -1:
+		out.append("letting go of the stick still walks: %d" % t.steer())
 	_touch(t, 0, Vector2(100.0, Touch.STICK_TOP - 10.0)) # on the HUD's top-left panel
 	_drag(t, 0, Vector2(130.0, Touch.STICK_TOP - 10.0))
-	if not _held(t).is_empty():
+	if t.steer() != -1:
 		out.append("a thumb on the HUD panel starts the stick")
 	_touch(t, 0, Vector2.ZERO, false)
 	_touch(t, 0, Vector2(Touch.VIEW.x - 120.0, 150.0)) # the right half, away from the buttons
 	_drag(t, 0, Vector2(Touch.VIEW.x - 150.0, 150.0))
-	if not _held(t).is_empty():
+	if t.steer() != -1:
 		out.append("a thumb on the right half steers")
 	_touch(t, 0, Vector2.ZERO, false)
+	t.mode = "pick"
+	_touch(t, 0, AT)
+	_drag(t, 0, AT + Vector2(10.0, 0.0))
+	if t.steer() != -1:
+		out.append("the stick steers while the cards are up")
+	_touch(t, 0, AT, false)
 	t.free()
+	# The simulation: the stick walks the keeper at full speed exactly the way it points, and faces it there; the
+	# keys are read as before when it is not pushed.
+	for i in [0, 5, 21, 40]:
+		var w = World.new(1)
+		w.phase = "night"
+		w.offer = []
+		var from: Vector2 = w.player.pos
+		var f := InputFrame.new()
+		f.stick = i
+		w.step(f)
+		var want := Vector2.from_angle(TAU * i / n)
+		if not (w.player.pos - from).normalized().is_equal_approx(want) or not is_equal_approx((w.player.pos - from).length(), Config.PLAYER.speed * Config.STEP) or not w.player.face.is_equal_approx(want):
+			out.append("the stick at %d moves the keeper by %s facing %s, not %s at full speed" % [i, w.player.pos - from, w.player.face, want])
+	var k = World.new(1)
+	k.phase = "night"
+	k.offer = []
+	var kf := InputFrame.new()
+	kf.held["left"] = true
+	var kfrom: Vector2 = k.player.pos
+	k.step(kf)
+	if not (k.player.pos - kfrom).is_equal_approx(Vector2.LEFT * Config.PLAYER.speed * Config.STEP):
+		out.append("with the stick let go, the keys no longer walk the keeper as before")
 	return out
 
 
@@ -98,14 +145,14 @@ static func _buttons() -> Array:
 	_touch(t, 0, AT)
 	_drag(t, 0, AT + Vector2(10.0, 0.0))
 	_touch(t, 1, Touch.ATTACK + Vector2(5.0, 5.0))
-	if _held(t) != ["attack", "right"]:
-		out.append("walking and the sword at once hold %s" % [_held(t)])
+	if _held(t) != ["attack"] or t.steer() != 0:
+		out.append("walking and the sword at once hold %s steering %d" % [_held(t), t.steer()])
 	if t.take().keys() != ["attack"]:
 		out.append("the sword's tap is not pressed")
 	if not t.take().is_empty():
 		out.append("one tap of the sword is pressed for more than one step")
 	_touch(t, 1, Touch.ATTACK, false)
-	if _held(t) != ["right"]:
+	if not _held(t).is_empty() or t.steer() != 0:
 		out.append("letting go of the sword stops the walk, or keeps the sword: %s" % [_held(t)])
 	_touch(t, 2, Touch.DASH)
 	if t.take().has("dash"):

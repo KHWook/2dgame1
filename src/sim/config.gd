@@ -15,6 +15,10 @@ const PLAYER := {
 	"dash_speed": 250.0, "dash_time": 0.14, # the dash upgrade: how fast and how long; you cannot be hurt during it
 }
 
+## How many directions the touch stick steers in (InputFrame.stick). The keys give eight; the stick's 64 are fine
+## enough to feel like any direction, and whole numbers, so a touch run is as exact as a key run.
+const STICK_DIRECTIONS := 64
+
 ## The spark upgrade: embers the torch shoots at an enemy in its light. They fly straight and burn the first enemy
 ## they touch.
 const SPARK := { "speed": 170.0, "life": 1.2, "radius": 3.0, "damage": 1, "mouth": Vector2(0.0, -6.0) }
