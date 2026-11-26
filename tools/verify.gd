@@ -10,6 +10,7 @@ const Sprites := preload("res://src/art/sprites.gd")
 const Looks := preload("res://src/art/looks.gd")
 const RulesTest := preload("res://tools/rules_test.gd")
 const RecordsTest := preload("res://tools/records_test.gd")
+const TouchTest := preload("res://tools/touch_test.gd")
 const Ui := preload("res://src/ui.gd")
 
 
@@ -57,6 +58,13 @@ func _initialize() -> void:
 		printerr("records: " + line)
 	if records.is_empty():
 		print("records: kept best first, once per run, and read back as saved")
+	else:
+		failed = true
+	var touches: Array = TouchTest.run()
+	for line in touches:
+		printerr("touch: " + line)
+	if touches.is_empty():
+		print("touch: the stick, the buttons and the taps give the keys' actions; phones scale as chosen")
 	else:
 		failed = true
 	if not args.has("--check"):

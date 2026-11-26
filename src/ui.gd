@@ -101,6 +101,17 @@ const INTRO_KEYS := "이동 WASD · 방향키     베기 Space · J · X     돌
 const INTRO_MORE := "일시정지 P · Esc     이 설명 다시 보기 H"
 const INTRO_START := "아무 키나 눌러 시작"
 const INTRO_BACK := "아무 키나 눌러 돌아가기"
+## The same lines for a phone (src/touch.gd), shown while the touch controls are.
+const TOUCH_KEYS := "이동 왼쪽 아무 데나 끌기     베기 오른쪽 아래 칼     돌진 그 옆 (힘을 얻은 뒤)"
+const TOUCH_MORE := "일시정지 오른쪽 위 버튼"
+const TOUCH_START := "눌러서 시작"
+const TOUCH_BACK := "눌러서 돌아가기"
+const PICK_KEYS := "1 · 2 · 3 키 또는 클릭으로 고르기"
+const PICK_TOUCH := "카드를 눌러 고르기"
+const AGAIN_KEYS := "R 다시 하기"
+const AGAIN_TOUCH := "눌러서 다시 하기"
+const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
+const PAUSE_TOUCH := "눌러서 계속하기"
 const INTRO_NAME := 30.0 # the width kept for a line's name, so what follows lines up
 const INTRO_BLINK := 3.0 # radians per second the last line breathes
 const INTRO_SCRIM := 0.7
@@ -117,6 +128,10 @@ var paused := false
 var intro := false # set by main.gd: the first screen is up
 var intro_box: PanelContainer
 var intro_press: Label
+var intro_keys: Label
+var intro_more: Label
+var pause_keys: Label
+var touch := false # set by main.gd: the touch controls are showing, so the words say tap instead of keys
 
 var hint_box: PanelContainer
 var hint_icon: TextureRect
@@ -215,7 +230,6 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	for i in Config.NIGHT.offer_size:
 		offers.append(_card(i))
 	press = _label(lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
-	press.text = "1 · 2 · 3 키 또는 클릭으로 고르기"
 	foot = _label(lines, BIG, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
 	held_head = _label(lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	held_head.text = "고른 힘"
@@ -227,7 +241,6 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	lines.add_child(held_flow)
 	board = _label(lines, SMALL, CARD_TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	again = _label(lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-	again.text = "R 다시 하기"
 	box.visible = false
 
 	told_box = _panel(self)
@@ -248,8 +261,7 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	pause_box.add_child(pause_lines)
 	var pause_title := _label(pause_lines, HUGE, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
 	pause_title.text = "일시정지"
-	var pause_keys := _label(pause_lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-	pause_keys.text = "P / Esc 계속하기 · H 설명 보기"
+	pause_keys = _label(pause_lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	pause_columns = HBoxContainer.new()
 	pause_columns.add_theme_constant_override("separation", 10)
 	pause_lines.add_child(pause_columns)
@@ -272,8 +284,8 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 		line_name.text = line[1]
 		line_name.custom_minimum_size = Vector2(INTRO_NAME, 0.0)
 		_label(intro_row, SMALL, CREAM).text = line[2]
-	_label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_KEYS
-	_label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_MORE
+	intro_keys = _label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	intro_more = _label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	intro_press = _label(intro_lines, BIG, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	intro_box.visible = false
 
@@ -319,6 +331,11 @@ func set_paused(on: bool, w) -> void:
 ## Call every drawn frame.
 func frame(w, delta: float) -> void:
 	clock_time += delta
+	press.text = PICK_TOUCH if touch else PICK_KEYS
+	again.text = AGAIN_TOUCH if touch else AGAIN_KEYS
+	pause_keys.text = PAUSE_TOUCH if touch else PAUSE_KEYS
+	intro_keys.text = TOUCH_KEYS if touch else INTRO_KEYS
+	intro_more.text = TOUCH_MORE if touch else INTRO_MORE
 	_top(w, delta)
 	if intro: # the offer waits under the first screen, and is dealt once it is gone
 		box.visible = false
@@ -326,7 +343,7 @@ func frame(w, delta: float) -> void:
 		_offer(w, delta)
 	intro_box.visible = intro
 	if intro:
-		intro_press.text = INTRO_START if w.steps == 0 else INTRO_BACK
+		intro_press.text = (TOUCH_START if w.steps == 0 else TOUCH_BACK) if touch else (INTRO_START if w.steps == 0 else INTRO_BACK)
 		intro_press.modulate.a = 0.7 + 0.3 * sin(clock_time * INTRO_BLINK)
 		intro_box.reset_size()
 		intro_box.position = ((Painter.VIEW - intro_box.size) / 2.0).round()
@@ -520,11 +537,11 @@ func _cards(w, delta: float) -> void:
 		o.key_style.bg_color = CARD_EDGE.lerp(GOLD, f)
 
 
-## The card slot under the mouse, or -1.
-func _hovered(shown: Array) -> int:
+## The card slot under the mouse (or under at, a point on the screen, such as where a click or a tap landed), or -1.
+func _hovered(shown: Array, at = null) -> int:
 	if bot_slot > 0 or taken >= 0 or not row.is_visible_in_tree():
 		return -1
-	var m := row.get_local_mouse_position()
+	var m := row.get_local_mouse_position() if at == null else row.get_global_transform_with_canvas().affine_inverse() * (at as Vector2)
 	for i in shown:
 		var r := Rect2(offers[i].base, offers[i].card.size)
 		if r.has_point(m) and deal >= i * DEAL_APART + DEAL_TIME * 0.5:
@@ -540,7 +557,7 @@ func _input(event: InputEvent) -> void:
 	for i in offers.size():
 		if offers[i].card.visible:
 			shown.append(i)
-	var i := _hovered(shown)
+	var i := _hovered(shown, b.position) # a tap moves no mouse, so where it landed is the event's own place
 	if i >= 0:
 		chosen.emit(i)
 
@@ -900,14 +917,14 @@ func _label(parent: Node, size: int, colour: Color, align := HORIZONTAL_ALIGNMEN
 
 
 ## The pixel font drawn for this size (SMALL, BIG or HUGE), unsmoothed. It is read straight from its file, so the
-## game runs without the editor having imported it; an exported game has only the imported copy, which comes second.
-## Null if neither is there: the label keeps Godot's own font.
+## game runs without the editor having imported it. Each font's .import says "keep", so an export (the web build) holds
+## the file itself, unimported (export_presets.cfg also lists them). Null if it is not there: Godot's own font.
 static func font(size: int) -> Font:
 	if not _fonts.has(size):
 		var path: String = FONT_FILES[size]
 		var f := FontFile.new()
 		if f.load_dynamic_font(path) != OK:
-			f = load(path) as FontFile if ResourceLoader.exists(path) else null
+			f = null
 		if f != null:
 			f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
 			f.hinting = TextServer.HINTING_NONE

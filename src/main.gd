@@ -1,6 +1,7 @@
 ## Boot, and the only bridge between the engine and the simulation. It turns key events into InputFrames, steps the
 ## world on Godot's fixed physics tick (D5), and shows the world by reading it (D4): src/art/painter.gd paints it.
 ## Words go in Control nodes such as Label, never into the world (C1): src/ui.gd holds them all.
+## Touches become the same actions as keys in src/touch.gd, which main.gd merges in here.
 extends Node2D
 
 const World := preload("res://src/sim/world.gd")
@@ -12,6 +13,7 @@ const Records := preload("res://src/records.gd")
 const Juice := preload("res://src/art/juice.gd")
 const Sfx := preload("res://src/audio/sfx.gd")
 const Ui := preload("res://src/ui.gd")
+const Touch := preload("res://src/touch.gd")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -28,6 +30,9 @@ const TORCH_ENERGY := 1.25 # the night is nearly black, so what you see by is al
 const DAY_ENERGY := 0.3 # the torch still glows a little once the sun is up
 const FLARE_ENERGY := 0.5 # how much brighter the torch burns for a moment when it is fed
 const BOT_LOOKS := 90 # steps a demo bot leaves an offer on screen before it picks, so a person watching can read it
+## On the web, the first tap asks the browser for the whole screen held sideways (Android browsers allow it after a
+## tap; an iPhone's Safari has no such call for a page, and nothing happens).
+const FULL_SCREEN_JS := "try{var d=document.documentElement;if(d.requestFullscreen){d.requestFullscreen({navigationUI:'hide'}).then(function(){if(screen.orientation&&screen.orientation.lock){return screen.orientation.lock('landscape');}}).catch(function(){});}}catch(e){}"
 
 var world
 var painter
@@ -46,6 +51,7 @@ var sfx := {} # sound name -> its AudioStreamPlayer
 var paused := false
 var intro := false # the first screen is up (src/ui.gd): the world waits, and the next key or click takes it away
 var player_light: PointLight2D
+var touch # src/touch.gd: the stick and buttons on a phone
 
 func _ready() -> void:
 	var skip := 0
@@ -92,6 +98,25 @@ func _ready() -> void:
 	ui.setup(painter, records, overlay, bot.pick if bot != null else 0, world)
 	_set_intro(bot == null) # the demo bot starts at once
 	ui.chosen.connect(func(slot: int): pending["pick_%d" % (slot + 1)] = true)
+	var touch_layer := CanvasLayer.new()
+	touch_layer.layer = ui.layer + 1
+	add_child(touch_layer)
+	touch = Touch.new()
+	touch_layer.add_child(touch)
+	touch.pause_pressed.connect(_toggle_pause)
+	get_tree().root.size_changed.connect(_fit)
+	_fit()
+
+
+## On the web and on phones, the field keeps whole-pixel scaling unless that leaves it small (Touch.stretch_for).
+func _fit() -> void:
+	if OS.has_feature("web") or OS.has_feature("mobile"):
+		get_tree().root.content_scale_stretch = Touch.stretch_for(Vector2(get_tree().root.size))
+
+
+func _toggle_pause() -> void:
+	paused = not paused
+	ui.set_paused(paused, world)
 
 
 func _set_intro(on: bool) -> void:
@@ -105,13 +130,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if intro: # the key or click that takes the first screen away does nothing else
 		if (k != null and k.pressed and not k.echo) or (click != null and click.pressed):
 			_set_intro(false)
+			if touch.on and OS.has_feature("web"):
+				JavaScriptBridge.eval(FULL_SCREEN_JS, true)
 		return
 	if k != null and k.pressed and not k.echo and k.keycode == HELP_KEY:
 		_set_intro(true)
 		return
 	if k != null and k.pressed and not k.echo and PAUSE_KEYS.has(k.keycode):
-		paused = not paused
-		ui.set_paused(paused, world)
+		_toggle_pause()
 		return
 	if k == null or not KEYS.has(k.keycode):
 		return
@@ -127,14 +153,18 @@ func _unhandled_input(event: InputEvent) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		held.clear()
+		if touch != null:
+			touch.release()
 
 
 func _physics_process(_delta: float) -> void:
 	var f := InputFrame.new()
 	f.held = held.duplicate()
+	f.held.merge(touch.held())
+	pending.merge(touch.take())
 	f.pressed = pending
 	pending = {}
-	if paused or intro: # presses made while paused are dropped; keys still held count again once it goes on
+	if paused or intro or touch.upright(): # presses made while paused are dropped; keys still held count again once it goes on
 		return
 	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
 	juice.frame()
@@ -160,6 +190,10 @@ func _physics_process(_delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	touch.mode = "off" if intro else "paused" if paused else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
+	touch.dash_shown = world.mod("dash_every", 0.0) > 0.0
+	touch.frame(delta)
+	ui.touch = touch.on
 	ui.frame(world, delta)
 	overlay.queue_redraw() # the ui's dim, flights and flashes move on real time, also while the world is not stepped
 	var day: float = painter.daylight(world)
