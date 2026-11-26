@@ -106,6 +106,12 @@ const DASH_GHOST_GAP := 6.0
 const DASH_GHOST := Color(0.65, 0.85, 1.0, 0.45)
 const SPARK_TAIL := [[0.012, "F"], [0.024, "x"], [0.036, "X"]] # pixels behind a spark: [seconds back along its flight, colour]
 
+## An enemy faster in the dark (looks.gd's dark_glow) streaks its burning eyes behind it: this many copies, this many
+## pixels apart, the nearest this solid.
+const DARK_STREAK := 3
+const DARK_STREAK_GAP := 3.0
+const DARK_STREAK_FADE := 0.7
+
 ## How upgrades show in the world. The rest show only as their icon.
 const WARMED := Color(1.0, 0.74, 0.5) # tint of an enemy the warm glow is slowing
 const EMBERS := 14 # embers in the ember ring
@@ -198,10 +204,14 @@ func paint_overlay(c: CanvasItem, w) -> void:
 	c.draw_set_transform(shake) # what glows in the field shakes with it (main.gd moves the field); the HUD does not
 	effects.paint(c)
 	_slash(c, w)
-	for e in w.enemies:
+	for i in w.enemies.size():
+		var e = w.enemies[i]
 		var look := Looks.enemy(e.kind)
+		var at: Vector2 = e.pos + _bob(w, i, look) - look.anchor
 		if look.glow != "":
-			c.draw_texture(Sprites.texture(look.glow), (e.pos - look.anchor).round())
+			c.draw_texture(Sprites.texture(look.glow), at.round())
+		if look.dark_glow != "" and not w.in_light(e.pos):
+			_dark_glow(c, e, Sprites.texture(look.dark_glow), at)
 	c.draw_set_transform(Vector2.ZERO)
 	_hud_panels(c, w)
 	for i in w.max_hp():
@@ -403,9 +413,21 @@ func _fliers(c: CanvasItem, w) -> void:
 		var e = w.enemies[i]
 		var look := Looks.enemy(e.kind)
 		if look.flies:
-			var bob := roundf(sin((w.steps + i * 9) * 0.2))
 			var tex := Sprites.texture(Looks.frame(e.kind, w.steps, i), false, e.flash > 0.0)
-			c.draw_texture(tex, (e.pos + Vector2(0.0, bob) - look.anchor).round(), _tint(w, e, warms))
+			c.draw_texture(tex, (e.pos + _bob(w, i, look) - look.anchor).round(), _tint(w, e, warms))
+
+
+## How far a flier is lifted off its place on this step; nothing for what stands.
+static func _bob(w, i: int, look: Dictionary) -> Vector2:
+	return Vector2(0.0, roundf(sin((w.steps + i * 9) * 0.2))) if look.flies else Vector2.ZERO
+
+
+## An enemy that hunts faster in the dark: its eyes burn while it is out there, streaking behind it as it moves.
+func _dark_glow(c: CanvasItem, e, eyes: Texture2D, at: Vector2) -> void:
+	var back: Vector2 = -e.vel.normalized() if e.vel != Vector2.ZERO else Vector2.ZERO
+	for g in range(DARK_STREAK, 0, -1):
+		c.draw_texture(eyes, (at + back * DARK_STREAK_GAP * g).round(), Color(1.0, 1.0, 1.0, DARK_STREAK_FADE * (1.0 - float(g) / (DARK_STREAK + 1))))
+	c.draw_texture(eyes, at.round())
 
 
 ## False on the frames a just-hurt keeper blinks away.

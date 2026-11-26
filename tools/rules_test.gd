@@ -26,6 +26,7 @@ static func run() -> Array:
 	out.append_array(_levels())
 	out.append_array(_new_upgrades())
 	out.append_array(_rebalanced())
+	out.append_array(_dark())
 	out.append_array(_bosses())
 	out.append_array(_logs())
 	out.append_array(_nights())
@@ -327,6 +328,29 @@ static func _rebalanced() -> Array:
 		_play(w, 1)
 		var want: float = Config.TORCH.start_fuel * w.max_fuel() / Config.TORCH.max_fuel
 		_expect(out, "dawn tops the torch up to its share of the tank (big torch level %d)" % picks.size(), [is_equal_approx(w.fuel, want), w.fuel > Config.TORCH.start_fuel], [true, not picks.is_empty()])
+	return out
+
+
+## The dark is where bats hunt: out of the torch's light they fly faster, in it they keep their speed (and the warm
+## glow still slows them there). A kind without dark_speed_mult, a slime, is the same speed in both.
+static func _dark() -> Array:
+	var out := []
+	var steps := 10
+	for kind in ["bat", "slime"]:
+		var T: Dictionary = Config.ENEMY_TYPES[kind]
+		for at in [LIT, DARK]:
+			for glow in [false, true]:
+				var w = _night(at, ["warm_glow"] if glow else [])
+				# a bat starts beside the player, a slime where the player stands (and walks off to the torch)
+				var e = _add(w, kind, Vector2(20.0, 0.0) if kind == "bat" else Vector2.ZERO)
+				w.player.pos += Vector2(0.0, 40.0) if kind == "slime" else Vector2.ZERO
+				var from: Vector2 = e.pos
+				var lit: bool = at == LIT
+				_expect(out, "the %s starts %s the light" % [kind, "in" if lit else "out of"], w.in_light(from), lit)
+				_play(w, steps)
+				var mult: float = (Config.UPGRADES.warm_glow.glow_slow if glow else 1.0) if lit else T.get("dark_speed_mult", 1.0)
+				_expect(out, "a %s's speed %s the light (warm glow %s)" % [kind, "in" if lit else "out of", glow], snappedf(from.distance_to(e.pos), 0.001), snappedf(T.speed * mult * Config.STEP * steps, 0.001))
+	_expect(out, "bats are faster in the dark", Config.ENEMY_TYPES.bat.get("dark_speed_mult", 1.0) > 1.0, true)
 	return out
 
 

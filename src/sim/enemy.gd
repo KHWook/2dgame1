@@ -1,5 +1,6 @@
 ## An enemy, seen from above. Its row in Config.ENEMY_TYPES says what it goes for: the torch, to smother it; the
-## player, to hurt them; or a log, to carry it off the field. It gets knocked back when hit.
+## player, to hurt them; or a log, to carry it off the field. It gets knocked back when hit. In the torch's light
+## the warm glow slows it; out of it, a kind with dark_speed_mult hunts faster.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -33,7 +34,7 @@ func step(world) -> void:
 	var stop: float = Config.TORCH.reach + T.radius if T.target == "torch" else 0.0
 	var to := _goal(world) - pos
 	at_torch = T.target == "torch" and to.length() <= stop
-	var speed: float = T.speed * (world.mod("glow_slow", 1.0) if world.in_light(pos) else 1.0)
+	var speed: float = T.speed * (world.mod("glow_slow", 1.0) if world.in_light(pos) else T.get("dark_speed_mult", 1.0))
 	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if at_torch else to.normalized() * speed)
 	knock *= pow(E.knock_decay, Config.STEP)
 	if knock.length() < E.knock_stop:

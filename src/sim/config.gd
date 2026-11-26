@@ -67,10 +67,11 @@ const ENEMY := {
 ## Optional: smother (how many slimes it counts as at the torch), split_count and splits_into (what it breaks into
 ## when it dies), dark_proof (blows pass through it outside the torch's light), harmless (touching it does not hurt),
 ## boss (comes on boss nights only, see BOSS; name is what the screen calls it), heavy (share of a blow's knockback it
-## takes), summon (every so many seconds it calls count enemies of kind around itself), score (worth more than a kill).
+## takes), summon (every so many seconds it calls count enemies of kind around itself), score (worth more than a kill),
+## dark_speed_mult (how much faster it moves outside the torch's light: the dark is where it hunts).
 const ENEMY_TYPES := {
 	"slime": { "hp": 2, "speed": 16.0, "radius": 7.0, "target": "torch" },
-	"bat": { "hp": 1, "speed": 32.0, "radius": 5.0, "target": "player" },
+	"bat": { "hp": 1, "speed": 26.0, "radius": 5.0, "target": "player", "dark_speed_mult": 1.5 },
 	"shade": { "hp": 2, "speed": 24.0, "radius": 6.0, "target": "player", "dark_proof": true },
 	"big_slime": { "hp": 5, "speed": 10.0, "radius": 10.0, "target": "torch", "smother": 2.0, "split_count": 2, "splits_into": "slime" },
 	"thief": { "hp": 1, "speed": 40.0, "radius": 6.0, "target": "log", "harmless": true },
