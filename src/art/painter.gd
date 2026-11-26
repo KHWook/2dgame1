@@ -8,6 +8,7 @@ const Sprites := preload("res://src/art/sprites.gd")
 const SimRng := preload("res://src/sim/rng.gd")
 const Effects := preload("res://src/art/effects.gd")
 const Looks := preload("res://src/art/looks.gd")
+const Juice := preload("res://src/art/juice.gd")
 const T := Config.TORCH
 
 const VIEW: Vector2 = Config.VIEW
@@ -105,6 +106,44 @@ const DASH_GHOST_GAP := 6.0
 const DASH_GHOST := Color(0.65, 0.85, 1.0, 0.45)
 const SPARK_TAIL := [[0.012, "F"], [0.024, "x"], [0.036, "X"]] # pixels behind a spark: [seconds back along its flight, colour]
 
+## An enemy faster in the dark (looks.gd's dark_glow) streaks its burning eyes behind it: this many copies, this many
+## pixels apart, the nearest this solid.
+const DARK_STREAK := 3
+const DARK_STREAK_GAP := 3.0
+const DARK_STREAK_FADE := 0.7
+
+## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing: a ring at the shock
+## that fills in as the landing nears, blinking, with the king crouched and flashing while it waits and lifted off
+## its shadow in the air. The shade lord, about to rush, flashes and lays a dashed line from itself to the torch.
+const MARK := "i" # PALETTE key of the marked landing and the rush line
+const MARK_FILL := 0.35 # how solid the ring's inside is the moment it lands
+const MARK_BLINK_STEPS := 4
+const LEAP_HEIGHT := 26.0 # pixels the king rises at the top of its leap
+const RUSH_DASH := 4.0 # pixels per dash of the rush line, and per gap
+## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) with
+## its line drawn to where the charge would end, an arrowhead there; dazed after, stars turn over its head.
+const CHARGE_HEAD := 5.0 # pixels from the arrowhead's tip to its back
+const PAW_STEPS := 3 # simulation steps per shuffle while it paws
+const DAZED_AT := Vector2(-3.0, -13.0) # the stars' top-left, from the charger's position
+const DAZED_STEPS := 8 # simulation steps per turn of the stars
+## A boss on its way: Config.BOSS.warn seconds ahead, the edge it comes from glows and an arrow there points out at it.
+const COMING_BAND := Vector2(70.0, 4.0) # along the edge, into the field
+const COMING_ARROW := 7.0 # pixels from the arrow's tip to its back
+const COMING_IN := 12.0 # from the edge to the arrow's tip
+const COMING_BLINK_STEPS := 8
+## An enemy coming in from beyond the field (under the treetops, or not yet on screen): a small arrow on that edge,
+## inside the treetops, points out at it until it is on the field.
+const EDGE_ARROW := 4.0 # pixels from the tip to the back
+const EDGE_ARROW_IN := 11.0 # from the screen edge to the tip
+const EDGE_ARROW_COLOUR := "W"
+const EDGE_ARROW_ALPHA := 0.75
+
+## The dash upgrade's cooldown: a bar under the keeper that fills while the dash is not ready, gone once it is; the
+## dash icon in the HUD is shaded over the share still to wait.
+const DASH_BAR := Rect2(-5.0, 8.0, 10.0, 2.0) # from the keeper's position: just under its feet
+const DASH_BAR_COLOUR := "l"
+const ICON_WAIT := Color(0.0, 0.0, 0.0, 0.6)
+
 ## How upgrades show in the world. The rest show only as their icon.
 const WARMED := Color(1.0, 0.74, 0.5) # tint of an enemy the warm glow is slowing
 const EMBERS := 14 # embers in the ember ring
@@ -117,6 +156,7 @@ var effects # short-lived pictures that answer what happens in the world
 var scenery: Array = [] # [texture, top-left]
 var clearing: Texture2D
 var hedges := {} # side -> texture: the treetops along each screen edge
+var shake := Vector2.ZERO # set by main.gd: how far the field is drawn off its place right now (src/art/juice.gd)
 
 
 ## The ground is laid out from the night's seed with its own generator, so it never draws from world.rng.
@@ -169,6 +209,7 @@ func sky(w) -> Color:
 
 
 func paint(c: CanvasItem, w) -> void:
+	c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"]) # the hedge goes on past the view, for a shake
 	c.draw_rect(Rect2(Vector2.ZERO, VIEW), GROUND)
 	c.draw_texture(clearing, (T.pos + CLEARING_DROP - Vector2(CLEARING) / 2.0).round())
 	for s in scenery:
@@ -192,12 +233,24 @@ func paint(c: CanvasItem, w) -> void:
 
 
 func paint_overlay(c: CanvasItem, w) -> void:
+	c.draw_set_transform(shake) # what glows in the field shakes with it (main.gd moves the field); the HUD does not
+	_telegraphs(c, w)
 	effects.paint(c)
 	_slash(c, w)
-	for e in w.enemies:
+	for i in w.enemies.size():
+		var e = w.enemies[i]
 		var look := Looks.enemy(e.kind)
+		var at: Vector2 = e.pos + _bob(w, i, look) + _lift(e) - look.anchor
 		if look.glow != "":
-			c.draw_texture(Sprites.texture(look.glow), (e.pos - look.anchor).round())
+			c.draw_texture(Sprites.texture(look.glow), at.round())
+		if look.dark_glow != "" and not w.in_light(e.pos):
+			_dark_glow(c, e, Sprites.texture(look.dark_glow), at)
+		if e.move == "rest":
+			var stars := Sprites.texture("dazed", (w.steps / DAZED_STEPS) % 2 == 1)
+			c.draw_texture(stars, (e.pos + DAZED_AT).round())
+	_dash_bar(c, w)
+	c.draw_set_transform(Vector2.ZERO)
+	_edge_arrows(c, w)
 	_hud_panels(c, w)
 	for i in w.max_hp():
 		c.draw_texture(Sprites.texture("heart" if i < w.player.hp else "heart_empty"), HUD_HEARTS + Vector2(i * HUD_HEART_STEP, 0.0))
@@ -215,10 +268,14 @@ func paint_overlay(c: CanvasItem, w) -> void:
 	for i in ids.size():
 		var at := _pick_at(i)
 		c.draw_texture(icon(ids[i]), at)
+		if ids[i] == "dash" and w.player.dash_wait > 0.0: # shaded over the share of the wait still to go
+			var left: float = w.player.dash_wait / w.mod("dash_every", 1.0)
+			c.draw_rect(Rect2(at, Vector2(ICON_SIZE, ceilf(ICON_SIZE * left))), ICON_WAIT)
 		var n: int = w.level(ids[i])
 		for d in n if n > 1 else 0: # one pip per level once there is more than one
 			c.draw_rect(Rect2(at + HUD_LEVEL + Vector2(d * HUD_LEVEL_STEP, 0.0), HUD_LEVEL_PIP), Sprites.PALETTE["Y"])
 	_sparks(c, w)
+	_coming(c, w)
 	_boss_bar(c, w)
 	_night_bar(c, w)
 
@@ -369,7 +426,9 @@ func _standing(w) -> Array:
 		var look := Looks.enemy(e.kind)
 		if look.flies:
 			continue
-		_put(out, e.pos.y + 4.0, Looks.frame(e.kind, w.steps, i), e.pos, look.anchor, look.turns and e.vel.x < 0.0, e.flash > 0.0, _tint(w, e, warms))
+		var white: bool = e.flash > 0.0 or (e.move == "warn" and (w.steps / MARK_BLINK_STEPS) % 2 == 0)
+		var heading: Vector2 = e.aim if e.move in ["warn", "charge", "rest"] else e.vel
+		_put(out, e.pos.y + 4.0, Looks.frame(e.kind, w.steps, i), e.pos + _lift(e) + _paw(w, e), look.anchor, look.turns and heading.x < 0.0, white, _tint(w, e, warms))
 		if e.carrying:
 			_put(out, e.pos.y + 4.1, "log", e.pos + THIEF_CARRY, LOG_ANCHOR)
 	if p.dead:
@@ -391,6 +450,108 @@ func _standing(w) -> Array:
 	return out
 
 
+## How far a leaping boss is lifted off the ground (and off its shadow) right now.
+static func _lift(e) -> Vector2:
+	if e.move != "air":
+		return Vector2.ZERO
+	var k: float = clampf(1.0 - e.move_t / e.T.leap.air, 0.0, 1.0)
+	return Vector2(0.0, -roundf(sin(k * PI) * LEAP_HEIGHT))
+
+
+## Where a boss is about to strike: the slime king's marked landing, the shade lord's line to the torch.
+func _telegraphs(c: CanvasItem, w) -> void:
+	var colour: Color = Sprites.PALETTE[MARK]
+	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
+	for e in w.enemies:
+		if e.T.has("leap") and e.move in ["warn", "air"]:
+			var L: Dictionary = e.T.leap
+			var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
+			var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
+			var at: Vector2 = e.move_to.round()
+			c.draw_circle(at, L.shock, Color(colour, MARK_FILL * k))
+			c.draw_arc(at, L.shock, 0.0, TAU, 32, Color(colour, 1.0 if blink else 0.6), 1.0)
+			c.draw_arc(at, L.shock * (1.0 - k), 0.0, TAU, 24, Color(colour, 0.8), 1.0) # closes in on the edge as it falls
+		elif e.T.has("lunge") and e.move == "warn":
+			_dashes(c, e.pos, e.move_to, Color(colour, 0.9 if blink else 0.5))
+		elif e.T.has("charge") and e.move == "warn":
+			var end: Vector2 = e.move_to.clamp(Config.FIELD.position, Config.FIELD.end) # it stops at the trees
+			_dashes(c, e.pos + e.aim * e.T.radius, end, Color(colour, 0.9 if blink else 0.5))
+			var side: Vector2 = e.aim.orthogonal() * CHARGE_HEAD * 0.7
+			var back: Vector2 = end - e.aim * CHARGE_HEAD
+			c.draw_colored_polygon(PackedVector2Array([end.round(), (back + side).round(), (back - side).round()]), Color(colour, 1.0 if blink else 0.6))
+
+
+## A dashed line from a to b.
+static func _dashes(c: CanvasItem, a: Vector2, b: Vector2, colour: Color) -> void:
+	var to: Vector2 = b - a
+	for d in int(to.length() / (RUSH_DASH * 2.0)):
+		var from: Vector2 = a + to.normalized() * RUSH_DASH * 2.0 * d
+		c.draw_line(from.round(), (from + to.normalized() * RUSH_DASH).round(), colour, 1.0)
+
+
+## A charger pawing the ground before it charges shuffles a pixel back and forth along its line.
+static func _paw(w, e) -> Vector2:
+	if e.move != "warn" or not e.T.has("charge"):
+		return Vector2.ZERO
+	return (e.aim * (1.0 if (w.steps / PAW_STEPS) % 2 == 0 else -1.0)).round()
+
+
+## Enemies beyond the field, coming in: a small arrow on their edge, pointing out at each, so you see where they come
+## from before they step out of the trees. One leaving the field (a thief with a log) gets none.
+func _edge_arrows(c: CanvasItem, w) -> void:
+	if w.phase != "night":
+		return
+	var f: Rect2 = Config.FIELD
+	var lo := Vector2(EDGE_ARROW_IN, EDGE_ARROW_IN)
+	for e in w.enemies:
+		if f.has_point(e.pos) or e.carrying or e.move == "air":
+			continue
+		var out := Vector2(1.0 if e.pos.x > f.end.x else (-1.0 if e.pos.x < f.position.x else 0.0),
+			1.0 if e.pos.y > f.end.y else (-1.0 if e.pos.y < f.position.y else 0.0)).normalized()
+		var tip: Vector2 = e.pos.clamp(lo, VIEW - lo)
+		var back: Vector2 = tip - out * EDGE_ARROW
+		var side: Vector2 = out.orthogonal() * EDGE_ARROW * 0.75
+		var arrow := PackedVector2Array([tip.round(), (back + side).round(), (back - side).round()])
+		c.draw_colored_polygon(arrow, Color(Sprites.PALETTE[EDGE_ARROW_COLOUR], EDGE_ARROW_ALPHA))
+		c.draw_polyline(PackedVector2Array([arrow[0], arrow[1], arrow[2], arrow[0]]), Color(Sprites.PALETTE["k"], EDGE_ARROW_ALPHA), 1.0)
+
+
+## The dash's cooldown under the keeper, while it is not ready.
+func _dash_bar(c: CanvasItem, w) -> void:
+	var p = w.player
+	var every: float = w.mod("dash_every", 0.0)
+	if every <= 0.0 or p.dash_wait <= 0.0 or p.dead or w.phase != "night":
+		return
+	var bar := Rect2((p.pos + DASH_BAR.position).round(), DASH_BAR.size)
+	c.draw_rect(bar.grow(1.0), Sprites.PALETTE["k"])
+	c.draw_rect(Rect2(bar.position, Vector2(ceilf(bar.size.x * (1.0 - p.dash_wait / every)), bar.size.y)), Sprites.PALETTE[DASH_BAR_COLOUR])
+
+
+## A boss on its way: the edge it will come from glows and an arrow points at it, blinking.
+func _coming(c: CanvasItem, w) -> void:
+	if w.boss_from == null or w.phase != "night":
+		return
+	var f: Vector2 = w.boss_from
+	var out := Vector2.ZERO # which edge: the one it is past
+	if f.x < Config.FIELD.position.x: out = Vector2.LEFT
+	elif f.x > Config.FIELD.end.x: out = Vector2.RIGHT
+	elif f.y < Config.FIELD.position.y: out = Vector2.UP
+	else: out = Vector2.DOWN
+	var spot: Vector2 = f.clamp(Vector2.ZERO, VIEW)
+	var on: bool = (w.steps / COMING_BLINK_STEPS) % 2 == 0
+	var colour: Color = Sprites.PALETTE[MARK]
+	var band_size := COMING_BAND if out.y != 0.0 else Vector2(COMING_BAND.y, COMING_BAND.x)
+	var band_at := spot - band_size / 2.0 - out * band_size / 2.0
+	var band := Rect2(band_at, band_size).intersection(Rect2(Vector2.ZERO, VIEW))
+	c.draw_rect(band, Color(colour, 0.85 if on else 0.4))
+	var tip: Vector2 = (spot - out * COMING_IN).clamp(Vector2(COMING_IN, COMING_IN), VIEW - Vector2(COMING_IN, COMING_IN))
+	var back: Vector2 = tip - out * COMING_ARROW
+	var side: Vector2 = out.orthogonal() * COMING_ARROW * 0.7
+	var arrow := PackedVector2Array([tip.round(), (back + side).round(), (back - side).round()])
+	c.draw_colored_polygon(arrow, Color(colour, 1.0 if on else 0.6))
+	c.draw_polyline(PackedVector2Array([arrow[0], arrow[1], arrow[2], arrow[0]]), Sprites.PALETTE["k"], 1.0)
+
+
 ## What flies is painted above everything that stands, bobbing.
 func _fliers(c: CanvasItem, w) -> void:
 	var warms := _warms(w)
@@ -398,9 +559,21 @@ func _fliers(c: CanvasItem, w) -> void:
 		var e = w.enemies[i]
 		var look := Looks.enemy(e.kind)
 		if look.flies:
-			var bob := roundf(sin((w.steps + i * 9) * 0.2))
 			var tex := Sprites.texture(Looks.frame(e.kind, w.steps, i), false, e.flash > 0.0)
-			c.draw_texture(tex, (e.pos + Vector2(0.0, bob) - look.anchor).round(), _tint(w, e, warms))
+			c.draw_texture(tex, (e.pos + _bob(w, i, look) - look.anchor).round(), _tint(w, e, warms))
+
+
+## How far a flier is lifted off its place on this step; nothing for what stands.
+static func _bob(w, i: int, look: Dictionary) -> Vector2:
+	return Vector2(0.0, roundf(sin((w.steps + i * 9) * 0.2))) if look.flies else Vector2.ZERO
+
+
+## An enemy that hunts faster in the dark: its eyes burn while it is out there, streaking behind it as it moves.
+func _dark_glow(c: CanvasItem, e, eyes: Texture2D, at: Vector2) -> void:
+	var back: Vector2 = -e.vel.normalized() if e.vel != Vector2.ZERO else Vector2.ZERO
+	for g in range(DARK_STREAK, 0, -1):
+		c.draw_texture(eyes, (at + back * DARK_STREAK_GAP * g).round(), Color(1.0, 1.0, 1.0, DARK_STREAK_FADE * (1.0 - float(g) / (DARK_STREAK + 1))))
+	c.draw_texture(eyes, at.round())
 
 
 ## False on the frames a just-hurt keeper blinks away.

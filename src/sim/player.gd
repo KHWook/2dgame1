@@ -38,7 +38,8 @@ func step(world, inp) -> void:
 			(1.0 if inp.is_held("right") else 0.0) - (1.0 if inp.is_held("left") else 0.0),
 			(1.0 if inp.is_held("down") else 0.0) - (1.0 if inp.is_held("up") else 0.0)).normalized()
 		var slow: bool = carrying and not world.mod("carry_full", false)
-		vel = dir * (P.carry_speed if slow else P.speed)
+		var lit: float = world.mod("lit_speed_mult", 1.0) if world.in_light(pos) else 1.0 # the bright fire upgrade
+		vel = dir * (P.carry_speed if slow else P.speed) * lit
 		if dir != Vector2.ZERO and attack_t < 0.0:
 			face = dir
 		var every: float = world.mod("dash_every", 0.0)
