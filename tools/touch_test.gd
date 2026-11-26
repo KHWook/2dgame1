@@ -1,7 +1,8 @@
 ## The touch controls (src/touch.gd) give the actions they claim: the stick's eight directions and dead zone, the ring
 ## following the thumb, the sword held while a second thumb steers, each tap pressed once (D6), dash only with the
-## upgrade, nothing steered while the cards are up, the tap that restarts only after the end has shown a moment, a key
-## press hiding it all, and the scaling chosen for common phone screens.
+## upgrade, nothing steered while the cards are up, the tap that restarts only after the end has shown a moment, the
+## "?" button bringing the start screen back (as H does) while playing or paused, a key press hiding it all, and the
+## scaling chosen for common phone screens.
 extends RefCounted
 
 const Touch := preload("res://src/touch.gd")
@@ -15,6 +16,7 @@ static func run() -> Array:
 	out.append_array(_stick())
 	out.append_array(_buttons())
 	out.append_array(_modes())
+	out.append_array(_help())
 	out.append_array(_scaling())
 	return out
 
@@ -160,6 +162,52 @@ static func _modes() -> Array:
 		out.append("a key press does not hide the touch controls")
 	if not _held(t).is_empty():
 		out.append("the touch controls hold actions after a key press hid them")
+	t.free()
+	return out
+
+
+## The "?" button: the start screen again when the tap is lifted on it, while playing or on the pause screen (where
+## it does not also go on), not while the cards are up or the end shows; it holds no action and is not the pause button.
+static func _help() -> Array:
+	var out := []
+	var t = _fresh()
+	var helped := [0]
+	var paused := [0]
+	t.help_pressed.connect(func(): helped[0] += 1)
+	t.pause_pressed.connect(func(): paused[0] += 1)
+	if Touch.HELP.distance_to(Touch.PAUSE) <= Touch.HELP_REACH + Touch.PAUSE_REACH:
+		out.append("a tap can reach both the \"?\" and the pause button")
+	_touch(t, 0, Touch.HELP + Vector2(3.0, 3.0))
+	if helped[0] != 0:
+		out.append("the \"?\" button answers as it is touched, so the same tap's click would close the start screen again")
+	t.frame(0.1)
+	_touch(t, 0, Touch.HELP, false)
+	if helped[0] != 1:
+		out.append("lifting a tap on the \"?\" button does not bring the start screen back")
+	if paused[0] != 0 or not t.take().is_empty() or not _held(t).is_empty():
+		out.append("the \"?\" button also pauses or gives an action")
+	_touch(t, 0, Touch.HELP)
+	_touch(t, 0, Touch.HELP + Vector2(0.0, 40.0), false)
+	if helped[0] != 1:
+		out.append("a tap that slid off the \"?\" button before lifting still brings the start screen back")
+	t.mode = "paused"
+	_touch(t, 0, Touch.HELP)
+	t.frame(0.1)
+	_touch(t, 0, Touch.HELP, false)
+	if helped[0] != 2 or paused[0] != 0:
+		out.append("on the pause screen the \"?\" button does not bring the start screen back, or also goes on")
+	_touch(t, 0, Touch.PAUSE)
+	_touch(t, 0, Touch.PAUSE, false)
+	if helped[0] != 2 or paused[0] != 1:
+		out.append("the pause button on the pause screen does not go on, or brings the start screen back")
+	for mode in ["pick", "ended", "off"]:
+		t.mode = mode
+		t.frame(0.1)
+		_touch(t, 0, Touch.HELP)
+		_touch(t, 0, Touch.HELP, false)
+		if helped[0] != 2:
+			out.append("the \"?\" button answers while %s" % mode)
+		helped[0] = 2
 	t.free()
 	return out
 

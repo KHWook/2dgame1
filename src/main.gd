@@ -107,6 +107,7 @@ func _ready() -> void:
 	touch = Touch.new()
 	touch_layer.add_child(touch)
 	touch.pause_pressed.connect(_toggle_pause)
+	touch.help_pressed.connect(func(): _set_intro(true)) # the H key's touch: over the pause screen too, as H is
 	get_tree().root.size_changed.connect(_fit)
 	_fit()
 
