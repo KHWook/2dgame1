@@ -41,7 +41,7 @@ Godot 내장 물리(`CharacterBody2D`, `move_and_slide`)는 게임 규칙에 쓰
 | C5 | 꼼수를 정당화하는 주석 금지(`hack`, `for now`, `workaround`…) | check C5 |
 | N1 | 튜닝 숫자는 `src/sim/config.gd`의 표에 둔다 | 글. 검사 후보 |
 | A1 | 스프라이트 격자는 줄 너비가 같고 모든 글자가 `PALETTE`에 있다 | `Sprites.problems()` (`./verify`) |
-| A2 | 규칙 데이터가 이름으로 찾는 스프라이트(적 종류마다 `<종류>_a`·`<종류>_b`, 강화마다 `icon_<id>`)는 전부 그려져 있고, 적 종류마다 첫 등장 안내(`Looks.HINTS`)가 있다 | `Looks.problems()` (`./verify`) |
+| A2 | 규칙 데이터가 이름으로 찾는 스프라이트(적 종류마다 `<종류>_a`·`<종류>_b`, 강화마다 `icon_<id>`)는 전부 그려져 있고, 적 종류마다 첫 등장 안내(`Looks.HINTS`)가 있고, 빛 밖에서 보일 것(`glow`, `dark_glow`, `in_dark`)이 있다 | `Looks.problems()` (`./verify`) |
 | A3 | 화면에 쓰는 글자(`src/`의 문자열에서 ASCII가 아닌 것)는 전부 픽셀 폰트(`assets/fonts/`, 한글에 필요한 만큼 잘라 넣음)에 있다. 다른 폰트로 대신 그려지는 글자가 없게 | `ui.gd`의 `font_problems()` (`./verify`의 fonts 줄, 자체 bad/good 포함) |
 | R1 | 적 종류·강화·줍는 것을 더하면 그 규칙을 보여 주는 장면을 `tools/rules_test.gd`에 더한다 | 장면 테스트(`./verify`) + 글 |
 | B1 | `src/`와 `tools/`의 스크립트는 전부 컴파일된다. 리플레이가 부르지 않는 화면 쪽 스크립트도 포함 | check B1 |

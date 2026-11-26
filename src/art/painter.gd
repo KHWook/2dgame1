@@ -13,7 +13,7 @@ const T := Config.TORCH
 
 const VIEW: Vector2 = Config.VIEW
 const GROUND := Color("#33523b")
-const NIGHT := Color("#8580b8")
+const NIGHT := Color("#15132a") # what the night leaves of every colour out of the light: next to nothing
 const DAWN := Color("#ffe9cf")
 const DAWN_FROM := 0.85 # the sky starts to lighten at this share of the night
 const DUSK_TIME := 2.5 # seconds the day takes to fade once a night begins
@@ -133,6 +133,22 @@ const DARK_STREAK := 3
 const DARK_STREAK_GAP := 3.0
 const DARK_STREAK_FADE := 0.7
 
+## The torch's light, as main.gd's lights show it: full at the torch and falling away to nothing at the edge, which is
+## exactly world.light_radius() out at its furthest. The edge is a ring of tongues, and two such rings turn against
+## each other, so it wavers like a flame without ever reaching past the radius the rules use. The whole light also
+## flickers a little.
+const LIGHT_SIZE := 128 # pixels across the light's picture
+const LIGHT_FALL := 2.0 # how late the light falls off toward its edge: 1 is a straight slope
+const LIGHT_RINGS := [[5, 0.45], [7, -0.3]] # [tongues round the edge, radians per second the ring turns]
+const LIGHT_LICK := 0.1 # how far in from the radius the edge dips between two tongues, as a share of it
+const LIGHT_FLICKER := [[0.37, 0.04], [0.83, 0.03]] # [radians per step, share of the brightness] added up
+## What stands in the light throws a long shadow away from the torch: its own shape laid on the ground from its
+## feet, longer the further out it stands, gone at the edge of the light, where everything is dark anyway.
+const CAST := Color(0.02, 0.01, 0.06, 0.5)
+const CAST_LENGTH := [0.9, 2.4] # times the thing's height: at the torch, at the edge of the light
+const CAST_FADE := [0.75, 1.1] # it fades out between these shares of the light's radius
+const CAST_NEAR := 6.0 # pixels: closer to the torch than this the shadow has no direction, so none is thrown
+
 ## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing: a ring at the shock
 ## that fills in as the landing nears, blinking, with the king crouched and flashing while it waits and lifted off
 ## its shadow in the air. The shade lord, about to rush, flashes and lays a dashed line from itself to the torch.
@@ -233,6 +249,31 @@ func sky(w) -> Color:
 	return NIGHT.lerp(DAWN, daylight(w))
 
 
+## The picture of a light: a round one, or with tongues round its edge that dip in by lick (a share of the radius).
+static func light_image(tongues := 0, lick := 0.0) -> Image:
+	var img := Image.create_empty(LIGHT_SIZE, LIGHT_SIZE, false, Image.FORMAT_RGBA8)
+	var mid := Vector2(LIGHT_SIZE, LIGHT_SIZE) / 2.0
+	for y in LIGHT_SIZE:
+		for x in LIGHT_SIZE:
+			var d := (Vector2(x, y) + Vector2(0.5, 0.5) - mid) / mid
+			var edge := 1.0 - lick * (0.5 + 0.5 * sin(d.angle() * tongues))
+			img.set_pixel(x, y, Color(1.0, 1.0, 1.0, 1.0 - pow(minf(d.length() / edge, 1.0), LIGHT_FALL)))
+	return img
+
+
+## How far ring i of the torch's light has turned by now, in radians.
+static func light_turn(w, i: int) -> float:
+	return w.steps * Config.STEP * LIGHT_RINGS[i][1]
+
+
+## How bright the flame is on this step, around 1.
+static func flicker(w) -> float:
+	var out := 1.0
+	for f in LIGHT_FLICKER:
+		out += sin(w.steps * f[0]) * f[1]
+	return out
+
+
 func paint(c: CanvasItem, w) -> void:
 	c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"]) # the hedge goes on past the view, for a shake
 	c.draw_rect(Rect2(Vector2.ZERO, VIEW), GROUND)
@@ -270,6 +311,9 @@ func paint_overlay(c: CanvasItem, w) -> void:
 			c.draw_texture(Sprites.texture(look.glow), at.round())
 		if look.dark_glow != "" and not w.in_light(e.pos):
 			_dark_glow(c, e, Sprites.texture(look.dark_glow), at)
+		if not look.in_dark.is_empty() and not w.in_light(e.pos): # its eyes, on the frame and facing it is drawn in
+			var eyes := Sprites.only(Looks.frame(e.kind, w.steps, i), look.in_dark[0], _turned(e, look))
+			c.draw_texture(eyes, (at + _paw(w, e)).round(), Color(Sprites.PALETTE[look.in_dark[1]], 1.0 - daylight(w)))
 		if e.move == "rest":
 			var stars := Sprites.texture("dazed", (w.steps / DAZED_STEPS) % 2 == 1)
 			c.draw_texture(stars, (e.pos + DAZED_AT).round())
@@ -472,11 +516,33 @@ func _boss_bar(c: CanvasItem, w) -> void:
 
 
 func _shadows(c: CanvasItem, w) -> void:
-	for e in w.enemies:
+	for i in w.enemies.size():
+		var e = w.enemies[i]
 		var look := Looks.enemy(e.kind)
 		c.draw_texture(Sprites.texture(look.shadow), (e.pos + look.shadow_at).round())
+		if not look.flies and e.move != "air":
+			_cast(c, w, Looks.frame(e.kind, w.steps, i), _turned(e, look), e.pos, look.anchor)
 	if _keeper_shows(w) and not w.player.dead:
 		c.draw_texture(Sprites.texture("shadow"), (w.player.pos + SHADOW).round())
+		var keeper := _keeper(w)
+		_cast(c, w, keeper[0], keeper[1], w.player.pos, BODY)
+
+
+## The long shadow the torch throws behind one standing thing: its sprite, dark, turned to lie away from the torch
+## with its feet where they are drawn. anchor is the pixel of the sprite that sits on pos.
+func _cast(c: CanvasItem, w, sprite: String, flip: bool, pos: Vector2, anchor: Vector2) -> void:
+	var from: Vector2 = pos - T.pos
+	var share: float = from.length() / w.light_radius()
+	var alpha: float = CAST.a * (1.0 - daylight(w)) * (1.0 - smoothstep(CAST_FADE[0], CAST_FADE[1], share))
+	if w.fuel <= 0.0 or alpha <= 0.0 or from.length() < CAST_NEAR:
+		return
+	var away := from.normalized()
+	var length: float = lerpf(CAST_LENGTH[0], CAST_LENGTH[1], clampf(share, 0.0, 1.0))
+	var foot := float(Sprites.foot(sprite))
+	var feet := pos + Vector2(0.0, foot - 1.0 - anchor.y)
+	c.draw_set_transform_matrix(Transform2D(away.rotated(PI / 2.0), -away * length, feet.round()))
+	c.draw_texture(Sprites.texture(sprite, flip), Vector2(-anchor.x, -foot), Color(CAST, alpha))
+	c.draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
 ## The ember ring upgrade: embers on the ground around the torch at the distance it burns, flaring each time it does.
@@ -529,8 +595,7 @@ func _standing(w) -> Array:
 		if look.flies:
 			continue
 		var white: bool = e.flash > 0.0 or (e.move == "warn" and (w.steps / MARK_BLINK_STEPS) % 2 == 0)
-		var heading: Vector2 = e.aim if e.move in ["warn", "charge", "rest"] else e.vel
-		_put(out, e.pos.y + 4.0, Looks.frame(e.kind, w.steps, i), e.pos + _lift(e) + _paw(w, e), look.anchor, look.turns and heading.x < 0.0, white, _tint(w, e, warms))
+		_put(out, e.pos.y + 4.0, Looks.frame(e.kind, w.steps, i), e.pos + _lift(e) + _paw(w, e), look.anchor, _turned(e, look), white, _tint(w, e, warms))
 		if e.carrying:
 			_put(out, e.pos.y + 4.1, "log", e.pos + THIEF_CARRY, LOG_ANCHOR)
 	if p.dead:
@@ -550,6 +615,12 @@ func _standing(w) -> Array:
 			var behind: bool = sin(_blade(w)[1]) < BEHIND
 			out.append([p.pos.y + (4.9 if behind else 5.2), null]) # the sword: paint() draws it at this depth
 	return out
+
+
+## Whether an enemy is drawn mirrored: one that turns, heading left (or lined up that way to charge).
+static func _turned(e, look: Dictionary) -> bool:
+	var heading: Vector2 = e.aim if e.move in ["warn", "charge", "rest"] else e.vel
+	return look.turns and heading.x < 0.0
 
 
 ## How far a leaping boss is lifted off the ground (and off its shadow) right now.

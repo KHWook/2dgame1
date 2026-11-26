@@ -23,11 +23,11 @@ const KEYS := {
 const PAUSE_KEYS := [KEY_P, KEY_ESCAPE]
 const SFX_DB := -12.0 # how loud the sound effects play: under the player's own music, if any
 const TORCH_LIGHT := Color("#ffcf8a")
-const TORCH_ENERGY := 1.0
+const TORCH_ENERGY := 1.25 # the night is nearly black, so what you see by is all the torch's
 const DAY_ENERGY := 0.3 # the torch still glows a little once the sun is up
 const FLARE_ENERGY := 0.5 # how much brighter the torch burns for a moment when it is fed
 const KEEPER_ENERGY := 0.45 # the keeper's own small glow, so you can see yourself out in the dark
-const KEEPER_GLOW := 0.35 # its size, as a scale of the 128px glow texture
+const KEEPER_GLOW := 0.35 # its size, as a scale of the light's picture (Painter.LIGHT_SIZE)
 const BOT_LOOKS := 90 # steps a demo bot leaves an offer on screen before it picks, so a person watching can read it
 
 var world
@@ -41,7 +41,7 @@ var overlay: Node2D # above the night and the lights: what glows by itself, and 
 var ui # src/ui.gd: every word on screen, and the offer cards
 var records # src/records.gd: the best runs on disk
 var seed_value := 1
-var torch_light: PointLight2D
+var torch_lights: Array = [] # one PointLight2D per ring of tongues (Painter.LIGHT_RINGS), turning against each other
 var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step made
 var sfx := {} # sound name -> its AudioStreamPlayer
 var paused := false
@@ -74,21 +74,14 @@ func _ready() -> void:
 		sfx[name] = player
 	sky = CanvasModulate.new()
 	add_child(sky)
-	var glow := GradientTexture2D.new()
-	glow.fill = GradientTexture2D.FILL_RADIAL
-	glow.fill_from = Vector2(0.5, 0.5)
-	glow.fill_to = Vector2(1.0, 0.5)
-	glow.width = 128
-	glow.height = 128
-	var g := Gradient.new()
-	g.set_color(0, Color.WHITE)
-	g.set_color(1, Color(1, 1, 1, 0))
-	glow.gradient = g
-	torch_light = PointLight2D.new()
-	torch_light.texture = glow
-	torch_light.color = TORCH_LIGHT
-	torch_light.position = Config.TORCH.pos
-	add_child(torch_light)
+	for ring in Painter.LIGHT_RINGS:
+		var light := PointLight2D.new()
+		light.texture = ImageTexture.create_from_image(Painter.light_image(ring[0], Painter.LIGHT_LICK))
+		light.color = TORCH_LIGHT
+		light.position = Config.TORCH.pos
+		add_child(light)
+		torch_lights.append(light)
+	var glow := ImageTexture.create_from_image(Painter.light_image())
 	player_light = PointLight2D.new()
 	player_light.texture = glow
 	player_light.texture_scale = KEEPER_GLOW
@@ -158,8 +151,11 @@ func _process(delta: float) -> void:
 	overlay.queue_redraw() # the ui's dim, flights and flashes move on real time, also while the world is not stepped
 	var day: float = painter.daylight(world)
 	sky.color = painter.sky(world)
-	torch_light.texture_scale = world.light_radius() * 2.0 / 128.0
-	torch_light.energy = lerpf(TORCH_ENERGY, DAY_ENERGY, day) * (1.0 + FLARE_ENERGY * painter.flare()) if world.fuel > 0.0 else 0.0
+	var energy: float = lerpf(TORCH_ENERGY, DAY_ENERGY, day) * (Painter.flicker(world) + FLARE_ENERGY * painter.flare()) if world.fuel > 0.0 else 0.0
+	for i in torch_lights.size(): # together as bright as one light; where only one ring's tongue reaches, half
+		torch_lights[i].texture_scale = world.light_radius() * 2.0 / Painter.LIGHT_SIZE
+		torch_lights[i].rotation = Painter.light_turn(world, i)
+		torch_lights[i].energy = energy / torch_lights.size()
 	# The keeper's glow fades where the torch already lights them, so the two never add up to a white blot.
 	var from_torch: float = world.player.pos.distance_to(Config.TORCH.pos) / world.light_radius()
 	player_light.energy = KEEPER_ENERGY * (1.0 - day) * (clampf(from_torch, 0.0, 1.0) if world.fuel > 0.0 else 1.0)

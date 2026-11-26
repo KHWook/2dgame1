@@ -1080,6 +1080,32 @@ static func rim(sprite: String) -> Texture2D:
 	return _textures[key]
 
 
+## Only the pixels of a sprite drawn with one PALETTE key, in white: the painter tints them and draws them where the
+## night does not dim them, so the eyes of a thing out in the dark still show, on whichever frame it is.
+static func only(sprite: String, key: String, flip := false) -> Texture2D:
+	var id := "%s#%s%s" % [sprite, key, "<" if flip else ""]
+	if not _textures.has(id):
+		var grid := rows(sprite)
+		var img := Image.create_empty(grid[0].length(), grid.size(), false, Image.FORMAT_RGBA8)
+		for y in grid.size():
+			for x in grid[y].length():
+				if grid[y][x] == key:
+					img.set_pixel(x, y, Color.WHITE)
+		if flip:
+			img.flip_x()
+		_textures[id] = ImageTexture.create_from_image(img)
+	return _textures[id]
+
+
+## How many rows down a sprite's lowest drawn pixel is, plus one: where it stands on the ground.
+static func foot(sprite: String) -> int:
+	var grid := rows(sprite)
+	for y in range(grid.size() - 1, -1, -1):
+		if grid[y].count(".") < grid[y].length():
+			return y + 1
+	return grid.size()
+
+
 static func _solid(img: Image, x: int, y: int) -> bool:
 	return x >= 0 and y >= 0 and x < img.get_width() and y < img.get_height() and img.get_pixel(x, y).a > 0.5
 

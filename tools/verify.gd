@@ -31,7 +31,7 @@ func _initialize() -> void:
 		print("check: all rules pass (selftest ok)")
 	else:
 		failed = true
-	var art: Array = Sprites.problems() + Looks.problems() + Sprites.selftest()
+	var art: Array = Sprites.problems() + Looks.problems() + Sprites.selftest() + Looks.selftest()
 	for line in art:
 		printerr("art: " + line)
 	if art.is_empty():
