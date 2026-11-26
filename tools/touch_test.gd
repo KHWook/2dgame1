@@ -1,6 +1,7 @@
 ## The touch controls (src/touch.gd) give the actions they claim: the stick's directions (all of
 ## Config.STICK_DIRECTIONS, not snapped to eight), its dead zone and the way it holds a direction and a walk against a
-## trembling thumb, the ring following the thumb, the keeper walking at full speed the way it points, the sword held
+## trembling thumb, the ring following the thumb, the keeper walking at full speed the way it points, the big sword
+## button and any tap on the right half below the HUD swinging, the dash button beside it, the sword held
 ## while a second thumb steers, each tap pressed once (D6), dash only with the upgrade, nothing steered while the cards
 ## are up, the tap that restarts only after the end has shown a moment, the "?" button bringing the start screen back
 ## (as H does) while playing or paused, a key press hiding it all, and the scaling chosen for common phone screens.
@@ -154,14 +155,35 @@ static func _buttons() -> Array:
 	_touch(t, 1, Touch.ATTACK, false)
 	if not _held(t).is_empty() or t.steer() != 0:
 		out.append("letting go of the sword stops the walk, or keeps the sword: %s" % [_held(t)])
+	for spot in [Touch.ATTACK + Vector2(-30.0, 20.0), Vector2(Touch.VIEW.x / 2.0 + 4.0, Touch.STICK_TOP + 2.0), Vector2(Touch.VIEW.x - 60.0, 120.0)]:
+		_touch(t, 1, spot) # anywhere on the right half below the HUD swings, past the drawn button too
+		if not t.take().has("attack"):
+			out.append("a tap on the right half at %s does not swing" % spot)
+		_touch(t, 1, spot, false)
+	_touch(t, 1, Vector2(Touch.VIEW.x - 60.0, Touch.STICK_TOP - 8.0)) # up by the score: not a swing
+	if t.take().has("attack"):
+		out.append("a tap on the HUD's top-right swings")
+	_touch(t, 1, Vector2.ZERO, false)
+	var big: Texture2D = Touch.Sprites.texture("button")
+	if big.get_width() < 40 or Touch.ATTACK_REACH < big.get_width() / 2.0:
+		out.append("the sword button is %d pixels across (want 40 or more) and answers %d from its middle" % [big.get_width(), Touch.ATTACK_REACH])
+	var mid: Texture2D = Touch.Sprites.texture("button_mid")
+	if mid.get_width() < 30 or Touch.DASH_REACH < mid.get_width() / 2.0:
+		out.append("the dash button is %d pixels across (want 30 or more) and answers %d from its middle" % [mid.get_width(), Touch.DASH_REACH])
+	if Touch.ATTACK.distance_to(Touch.DASH) <= Touch.ATTACK_REACH + Touch.DASH_REACH:
+		out.append("a tap can reach both the sword and the dash button")
+	for b in [[Touch.ATTACK, big], [Touch.DASH, mid]]:
+		var r: float = b[1].get_width() / 2.0
+		if b[0].x + r > Touch.VIEW.x - Touch.EDGE or b[0].y + r > Touch.VIEW.y - Touch.EDGE or b[0].y - r < Touch.STICK_TOP or b[0].x - r < Touch.VIEW.x / 2.0:
+			out.append("a button at %s comes within %d pixels of the screen's edge, onto the HUD, or onto the stick's half" % [b[0], Touch.EDGE])
 	_touch(t, 2, Touch.DASH)
-	if t.take().has("dash"):
-		out.append("dash is pressed without the dash upgrade")
+	if t.take().keys() != ["attack"]:
+		out.append("without the dash upgrade a tap where its button would be is a swing, as anywhere on the right half")
 	_touch(t, 2, Touch.DASH, false)
 	t.dash_shown = true
 	_touch(t, 2, Touch.DASH)
-	if not t.take().has("dash"):
-		out.append("dash is not pressed with the dash upgrade")
+	if t.take().keys() != ["dash"]:
+		out.append("dash is not pressed (alone) with the dash upgrade")
 	_touch(t, 2, Touch.DASH, false)
 	var paused := [0]
 	t.pause_pressed.connect(func(): paused[0] += 1)

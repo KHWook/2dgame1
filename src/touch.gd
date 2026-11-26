@@ -1,6 +1,6 @@
 ## Touch controls for playing on a phone: a stick that appears where the left thumb lands and steers in any of
-## Config.STICK_DIRECTIONS directions, a sword button and (once the dash upgrade is held) a dash button on the right,
-## a pause button, a "?" button beside it that brings the start
+## Config.STICK_DIRECTIONS directions, a sword button on the right (a tap anywhere on the right half swings too) and
+## (once the dash upgrade is held) a dash button beside it, a pause button, a "?" button beside it that brings the start
 ## screen back (the H key), and a tap that restarts after the end. Part of
 ## the bridge with src/main.gd: it turns screen touches into the same action names the keys give ("attack", "dash")
 ## and the stick into a direction number (InputFrame.stick), so the simulation reads no screen (S1), and each tap
@@ -23,15 +23,17 @@ const DEAD := 4.0 # pixels the thumb moves from where it landed before the keepe
 const DEAD_STOP := 2.5 # once walking, it stops only when the thumb comes back this close, so a still thumb does not stutter
 const REACH := 16.0 # how far the knob goes from the ring's middle; past it the ring follows the thumb
 const TURN_HOLD := 0.7 # a thumb must turn this many direction steps away before the direction changes
+const EDGE := 8.0 # the buttons keep this far from the screen's edges, clear of rounded corners and the notch
 const STICK_TOP := 60.0 # the stick starts only below the HUD's top-left panel, so it never covers it
-const ATTACK := Vector2(VIEW.x - 34.0, VIEW.y - 36.0) # the sword button's middle
-const DASH := Vector2(VIEW.x - 76.0, VIEW.y - 22.0)
+const ATTACK := Vector2(VIEW.x - 40.0, VIEW.y - 40.0) # the sword button's middle: 45 pixels across, clear of the edges
+const DASH := Vector2(VIEW.x - 100.0, VIEW.y - 26.0) # 33 across, left of the sword, low where the thumb rests
 const PAUSE := Vector2(VIEW.x - 14.0, 44.0) # under the score and the night, clear of the "+10" that rises there
 const HELP := PAUSE - Vector2(26.0, 0.0) # left of the pause button
-const ATTACK_REACH := 22.0 # touch radius: a little bigger than the drawn button, so a thumb that is close counts
-const DASH_REACH := 17.0
+const ATTACK_REACH := 34.0 # touch radius: well past the drawn button (and any tap on the right half swings anyway)
+const DASH_REACH := 24.0 # past its drawn 16, short of the sword's: the two never both answer one tap
 const PAUSE_REACH := 13.0
 const HELP_REACH := 12.0 # a little smaller than the pause button's, so the two never both answer one tap
+const ICON_SCALE := 2 # the sword and dash pictures on their buttons are drawn twice their size
 const LOOK := 0.45 # how solid the controls are while untouched
 const LOOK_DOWN := 0.85 # and while pressed
 const REST := 0.8 # seconds after the end before a tap restarts, so a thumb still swinging does not skip the end screen
@@ -123,10 +125,10 @@ func handle(event: InputEvent) -> bool:
 		"play":
 			if t.position.distance_to(PAUSE) <= PAUSE_REACH:
 				pause_pressed.emit()
-			elif t.position.distance_to(ATTACK) <= ATTACK_REACH:
-				_press(t.index, "attack")
 			elif dash_shown and t.position.distance_to(DASH) <= DASH_REACH:
 				_press(t.index, "dash")
+			elif t.position.distance_to(ATTACK) <= ATTACK_REACH or (t.position.x >= VIEW.x / 2.0 and t.position.y >= STICK_TOP):
+				_press(t.index, "attack")
 			elif t.position.x < VIEW.x / 2.0 and t.position.y >= STICK_TOP and stick < 0:
 				stick = t.index
 				stick_from = t.position
@@ -226,11 +228,11 @@ func _draw() -> void:
 		return
 	var attacking := buttons.values().has("attack")
 	_sprite("button", ATTACK, attacking)
-	_sprite("sword", ATTACK + Vector2(1.0, 0.0), attacking)
+	_sprite("sword", ATTACK + Vector2(1.0, 0.0), attacking, ICON_SCALE)
 	if dash_shown:
 		var dashing := buttons.values().has("dash")
-		_sprite("button_small", DASH, dashing)
-		_sprite("icon_dash", DASH, dashing)
+		_sprite("button_mid", DASH, dashing)
+		_sprite("icon_dash", DASH, dashing, ICON_SCALE)
 	if stick >= 0:
 		_sprite("pad_ring", stick_from, true)
 		var knob := stick_from + (stick_at - stick_from).limit_length(REACH)

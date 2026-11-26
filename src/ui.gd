@@ -102,7 +102,7 @@ const INTRO_MORE := "일시정지 P · Esc     이 설명 다시 보기 H"
 const INTRO_START := "아무 키나 눌러 시작"
 const INTRO_BACK := "아무 키나 눌러 돌아가기"
 ## The same lines for a phone (src/touch.gd), shown while the touch controls are.
-const TOUCH_KEYS := "이동 왼쪽 아무 데나 끌기     베기 오른쪽 아래 칼     돌진 그 옆 (힘을 얻은 뒤)"
+const TOUCH_KEYS := "이동 왼쪽 아무 데나 끌기     베기 오른쪽 아무 데나     돌진 칼 옆 버튼 (힘을 얻은 뒤)"
 const TOUCH_MORE := "일시정지 오른쪽 위 버튼     이 설명 다시 보기 그 옆 ?"
 const TOUCH_START := "눌러서 시작"
 const TOUCH_BACK := "눌러서 돌아가기"
