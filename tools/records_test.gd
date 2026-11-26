@@ -7,6 +7,7 @@ const Records := preload("res://src/records.gd")
 const World := preload("res://src/sim/world.gd")
 
 const FILE := "user://records_test.json"
+const GUIDE_FILE := "user://guide_test.json"
 
 
 ## Every failure as a message; empty when all hold.
@@ -15,7 +16,9 @@ static func run() -> Array:
 	out.append_array(_order())
 	out.append_array(_once_per_run())
 	out.append_array(_files())
+	out.append_array(_guide())
 	DirAccess.remove_absolute(FILE)
+	DirAccess.remove_absolute(GUIDE_FILE)
 	return out
 
 
@@ -84,4 +87,23 @@ static func _files() -> Array:
 		f.close()
 		if not Records.new(FILE).runs.is_empty():
 			out.append("a broken file is not an empty list: %s" % broken)
+	return out
+
+
+## The guide read once stays read, in its own file; missing, broken, other-version or odd files count as unread.
+static func _guide() -> Array:
+	var out := []
+	DirAccess.remove_absolute(GUIDE_FILE)
+	var r = Records.new(FILE, GUIDE_FILE)
+	if r.guide_read():
+		out.append("with no file the guide counts as read")
+	r.read_guide()
+	if not Records.new(FILE, GUIDE_FILE).guide_read():
+		out.append("the guide read is not remembered")
+	for text in ["{", "[]", "{\"version\": 2, \"read\": true}", "{\"version\": \"1\", \"read\": true}", "{\"version\": 1, \"read\": \"yes\"}"]:
+		var f := FileAccess.open(GUIDE_FILE, FileAccess.WRITE)
+		f.store_string(text)
+		f.close()
+		if Records.new(FILE, GUIDE_FILE).guide_read():
+			out.append("a guide file %s counts as read" % text)
 	return out

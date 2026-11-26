@@ -8,6 +8,8 @@ const Enemy := preload("res://src/sim/enemy.gd")
 const InputFrame := preload("res://src/sim/input_frame.gd")
 const Config := preload("res://src/sim/config.gd")
 const Ui := preload("res://src/ui.gd")
+const Painter := preload("res://src/art/painter.gd")
+const Coach := preload("res://src/coach.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -19,6 +21,7 @@ const NEVER := 1.0e9 # a time that does not come: keeps the night from adding th
 ## Every failure as a message; empty when all scenes hold.
 static func run() -> Array:
 	var out := []
+	out.append_array(_swing_area())
 	out.append_array(_shade())
 	out.append_array(_big_slime())
 	out.append_array(_thief())
@@ -35,6 +38,7 @@ static func run() -> Array:
 	out.append_array(_nights())
 	out.append_array(_company())
 	out.append_array(_setup())
+	out.append_array(_coaching())
 	return out
 
 
@@ -78,6 +82,86 @@ static func _play(w, steps: int, press: String = "", hold: String = "") -> Array
 static func _expect(out: Array, what: String, got, want) -> void:
 	if got != want:
 		out.append("%s: got %s, want %s" % [what, got, want])
+
+
+## What looks struck is struck (World.in_swing): a big body whose middle is past the edge of the arc but whose side
+## is in it, and anything pressed against the keeper, behind too; not a body just past the reach, nor one behind
+## that is not touching. The blow keeps landing while the trail shows (PLAYER.attack_hit_at to attack_hit_until), on
+## what comes into it then, once per enemy per swing, and not on the halves of the slime it broke. Every line of the
+## trail the painter draws lies inside what the swing hits.
+static func _swing_area() -> Array:
+	var out := []
+	var hp: int = Config.ENEMY_TYPES.big_slime.hp
+	var half: float = acos(Config.PLAYER.arc)
+	var w = _night(DARK)
+	var edge = _add(w, "big_slime", Vector2.from_angle(half + 0.35) * 20.0) # its middle 20 degrees past the edge
+	var behind = _add(w, "bat", Vector2(-9.0, 2.0)) # pressed against the keeper's back
+	var far = _add(w, "big_slime", Vector2(Config.PLAYER.reach + Config.ENEMY_TYPES.big_slime.radius + 2.5, 0.0).rotated(-0.3)) # walks 2 px nearer by the blow
+	var back = _add(w, "slime", Vector2(-18.0, 0.0)) # behind, close, not touching
+	var aim_off = _add(w, "slime", Vector2(0.0, 60.0)) # far below: the swing does not turn to it
+	w.player.face = Vector2.RIGHT
+	w.player.attack_t = 0.0 # a swing just begun, facing right (pressing attack would turn it to the nearest)
+	w.player.struck = []
+	w.player.invuln = NEVER # the bat at its back would hurt it and knock it about
+	_play(w, SWING)
+	_expect(out, "a big slime whose side is in the arc is struck", edge.hp, hp - 1)
+	_expect(out, "a bat pressed against the keeper's back is struck", behind.dead, true)
+	_expect(out, "a big slime just past the reach is not struck", far.hp, hp)
+	_expect(out, "a slime behind, not touching, is not struck", back.hp, Config.ENEMY_TYPES.slime.hp)
+	_expect(out, "an enemy far away is not struck", aim_off.hp, Config.ENEMY_TYPES.slime.hp)
+	# Into the swing while the trail shows: struck once. Past attack_hit_until: not.
+	var into := roundi(Config.PLAYER.attack_hit_at / Config.STEP) + 2
+	var late := roundi(Config.PLAYER.attack_hit_until / Config.STEP) + 1
+	for at in [into, late]:
+		w = _night(DARK)
+		var later = Enemy.new("big_slime", w.player.pos + Vector2(0.0, 80.0))
+		w.player.face = Vector2.RIGHT
+		w.player.attack_t = 0.0 # mid-swing from here, facing right, nothing to aim at
+		w.player.struck = []
+		for i in at:
+			_play(w, 1)
+		w.enemies.append(later)
+		later.pos = w.player.pos + NEAR
+		_play(w, SWING)
+		_expect(out, "a big slime that comes into the swing %d steps in: hit" % at, later.hp, hp - (1 if at == into else 0))
+	w = _night(DARK)
+	var front = _add(w, "slime", NEAR)
+	var biter = _add(w, "bat", Vector2(-9.0, 0.0)) # hurts the keeper the step the swing begins
+	_play(w, SWING, "attack")
+	_expect(out, "hurt as the swing begins, the keeper still lands it", [w.player.hp, front.hp], [Config.PLAYER.hp - 1, Config.ENEMY_TYPES.slime.hp - 1])
+	w = _night(DARK)
+	var twice = _add(w, "big_slime", NEAR + Vector2(6.0, 0.0)) # not touching, so it does not hurt the keeper
+	_play(w, SWING * 2, "attack")
+	_expect(out, "a swing hits an enemy once however long it stays in it", twice.hp, hp - 1)
+	w = _night(LIT, ["fire_blade", "fire_blade"]) # 3 per blow: one blow breaks a big slime of 3, its halves land in the arc
+	var big = _add(w, "big_slime", NEAR + Vector2(6.0, 0.0))
+	big.hp = 3
+	_play(w, 1, "attack")
+	var told: Array = []
+	for i in SWING:
+		told.append_array(_play(w, 1))
+	var halves: Array = w.enemies.filter(func(e): return e.kind == "slime")
+	_expect(out, "the swing that breaks a big slime does not also cut its halves", [big.dead, halves.size(), halves.all(func(e): return e.hp == Config.ENEMY_TYPES.slime.hp)], [true, 2, true])
+	# The painter's trail, step by step through swings of every kind: each line within what in_swing strikes.
+	var painter = Painter.new(1)
+	var drawn := 0
+	for ups in [[], ["long_blade", "long_blade"], ["wide_swing", "wide_swing"], ["spin"]]:
+		w = _night(DARK, ups)
+		for turn in 3: # the spin upgrade goes round on the third swing
+			w.player.face = Vector2.from_angle(0.7 * turn + 0.2)
+			for i in roundi(Config.PLAYER.attack_time / Config.STEP) + 2:
+				_play(w, 1, "attack" if i == 0 else "")
+				for line in painter.slash_lines(w):
+					drawn += 1
+					for j in 9:
+						var at: Vector2 = w.player.pos.round() + Vector2.from_angle(lerpf(line[1], line[2], j / 8.0)) * (line[0] + line[4] / 2.0)
+						if not w.in_swing(at, 1.0):
+							out.append("the trail is drawn where the swing does not hit (%s, %s at %s)" % [ups, at - w.player.pos, w.player.attack_t])
+							break
+				if not painter.slash_lines(w).is_empty() and w.player.attack_t > Config.PLAYER.attack_hit_until:
+					out.append("the trail still shows once the blow has stopped landing (%s)" % [ups])
+	_expect(out, "the painter drew a trail in the swings", drawn > 0, true)
+	return out
 
 
 static func _shade() -> Array:
@@ -168,7 +252,7 @@ static func _upgrades() -> Array:
 	for wide in [false, true]:
 		w = _night(DARK, ["wide_swing"] if wide else [])
 		_add(w, "slime", NEAR)
-		var beside = _add(w, "slime", Vector2(0.0, -18.0))
+		var beside = _add(w, "slime", Vector2(-4.0, -18.0)) # a little behind the side: its body is clear of the usual arc
 		_play(w, SWING, "attack")
 		_expect(out, "a swing reaches an enemy at its side only with wide swing (%s)" % wide, beside.hp, Config.ENEMY_TYPES.slime.hp - (1 if wide else 0))
 	for at in [LIT, DARK]:
@@ -665,4 +749,38 @@ static func _setup() -> Array:
 	_expect(out, "the web page's title (project.godot config/name.web) is the first screen's title", ProjectSettings.get_setting("application/config/name.web"), Ui.INTRO_TITLE)
 	_expect(out, "the field lies inside the view", Rect2(Vector2.ZERO, Config.VIEW).encloses(Config.FIELD), true)
 	_expect(out, "the torch and the player start on the field", [Config.FIELD.has_point(Config.TORCH.pos), Config.FIELD.has_point(Config.PLAYER.start)], [true, true])
+	return out
+
+
+## The first night's coaching (src/coach.gd): an arrow at the nearest log until one is carried, at the torch until it
+## is fed, at the first enemy that comes close until something is cut down; then nothing, and off. Off, never anything.
+static func _coaching() -> Array:
+	var out := []
+	var w = _night(Vector2(0.0, 40.0))
+	var c = Coach.new()
+	w.logs = [w.player.pos + Vector2(30.0, 0.0), w.player.pos + Vector2(-60.0, 0.0)]
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "off, it shows nothing", c.now(w), [])
+	c.on = true
+	c.step(w)
+	_expect(out, "first it points at the nearest log", c.now(w), [Coach.HAUL, w.logs[0]])
+	w.player.pos = w.logs[0]
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "carrying a log, it points at the torch", c.now(w), [Coach.FEED, Config.TORCH.pos])
+	w.player.pos = Config.TORCH.pos + Vector2(0.0, Config.TORCH.reach)
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "once a log is fed, the hauling is done", [c.haul, c.now(w)], ["done", []])
+	var bat = _add(w, "bat", Vector2(Coach.NEAR - 5.0, 0.0))
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "an enemy close: cut it", c.now(w), [Coach.FIGHT, bat.pos])
+	w.player.face = Vector2.RIGHT
+	w.player.pos = bat.pos - Vector2(14.0, 0.0)
+	for i in SWING: # the ui steps the coach after every world step, so it sees each step's events
+		_play(w, 1, "attack" if i == 0 else "")
+		c.step(w)
+	_expect(out, "something cut down: all done and off", [c.fight, c.on, c.now(w)], ["done", false, []])
 	return out

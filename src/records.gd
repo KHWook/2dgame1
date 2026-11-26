@@ -1,6 +1,8 @@
 ## The best runs, kept on disk between plays: the top KEEP by score, then by how many nights were reached.
 ## It reads files and is handed the date, so it lives outside src/sim/ (S1, D2): the simulation only keeps the score.
 ## main.gd calls step() after every world step; a run is written once, on the step its ending begins.
+## Beside them, in a file of its own, whether the start screen's guide has been read (src/guide.gd): once it has, its
+## start button shows on every page and the first night's coaching (src/coach.gd) is not shown again.
 extends RefCounted
 
 const KEEP := 10 # runs kept on disk
@@ -8,17 +10,39 @@ const SHOWN := 5 # runs listed under an ending
 const VERSION := 1 # bump when a run's fields change; a file of another version starts a fresh list
 const FILE := "user://records.json"
 const ENDINGS := ["out", "dead"] # the world's phases that end a run
+const GUIDE_FILE := "user://guide.json"
+const GUIDE_VERSION := 1 # bump when the guide changes enough to be worth showing again: a file of another version is unread
 
 var path: String
+var guide_path: String
 var runs: Array = [] # best first: { "score", "night", "seed", "picks", "date" }
 var place := 0 # where the run that just ended landed, from 1; 0 if it missed the list or none has ended
 var latest = null # that run, so the list can mark it
 var _over := false # whether the world was already in an ending on the last step
 
 
-func _init(file: String = FILE) -> void:
+func _init(file: String = FILE, guide_file: String = GUIDE_FILE) -> void:
 	path = file
+	guide_path = guide_file
 	runs = read(path)
+
+
+## Whether the guide has been read before. A missing, broken or other-version file is not read, never an error.
+func guide_read() -> bool:
+	if not FileAccess.file_exists(guide_path):
+		return false
+	var json := JSON.new()
+	if json.parse(FileAccess.get_file_as_string(guide_path)) != OK:
+		return false
+	var data = json.data # a mismatched type compared with == is a script error, so each is compared by type first
+	return typeof(data) == TYPE_DICTIONARY and is_same(data.get("version"), float(GUIDE_VERSION)) and is_same(data.get("read"), true)
+
+
+## Remembers that the guide has been read.
+func read_guide() -> void:
+	var f := FileAccess.open(guide_path, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify({ "version": GUIDE_VERSION, "read": true }))
 
 
 ## Call after every world step. Records the run the step it ends; an ending that lasts many steps is one run, and R

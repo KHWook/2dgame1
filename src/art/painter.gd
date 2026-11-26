@@ -26,7 +26,6 @@ const BERRY_ANCHOR := Vector2(4.0, 6.0)
 const CARRY := Vector2(0.0, -11.0) # a carried log rides on the keeper's raised hands, over the hair
 const THIEF_CARRY := Vector2(0.0, -9.0) # and on a thief's back
 const SHADOW := Vector2(-6.0, 1.0) # where the keeper's shadow's top-left sits, from the keeper's position
-const SLASH_AT := Vector2(0.0, -2.0) # the middle of the swing's trail, from the keeper's position
 const GHOST := 0.45 # how solid an enemy looks while the dark protects it from blows
 
 ## Simulation steps per animation frame. Enemies have theirs in looks.gd.
@@ -42,13 +41,14 @@ const CLEARING_DROP := Vector2(0.0, 5.0)
 const HEDGE_SIDES := { "top": 0, "right": 1, "bottom": 2, "left": 3 } # quarter turns from the sprite, which faces down
 const HEDGE_DEPTH := 9
 
-## The sword. The swing sweeps the arc the simulation hits (world.arc()), always turning the same way, and the
+## The sword. The swing sweeps the arc the simulation hits (world.swing_half()), always turning the same way, and the
 ## picture runs through four stages, as shares of Config.PLAYER.attack_time: it winds up past the start of the arc,
-## strikes across it (the blow lands at PLAYER.attack_hit_at, in the middle of this), holds at the end while the
-## trail fades, and goes back to rest in the hand.
+## strikes across it (the blow starts landing at PLAYER.attack_hit_at, in the middle of this), holds at the end while
+## the trail fades, and goes back to rest in the hand. The trail shows until the blow stops landing
+## (PLAYER.attack_hit_until), so while it is on screen, whatever it covers is struck.
 const SWING_WIND := 0.18
 const SWING_STRIKE := 0.46
-const SWING_HOLD := 0.64
+const SWING_HOLD: float = Config.PLAYER.attack_hit_until / Config.PLAYER.attack_time
 const WIND_BACK := 0.5 # radians the blade is pulled back past the start of the arc
 const OVERSHOOT := 0.25 # radians it flies past the end before it settles
 const LUNGE := 1.0 # pixels the keeper leans into the blow while it strikes and holds
@@ -65,10 +65,10 @@ const BEHIND := -0.25 # the sword is painted behind the keeper while it points u
 ## The swing's trail: arcs just inside the reach, each [pixels inside the reach, share of the sweep it trails, colour].
 ## Each line is [share of the sweep it trails, PALETTE key], outermost first. The upgrades that change the swing
 ## show in it: the fire blade, where it does its extra damage (in the light), burns the trail and the blade; the
-## long blade adds a cold gleam outside the reach; the wide swing draws every line twice as thick.
+## long blade adds a cold gleam at the reach; the wide swing draws every line twice as thick.
 const SLASH := [[1.0, "W"], [0.7, "a"], [0.4, "A"]]
 const SLASH_FIRE := [[1.0, "f"], [0.85, "F"], [0.65, "F"], [0.45, "x"], [0.25, "X"]]
-const SLASH_GLEAM := [0.6, "l"] # outside the reach, with the long blade
+const SLASH_GLEAM := [0.6, "l"] # the outermost line, at the reach, with the long blade
 const WIDE_LINE := 2.0 # pixels per trail line with the wide swing
 const SWORD := "sword%s%s" # + "_long" with the long blade, + "_fire" while the fire blade burns
 const SWORD_FLAMES := 4 # flames shed along the trail of a burning blade
@@ -856,7 +856,7 @@ func _lean(w) -> Vector2:
 ## The angles of the swing: [start of the arc, end of the arc, wound up]. The sweep turns counter-clockwise on the
 ## screen and starts on the hand side, the side the facing turned a quarter clockwise points to.
 func _arc(w) -> Array:
-	var half := acos(clampf(w.blow_arc(), -1.0, 1.0)) # a spin goes all the way round
+	var half: float = w.swing_half() # a spin goes all the way round
 	var start: float = w.player.face.angle() + half
 	return [start, start - 2.0 * half, start + WIND_BACK]
 
@@ -923,7 +923,31 @@ func _sword(c: CanvasItem, w) -> void:
 
 
 ## The trail follows the blade through the strike at the reach the simulation hits (world.reach()), then shrinks
-## into the blade and fades while the swing holds. A burning blade sheds flames that rise off it.
+## into the blade and fades while the swing holds. It is drawn round the keeper's position, the point the simulation
+## measures from, and only over the arc it hits: the blade winds up before the arc and flies past its end, but its
+## trail stays inside (world.in_swing() strikes every body it covers). A burning blade sheds flames that rise off it.
+## The trail's lines right now, outermost first: [radius, from angle, to angle, PALETTE key, width]. None outside
+## the strike, while carrying, or once the keeper is down. tools/rules_test.gd holds every one inside world.in_swing().
+func slash_lines(w) -> Array:
+	var p = w.player
+	var k := _swing_share(w)
+	if p.dead or p.carrying or k < SWING_WIND or k >= SWING_HOLD:
+		return []
+	var arc := _arc(w)
+	var a: float = clampf(_blade(w)[1], arc[1], arc[0])
+	var hold := _stage(k, SWING_STRIKE, SWING_HOLD)
+	var lines: Array = (SLASH_FIRE if _burning(w) else SLASH).duplicate()
+	if w.mod("reach_bonus", 0.0) > 0.0:
+		lines.push_front(SLASH_GLEAM)
+	var width: float = WIDE_LINE if w.mod("arc_bonus", 0.0) < 0.0 else 1.0
+	var out := []
+	for i in lines.size():
+		var tail: float = clampf(lerpf(a, arc[2], lines[i][0] * (1.0 - hold)), arc[1], arc[0])
+		if absf(tail - a) > 0.05:
+			out.append([w.reach() - (i + 0.5) * width + 0.5, tail, a, lines[i][1], width])
+	return out
+
+
 func _slash(c: CanvasItem, w) -> void:
 	var p = w.player
 	if p.dead or p.carrying:
@@ -935,28 +959,21 @@ func _slash(c: CanvasItem, w) -> void:
 		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - GRIP.x - 1.0) * _stretch(w, sword, blade[2])
 		var lick := Sprites.texture("flame_s_%s" % ("a" if (w.steps / FLAME_STEPS_FAST) % 2 == 0 else "b"))
 		c.draw_texture(lick, (tip - Vector2(3.0, 5.0)).round())
-	var k := _swing_share(w)
-	if k < SWING_WIND or k >= SWING_HOLD:
+	var hold := _stage(_swing_share(w), SWING_STRIKE, SWING_HOLD)
+	var fade := Color(1.0, 1.0, 1.0, 1.0 - hold * hold)
+	var at: Vector2 = p.pos.round()
+	var lines := slash_lines(w)
+	for line in lines:
+		c.draw_arc(at, line[0], line[1], line[2], 12, Sprites.PALETTE[line[3]] * fade, line[4])
+	if lines.is_empty():
 		return
 	var arc := _arc(w)
-	var a: float = blade[1]
-	var hold := _stage(k, SWING_STRIKE, SWING_HOLD)
-	var fade := Color(1.0, 1.0, 1.0, 1.0 - hold * hold)
-	var at: Vector2 = (p.pos + _lean(w) + SLASH_AT).round()
-	var lines: Array = (SLASH_FIRE if burning else SLASH).duplicate()
+	var a: float = clampf(blade[1], arc[1], arc[0])
 	var r: float = w.reach()
-	if w.mod("reach_bonus", 0.0) > 0.0:
-		lines.push_front(SLASH_GLEAM)
-		r += 1.0
-	var width: float = WIDE_LINE if w.mod("arc_bonus", 0.0) < 0.0 else 1.0
-	for i in lines.size():
-		var tail: float = lerpf(a, arc[2], lines[i][0] * (1.0 - hold))
-		if absf(tail - a) > 0.05:
-			c.draw_arc(at, r - (i + 0.5) * width + 0.5, tail, a, 12, Sprites.PALETTE[lines[i][1]] * fade, width)
 	if burning:
 		for j in SWORD_FLAMES:
 			var share := (j + 1.0) / (SWORD_FLAMES + 1.0)
-			var spot: float = lerpf(a, arc[2], share * (1.0 - hold * 0.5))
+			var spot: float = clampf(lerpf(a, arc[2], share * (1.0 - hold * 0.5)), arc[1], arc[0])
 			var flame := Sprites.texture("flame_s_%s" % ("a" if (w.steps / FLAME_STEPS_FAST + j) % 2 == 0 else "b"))
 			var rise := Vector2(0.0, -FLAME_RISE * hold - j)
 			c.draw_texture(flame, (at + Vector2.from_angle(spot) * (r - 3.0) + rise - Vector2(3.0, 5.0)).round(), fade)
