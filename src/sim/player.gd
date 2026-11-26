@@ -13,7 +13,7 @@ var invuln := 0.0
 var hurt_t := 0.0
 var dead := false
 var attack_t := -1.0 # time into the swing, or -1 when not swinging
-var swung := false
+var struck: Array = [] # the enemies this swing has hit: each is hit once per swing
 var carrying := false
 var swings := 0 # swings started so far, for the spin upgrade
 var spin := false # this swing goes all the way round
@@ -55,15 +55,14 @@ func step(world, inp) -> void:
 				world.drop_log(pos)
 			elif attack_t < 0.0:
 				attack_t = 0.0
-				swung = false
+				struck = []
 				face = world.aim(pos, face)
 				swings += 1
 				var spin_every: int = world.mod("spin_every", 0)
 				spin = spin_every > 0 and swings % spin_every == 0
 	if attack_t >= 0.0:
 		attack_t += Config.STEP
-		if not swung and attack_t >= P.attack_hit_at:
-			swung = true
+		if attack_t >= P.attack_hit_at and attack_t <= P.attack_hit_until:
 			world.melee(self)
 		if attack_t >= P.attack_time:
 			attack_t = -1.0
@@ -71,16 +70,15 @@ func step(world, inp) -> void:
 	pos = (pos + vel * Config.STEP).clamp(Config.FIELD.position, Config.FIELD.end)
 
 
-## Take a hit from something at from_pos. Returns false while invulnerable, dashing or dead.
+## Take a hit from something at from_pos. Returns false while invulnerable, dashing or dead. It knocks you back and
+## stuns you for a moment, but a swing already under way still lands.
 func hurt(from_pos: Vector2) -> bool:
 	if invuln > 0.0 or dash_t > 0.0 or dead:
 		return false
 	hp -= 1
 	invuln = P.invuln
 	hurt_t = P.hurt_time
-	vel = (pos - from_pos).normalized() * P.hurt_knock
-	attack_t = -1.0
-	spin = false
+	vel = (pos - from_pos).normalized() * P.hurt_knock # a swing under way goes on: the blow you started still lands
 	if hp <= 0:
 		dead = true
 	return true

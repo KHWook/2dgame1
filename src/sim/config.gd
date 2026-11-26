@@ -6,10 +6,12 @@ const STEP := 1.0 / 60.0 # the fixed simulation step, in seconds (D5: project.go
 const VIEW := Vector2(480.0, 270.0) # the screen, in game pixels; project.godot's viewport must match (R1 checks)
 const FIELD := Rect2(8.0, 8.0, 464.0, 254.0) # where the player can walk: the view less the treetops at its edges
 
+## A swing's blow lands from attack_hit_at to attack_hit_until seconds into it (while the painter shows its trail),
+## on every enemy that is in it then (World.in_swing), each at most once per swing.
 const PLAYER := {
 	"start": Vector2(240.0, 165.0), "speed": 80.0, "carry_speed": 58.0, "radius": 6.0, "hp": 5,
 	"invuln": 1.2, "hurt_time": 0.25, "hurt_knock": 140.0,
-	"attack_time": 0.28, "attack_hit_at": 0.1, "reach": 22.0, "arc": 0.3, "aim_slack": 10.0, "grab": 9.0,
+	"attack_time": 0.28, "attack_hit_at": 0.1, "attack_hit_until": 0.18, "reach": 22.0, "arc": 0.3, "aim_slack": 10.0, "grab": 9.0,
 	"dash_speed": 250.0, "dash_time": 0.14, # the dash upgrade: how fast and how long; you cannot be hurt during it
 }
 

@@ -142,8 +142,7 @@ func max_hp() -> int:
 	return Config.PLAYER.hp + mod("hp_bonus", 0)
 
 
-## How far the swing reaches, and how wide it is: a blow lands when the direction to the enemy, dotted with the
-## facing, is above arc().
+## How far the swing reaches, and how wide it is: arc() is the cosine of the angle each side of the facing it sweeps.
 func reach() -> float:
 	return Config.PLAYER.reach + mod("reach_bonus", 0.0)
 
@@ -155,6 +154,25 @@ func arc() -> float:
 ## The arc of the swing under way: all the way round for a spin.
 func blow_arc() -> float:
 	return -1.01 if player.spin else arc()
+
+
+## The angle each side of the facing the swing under way sweeps, in radians (PI for a spin).
+func swing_half() -> float:
+	return acos(clampf(blow_arc(), -1.0, 1.0))
+
+
+## Whether the swing under way reaches a body of radius r at at: the body touches the keeper's own (what presses
+## against you is cut, behind you too), or some of it is inside the swept sector, reach() from the keeper and
+## swing_half() each side of the facing, allowing for the body's size. The painter draws the trail inside this
+## sector (src/art/painter.gd), so whatever the trail passes over is struck.
+func in_swing(at: Vector2, r: float) -> bool:
+	var to: Vector2 = at - player.pos
+	var d := to.length()
+	if d < r + Config.PLAYER.radius:
+		return true
+	if d >= reach() + r:
+		return false
+	return absf(to.angle_to(player.face)) <= swing_half() + asin(minf(1.0, r / d))
 
 
 func step(inp) -> void:
@@ -358,12 +376,13 @@ func aim(from: Vector2, face: Vector2) -> Vector2:
 	return face if best == null else (best.pos - from).normalized()
 
 
-## The player's swing lands: hit everything in the facing arc within reach.
+## The player's swing lands, on every step from PLAYER.attack_hit_at to attack_hit_until: hit everything in it
+## (in_swing) that this swing has not hit yet.
 func melee(p) -> void:
 	var dmg: int = 1 + (mod("lit_damage", 0) if in_light(p.pos) else 0)
 	for e in enemies:
-		var to: Vector2 = e.pos - p.pos
-		if to.length() < reach() + e.T.radius and to.normalized().dot(p.face) > blow_arc():
+		if not e.dead and not p.struck.has(e) and in_swing(e.pos, e.T.radius):
+			p.struck.append(e)
 			_damage(e, dmg, p.pos, true)
 
 
@@ -396,6 +415,8 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 		var half = Enemy.new(e.T.splits_into, e.pos + Vector2(side * Config.ENEMY.split_spread, 0.0))
 		half.knock = Vector2(side * Config.ENEMY.split_knock, 0.0)
 		born.append(half)
+		if player.attack_t >= 0.0:
+			player.struck.append(half) # the swing that broke it does not also cut its halves
 
 
 func _spawns() -> void:
