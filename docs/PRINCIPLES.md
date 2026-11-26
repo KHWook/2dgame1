@@ -51,3 +51,4 @@ Godot 내장 물리(`CharacterBody2D`, `move_and_slide`)는 게임 규칙에 쓰
 - G2. 게임플레이가 바뀌면 `./verify --update-golden`으로 일부러 다시 기록하고 DECISIONS에 남긴다. 골든 직접 편집은 막혀 있다.
 - G3. 말이 아니라 증거. 검사 출력, 렌더한 프레임, 리플레이 결과를 보여준다.
 - G4. 검사도 검사한다. 규칙마다 `bad`/`good` 줄이 있고 `./verify`가 매번 자체 테스트를 돌린다. B1만 예외다(깨진 스크립트를 부르면 통과하는 실행에도 오류 줄이 찍힌다). B1은 심어 본 오류로 확인했다(`docs/DECISIONS.md`).
+- G5. `./verify`가 도는 동안 난 실행 중 스크립트 오류(`SCRIPT ERROR`)는 어디서 났든 실패다. GDScript 함수는 오류가 나면 멈추고 빈 값을 돌려주므로, 터진 장면은 `[]`를 돌려주어 통과한 장면처럼 보인다. `tools/verify.gd`의 `ScriptErrors`(Godot `Logger`)가 오류를 듣고, `./verify` 셸 스크립트도 출력에 `SCRIPT ERROR` 줄이 있으면 실패시킨다. 자체 테스트 대신 심어 본 오류로 확인했다(`docs/DECISIONS.md`): 일부러 오류를 내는 자체 테스트는 통과하는 실행에도 오류 줄을 찍는다.

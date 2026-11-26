@@ -3,6 +3,14 @@
 새 결정은 위에 추가한다. 형식: 날짜 · 무엇을 · 왜 · 어디에 반영했는지(검사/코드/글).
 콘셉트를 정한 과정(장르, 아트 세대, 세대별 능력, 에셋 조사, 엔진 선택)은 `../pixelfx-starter/docs/DECISIONS.md`에 있다.
 
+## 2026-11-26 · 실행 중 스크립트 오류는 `./verify` 실패 (G5)
+- 일어난 일: 보스 패턴 작업에서 버그를 심어 보다가 `_patterns` 장면이 `Vector2.distance_to(null)`로 실행 중 오류를 냈다. Godot는 `SCRIPT ERROR`를 찍었지만 `./verify`는 `verify: PASS`였고, 장면을 null에 안전하게 고칠 때까지 심은 버그가 보고되지 않았다.
+- 원인: GDScript 함수는 실행 중 오류가 나면 그 자리에서 멈추고 반환형의 빈 값을 돌려준다(`Array`면 `[]`). 장면은 실패를 목록으로 돌려주므로 터진 장면과 통과한 장면이 똑같이 `[]`다. `run()`도 계속 돌고 "rules: every scene holds"를 찍는다. records와 리플레이도 같다(리플레이는 요약 문자열이 빈 채로 "matches golden"이 나왔다).
+- 결정: `tools/verify.gd`가 시작할 때 Godot 4.5+의 `Logger`(`ScriptErrors`)를 `OS.add_logger`로 달고, `ERROR_TYPE_SCRIPT` 오류를 모두 모은다. 하나라도 있으면 파일:줄과 함수를 찍고 FAIL. 검사, 스프라이트, 장면, 기록, 리플레이 어디서 났든 같다. 그리고 `./verify` 셸 스크립트도 출력에 `^SCRIPT ERROR` 줄이 있으면 실패시킨다(로거를 달기 전, 예를 들어 preload 중에 난 오류까지).
+- 고르지 않은 것: 장면마다 마지막에 "done" 표지를 넣고 `run()`이 확인하는 방식. 장면을 더할 때마다 잊을 수 있고 records와 리플레이는 덮지 못한다. 로거는 어디서 났든 잡고 장면 쪽에 할 일이 없다. 셸의 grep만 두면 Godot가 출력 형식을 바꿀 때 조용히 꺼지므로 둘 다 둔다.
+- 검사: 자체 테스트 대신 심어 본 오류로 확인했다(일부러 오류를 내는 자체 테스트는 통과하는 실행에도 `SCRIPT ERROR`를 찍어 셸 검사에 걸린다). `var v = null; v.length()`를 `rules_test._shade`, `records_test._order`, `replay_test._say`에 심으면 세 경우 모두 `script error: res://tools/...:줄 in 함수(): ...`와 `verify: FAIL`, 종료 코드 1(`--hook`이면 2). 셸의 grep을 빼고 Godot만 돌려도 `verify: FAIL`. `var v: Vector2 = null`은 실행 중 오류가 아니라 파싱 오류라 원래도 PASS 줄이 없어 실패했다.
+- 반영: `tools/verify.gd`(`ScriptErrors`), `verify`, `docs/PRINCIPLES.md`(G5).
+
 ## 2026-11-25 · 점수 기록, HUD 다시 그리기
 - 사용자 요청: 게임 점수를 기록하고(상위 10개 목록, 엔딩 화면에만 보이기), 새벽까지 남은 시간과 횃불이 꺼지기까지 남은 시간을 잘 보이게 하고, HUD 전체의 가독성을 다시 검토.
 - 기록: `src/records.gd`가 `user://records.json`에 점수 순으로 상위 10판(`KEEP`)을 남긴다. 한 판에는 점수, 밤, 시드, 고른 강화, 날짜가 들어간다. 정렬은 점수, 같으면 늦은 밤, 그것도 같으면 오래된 판이 위(동점은 기존 기록을 밀어내지 않는다). 파일이 없거나 깨졌거나 버전(`VERSION`)이 다르면 빈 목록으로 시작한다. 엔딩이 시작되는 스텝에 한 번만 기록하고, R로 다시 시작하면 다음 판을 기록할 수 있다(`Records.step`). 봇(`--bot`)이 한 판은 기록하지 않는다(데모와 밸런스 측정이 목록을 채우지 않게).

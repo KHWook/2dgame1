@@ -12,7 +12,27 @@ const RulesTest := preload("res://tools/rules_test.gd")
 const RecordsTest := preload("res://tools/records_test.gd")
 
 
+## Hears every script error while verify runs (G5). A GDScript function that hits a runtime error stops and hands
+## back an empty value: a scene that crashed returns [] and looks like a scene that holds. So an error counts as a
+## failure here, whatever part of verify it happened in.
+class ScriptErrors extends Logger:
+	var seen: Array[String] = []
+	var _lock := Mutex.new()
+
+	func _log_error(function: String, file: String, line: int, code: String, rationale: String, _editor_notify: bool, error_type: int, _backtraces: Array[ScriptBacktrace]) -> void:
+		if error_type != ERROR_TYPE_SCRIPT:
+			return
+		_lock.lock()
+		seen.append("%s:%d in %s(): %s" % [file, line, function, rationale if rationale != "" else code])
+		_lock.unlock()
+
+	func _log_message(_message: String, _error: bool) -> void:
+		pass
+
+
 func _initialize() -> void:
+	var errors := ScriptErrors.new()
+	OS.add_logger(errors)
 	var args := OS.get_cmdline_user_args()
 	if args.has("--balance"):
 		print(Balance.run())
@@ -58,5 +78,11 @@ func _initialize() -> void:
 		else:
 			printerr(r[1])
 			failed = true
+	OS.remove_logger(errors)
+	for e in errors.seen:
+		printerr("script error: " + e)
+	if not errors.seen.is_empty():
+		printerr("script: %d runtime error(s) above; the part that hit one stopped early, so its result does not count (G5). Make that code not error, do not catch it." % errors.seen.size())
+		failed = true
 	print("verify: " + ("FAIL" if failed else "PASS"))
 	quit(1 if failed else 0)
