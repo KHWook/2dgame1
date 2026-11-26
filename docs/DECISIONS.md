@@ -3,6 +3,13 @@
 새 결정은 위에 추가한다. 형식: 날짜 · 무엇을 · 왜 · 어디에 반영했는지(검사/코드/글).
 콘셉트를 정한 과정(장르, 아트 세대, 세대별 능력, 에셋 조사, 엔진 선택)은 `../pixelfx-starter/docs/DECISIONS.md`에 있다.
 
+## 2026-11-26 · 브라우저 탭 제목은 "횃불 지기"
+- 문제: 웹 페이지 탭에 프로젝트 이름 `era-game`이 떴다(Godot 웹 셸의 `<title>$GODOT_PROJECT_NAME</title>`, 엔진도 켜질 때 창 제목을 이 이름으로 다시 쓴다).
+- 결정: `project.godot`에 기능 태그 덮어쓰기 `config/name.web="횃불 지기"`. 웹 내보내기와 웹에서 도는 엔진만 이 이름을 읽어서, 내보낸 `index.html`의 `<title>` 자체가 "횃불 지기"이고 켜진 뒤에도 그대로다. 데스크톱 창 제목은 `main.gd`가 첫 화면의 제목(`Ui.INTRO_TITLE`)으로 둔다.
+- `config/name`을 그냥 바꾸지 않은 이유: 데스크톱에서 `user://`는 `~/.local/share/godot/app_userdata/<config/name>`(윈도·맥도 이름을 따른다)이라 바꾸면 지난 판의 기록(`user://records.json`)이 새 폴더로 가서 안 보인다. `use_custom_user_dir`로 옛 경로를 흉내 내는 것은 OS마다 경로 앞부분이 달라서 버렸다. 웹의 `user://`는 이름과 상관없이 `/userfs`(IndexedDB)라서 웹 쪽 이름만 바꾸면 어디서도 기록이 옮겨지지 않는다. `html/head_include`에 `document.title`을 넣는 안도 해 봤는데 `<title>`은 여전히 `era-game`이라(스크립트를 안 돌리는 미리보기·검색에 그대로 보인다) 버렸다. 웹 셸을 복사해 고치는 안은 Godot를 올릴 때마다 맞춰야 해서 버렸다.
+- 확인: 웹 내보내기의 `<title>횃불 지기</title>`, Playwright Chromium(Pixel 7 가로)에서 불러올 때와 엔진이 켜진 15초 뒤 모두 `document.title`이 "횃불 지기", 콘솔 오류 없음. 검사: `rules_test._setup`에 "`config/name.web`은 첫 화면의 제목"(값을 바꿔 보니 잡혔다).
+- 반영: `project.godot`, `src/main.gd`, `tools/rules_test.gd`.
+
 ## 2026-11-26 · 늦은 밤은 무리로: 그림자가 지키는 도둑, 박쥐를 데려오는 멧돼지 (7~9번째 밤)
 - 문제: 지난 측정(봇, 시드 20 × 슬롯 3, 600초 ≈ 10번째 밤에 멈춤)에서 진 밤이 1:1 2:1 3:9 4:11 5:20 6:2 7:1 8:1 9:0 10(서 있음):14, 평균 5.68. 봇은 멧돼지 돌진을 다 피하고, 6번째 밤을 넘으면 거의 끝까지 갔다. 표 뒤(`LATER_NIGHTS`)는 숫자만 오른다. 바꾸기 전에 다시 재서 같은 분포를 확인했다.
 - 결정: 숫자 대신 적의 짝. `NIGHTS` 줄에 선택 키 `with`(그 종류가 나올 때 같은 가장자리의 바로 옆에서 함께 나오는 종류들)를 더하고 7·8·9번째 밤 줄을 새로 넣었다.

@@ -7,6 +7,7 @@ const World := preload("res://src/sim/world.gd")
 const Enemy := preload("res://src/sim/enemy.gd")
 const InputFrame := preload("res://src/sim/input_frame.gd")
 const Config := preload("res://src/sim/config.gd")
+const Ui := preload("res://src/ui.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -661,6 +662,7 @@ static func _setup() -> Array:
 			_expect(out, "a boss summons a real enemy kind (%s)" % kind, Config.ENEMY_TYPES.has(Config.ENEMY_TYPES[kind].summon.kind), true)
 	var viewport := Vector2(ProjectSettings.get_setting("display/window/size/viewport_width"), ProjectSettings.get_setting("display/window/size/viewport_height"))
 	_expect(out, "project.godot's viewport is Config.VIEW", viewport, Config.VIEW)
+	_expect(out, "the web page's title (project.godot config/name.web) is the first screen's title", ProjectSettings.get_setting("application/config/name.web"), Ui.INTRO_TITLE)
 	_expect(out, "the field lies inside the view", Rect2(Vector2.ZERO, Config.VIEW).encloses(Config.FIELD), true)
 	_expect(out, "the torch and the player start on the field", [Config.FIELD.has_point(Config.TORCH.pos), Config.FIELD.has_point(Config.PLAYER.start)], [true, true])
 	return out

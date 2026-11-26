@@ -65,6 +65,9 @@ func _ready() -> void:
 			slot = int(a.substr(7))
 	if OS.get_cmdline_user_args().has("--bot"):
 		bot = Bot.new(slot)
+	# The window's title is the game's name on the first screen. project.godot keeps the old config/name, which on
+	# desktop names the folder user://records.json lives in; the web build's page title comes from config/name.web.
+	get_window().title = Ui.INTRO_TITLE
 	world = World.new(seed_value)
 	records = Records.new()
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
