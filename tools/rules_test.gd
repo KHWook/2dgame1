@@ -9,6 +9,7 @@ const InputFrame := preload("res://src/sim/input_frame.gd")
 const Config := preload("res://src/sim/config.gd")
 const Ui := preload("res://src/ui.gd")
 const Painter := preload("res://src/art/painter.gd")
+const Coach := preload("res://src/coach.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -37,6 +38,7 @@ static func run() -> Array:
 	out.append_array(_nights())
 	out.append_array(_company())
 	out.append_array(_setup())
+	out.append_array(_coaching())
 	return out
 
 
@@ -747,4 +749,38 @@ static func _setup() -> Array:
 	_expect(out, "the web page's title (project.godot config/name.web) is the first screen's title", ProjectSettings.get_setting("application/config/name.web"), Ui.INTRO_TITLE)
 	_expect(out, "the field lies inside the view", Rect2(Vector2.ZERO, Config.VIEW).encloses(Config.FIELD), true)
 	_expect(out, "the torch and the player start on the field", [Config.FIELD.has_point(Config.TORCH.pos), Config.FIELD.has_point(Config.PLAYER.start)], [true, true])
+	return out
+
+
+## The first night's coaching (src/coach.gd): an arrow at the nearest log until one is carried, at the torch until it
+## is fed, at the first enemy that comes close until something is cut down; then nothing, and off. Off, never anything.
+static func _coaching() -> Array:
+	var out := []
+	var w = _night(Vector2(0.0, 40.0))
+	var c = Coach.new()
+	w.logs = [w.player.pos + Vector2(30.0, 0.0), w.player.pos + Vector2(-60.0, 0.0)]
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "off, it shows nothing", c.now(w), [])
+	c.on = true
+	c.step(w)
+	_expect(out, "first it points at the nearest log", c.now(w), [Coach.HAUL, w.logs[0]])
+	w.player.pos = w.logs[0]
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "carrying a log, it points at the torch", c.now(w), [Coach.FEED, Config.TORCH.pos])
+	w.player.pos = Config.TORCH.pos + Vector2(0.0, Config.TORCH.reach)
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "once a log is fed, the hauling is done", [c.haul, c.now(w)], ["done", []])
+	var bat = _add(w, "bat", Vector2(Coach.NEAR - 5.0, 0.0))
+	_play(w, 1)
+	c.step(w)
+	_expect(out, "an enemy close: cut it", c.now(w), [Coach.FIGHT, bat.pos])
+	w.player.face = Vector2.RIGHT
+	w.player.pos = bat.pos - Vector2(14.0, 0.0)
+	for i in SWING: # the ui steps the coach after every world step, so it sees each step's events
+		_play(w, 1, "attack" if i == 0 else "")
+		c.step(w)
+	_expect(out, "something cut down: all done and off", [c.fight, c.on, c.now(w)], ["done", false, []])
 	return out

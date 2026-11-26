@@ -14,6 +14,7 @@ const Juice := preload("res://src/art/juice.gd")
 const Sfx := preload("res://src/audio/sfx.gd")
 const Ui := preload("res://src/ui.gd")
 const Touch := preload("res://src/touch.gd")
+const Guide := preload("res://src/guide.gd")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -49,7 +50,7 @@ var torch_lights: Array = [] # one PointLight2D per ring of tongues (Painter.LIG
 var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step made
 var sfx := {} # sound name -> its AudioStreamPlayer
 var paused := false
-var intro := false # the first screen is up (src/ui.gd): the world waits, and the next key or click takes it away
+var intro := false # the first screen is up (src/ui.gd, src/guide.gd): the world waits until its start button
 var player_light: PointLight2D
 var touch # src/touch.gd: the stick and buttons on a phone
 
@@ -99,6 +100,7 @@ func _ready() -> void:
 	ui = Ui.new()
 	add_child(ui)
 	ui.setup(painter, records, overlay, bot.pick if bot != null else 0, world)
+	ui.coach.on = bot == null and not records.guide_read() # the first night is coached until the guide has been read once
 	_set_intro(bot == null) # the demo bot starts at once
 	ui.chosen.connect(func(slot: int): pending["pick_%d" % (slot + 1)] = true)
 	var touch_layer := CanvasLayer.new()
@@ -126,15 +128,26 @@ func _toggle_pause() -> void:
 func _set_intro(on: bool) -> void:
 	intro = on
 	ui.intro = on
+	if on:
+		ui.guide.show(records.guide_read(), world.steps > 0)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	var click := event as InputEventMouseButton
-	if intro: # the key or click that takes the first screen away does nothing else
-		if (k != null and k.pressed and not k.echo) or (click != null and click.pressed):
+	if intro: # the guide takes every key and click; only its start button (or Enter, Space) closes it
+		var did := ""
+		if k != null and k.pressed and not k.echo:
+			did = ui.guide.key(k.keycode)
+		elif click != null and click.button_index == MOUSE_BUTTON_LEFT:
+			if click.pressed:
+				ui.guide.press(click.position)
+			else:
+				did = ui.guide.release(click.position)
+		if did == "start":
+			records.read_guide()
 			_set_intro(false)
-			if touch.on and OS.has_feature("web"):
+			if touch.on and OS.has_feature("web"): # a tap on the start button asks for the whole screen
 				JavaScriptBridge.eval(FULL_SCREEN_JS, true)
 		return
 	if k != null and k.pressed and not k.echo and k.keycode == HELP_KEY:
@@ -197,6 +210,7 @@ func _physics_process(_delta: float) -> void:
 func _process(delta: float) -> void:
 	touch.mode = "off" if intro else "paused" if paused else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
 	touch.dash_shown = world.mod("dash_every", 0.0) > 0.0
+	touch.guide_controls = intro and ui.guide.page == Guide.CONTROLS
 	touch.frame(delta)
 	ui.touch = touch.on
 	ui.frame(world, delta)

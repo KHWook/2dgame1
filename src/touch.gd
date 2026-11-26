@@ -41,6 +41,10 @@ const REST := 0.8 # seconds after the end before a tap restarts, so a thumb stil
 ## (1280x720: 2x of 2.67x fits). Below this share of the size that would fit, scale by a fraction instead.
 const WHOLE_ENOUGH := 0.85
 const ROTATE := "가로로 돌려 주세요"
+## The start screen's controls page (src/guide.gd) shows the stick and the buttons where they really are, named.
+const DEMO_STICK := Vector2(46.0, 230.0) # the stick appears wherever the thumb lands; the page draws it here
+const DEMO_PUSH := Vector2(9.0, -5.0) # its knob, pushed a little
+const DEMO_WORDS := [["끌어서 이동", Vector2(74.0, 224.0)], ["누르면 베기", Vector2(412.0, 194.0)], ["돌진", Vector2(369.0, 213.0)]]
 
 var on := false # the controls are shown and listen
 var mode := "off" # set by main.gd every frame: "play", "pick", "ended", "paused", or "off" (the start screen)
@@ -55,6 +59,8 @@ var help_touch := -1 # the touch index on the "?" button, -1 when none. It answe
 var presses := {} # actions pressed since main.gd last took them
 var ended_for := 0.0 # real seconds in "ended"
 var rotate_label: Label
+var guide_controls := false # set by main.gd: the start screen's guide is on its controls page
+var demo_labels: Array = []
 
 
 func _ready() -> void:
@@ -74,6 +80,20 @@ func _ready() -> void:
 	rotate_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	rotate_label.visible = false
 	add_child(rotate_label)
+	for words in DEMO_WORDS:
+		var l := Label.new()
+		if Ui.font(Ui.SMALL) != null:
+			l.add_theme_font_override("font", Ui.font(Ui.SMALL))
+		l.add_theme_font_size_override("font_size", Ui.SMALL)
+		l.add_theme_color_override("font_color", Ui.GOLD)
+		l.add_theme_color_override("font_outline_color", Ui.INK)
+		l.add_theme_constant_override("outline_size", Ui.OUTLINE_SIZE)
+		l.text = words[0]
+		l.position = words[1]
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		l.visible = false
+		add_child(l)
+		demo_labels.append(l)
 
 
 func _input(event: InputEvent) -> void:
@@ -211,12 +231,22 @@ func frame(delta: float) -> void:
 		help_touch = help
 	if rotate_label != null: # made in _ready, so not there for a test that never adds this to a tree
 		rotate_label.visible = upright()
+	for l in demo_labels:
+		l.visible = _demo()
 	queue_redraw()
 
 
 func _draw() -> void:
 	if upright():
 		draw_rect(Rect2(Vector2.ZERO, VIEW), Color(0.05, 0.04, 0.09, 0.92))
+		return
+	if _demo():
+		_sprite("pad_ring", DEMO_STICK, true)
+		_sprite("pad_knob", DEMO_STICK + DEMO_PUSH, true)
+		_sprite("button", ATTACK, true)
+		_sprite("sword", ATTACK + Vector2(1.0, 0.0), true, ICON_SCALE)
+		_sprite("button_mid", DASH, false)
+		_sprite("icon_dash", DASH, false, ICON_SCALE)
 		return
 	if not on or not (mode == "play" or mode == "paused"):
 		return
@@ -237,6 +267,11 @@ func _draw() -> void:
 		_sprite("pad_ring", stick_from, true)
 		var knob := stick_from + (stick_at - stick_from).limit_length(REACH)
 		_sprite("pad_knob", knob, true)
+
+
+## Whether the guide's controls page is up on a touch screen, so the controls are drawn there to be seen.
+func _demo() -> bool:
+	return on and guide_controls and mode == "off" and not upright()
 
 
 ## A sprite centred on a point, on whole pixels, see-through unless pressed (a pressed one also sits a pixel lower),

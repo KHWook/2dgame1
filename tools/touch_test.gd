@@ -11,6 +11,8 @@ const Touch := preload("res://src/touch.gd")
 const Config := preload("res://src/sim/config.gd")
 const World := preload("res://src/sim/world.gd")
 const InputFrame := preload("res://src/sim/input_frame.gd")
+const Guide := preload("res://src/guide.gd")
+const Ui := preload("res://src/ui.gd")
 
 const AT := Vector2(100.0, 180.0) # where the left thumb lands
 
@@ -22,6 +24,7 @@ static func run() -> Array:
 	out.append_array(_buttons())
 	out.append_array(_modes())
 	out.append_array(_help())
+	out.append_array(_guide())
 	out.append_array(_scaling())
 	return out
 
@@ -278,6 +281,96 @@ static func _help() -> Array:
 			out.append("the \"?\" button answers while %s" % mode)
 		helped[0] = 2
 	t.free()
+	return out
+
+
+## The start screen's guide: deaf for Guide.WAIT seconds after it opens (the tap that opened it, or a press begun
+## before, does nothing); then a tap anywhere turns the page, a swipe turns it either way, and only the start button
+## (on the last page until the guide has been read; on every page once it has, or when opened during a run) or
+## Enter / Space closes it. Its buttons and panel stay clear of the controls the touch page draws.
+static func _guide() -> Array:
+	var out := []
+	var g = Guide.new()
+	var mid := Vector2(240.0, 120.0)
+	var right: Vector2 = Guide.RIGHT.get_center()
+	var left: Vector2 = Guide.LEFT.get_center()
+	g.show(false, false)
+	g.press(right)
+	g.frame(Guide.WAIT * 0.9)
+	if g.release(right) != "" or g.key(KEY_ENTER) != "" or not g.open or g.page != 0:
+		out.append("the guide answers a tap or a key in its first %.1f s" % Guide.WAIT)
+	g.press(right) # pressed while deaf, let go once it listens: still nothing
+	g.frame(Guide.WAIT * 0.2)
+	if g.release(right) != "" or g.page != 0:
+		out.append("a press begun before the guide listens turns or closes it when let go")
+	for at in [mid, left, Vector2(20.0, 260.0)]: # anywhere, the left button too while unread: the next page
+		g.page = 0
+		g.quiet = 0.0
+		g.press(at)
+		if g.release(at) != "next" or g.page != 1 or not g.open:
+			out.append("a quick tap at %s on the first page does not just turn to the next page" % at)
+	g.page = 0
+	g.quiet = 0.0
+	for i in 4: # tapping fast on the spot of "다음": the pages turn, but the start button in that spot is not reached
+		g.press(right)
+		g.release(right)
+		g.frame(Guide.TURN_WAIT + 0.05)
+	if not g.open or g.page != Guide.PAGES - 1:
+		out.append("tapping fast on the next button runs on through the start button (open %s, page %d)" % [g.open, g.page])
+	g.frame(Guide.WAIT)
+	g.page = Guide.PAGES - 1
+	for at in [mid, left]:
+		g.quiet = 0.0
+		g.press(at)
+		if g.release(at) != "" or not g.open:
+			out.append("a tap at %s on the last page closes the guide, or turns it" % at)
+	g.quiet = 0.0
+	g.press(mid)
+	if g.release(mid + Vector2(Guide.SWIPE + 5.0, 4.0)) != "back" or g.page != Guide.PAGES - 2:
+		out.append("a swipe to the right does not turn back a page")
+	g.quiet = 0.0
+	g.press(mid)
+	if g.release(mid - Vector2(Guide.SWIPE + 5.0, 0.0)) != "next" or g.page != Guide.PAGES - 1:
+		out.append("a swipe to the left does not turn to the next page")
+	g.quiet = 0.0
+	g.press(mid)
+	if g.release(mid + Vector2(Guide.SWIPE + 5.0, Guide.SWIPE + 20.0)) != "" or g.page != Guide.PAGES - 1:
+		out.append("a press slid mostly up or down turns the page, or closes it")
+	g.quiet = 0.0
+	if g.key(KEY_W) != "" or g.key(KEY_X) != "" or not g.open:
+		out.append("a key other than Enter, Space or the arrows does something in the guide")
+	g.quiet = 0.0
+	g.press(right + Vector2(Guide.PAD - 1.0, 0.0) + Vector2(Guide.RIGHT.size.x / 2.0, 0.0))
+	if g.release(right + Vector2(Guide.PAD - 1.0, 0.0) + Vector2(Guide.RIGHT.size.x / 2.0, 0.0)) != "start" or g.open:
+		out.append("the start button on the last page (or just past its edge) does not close the guide")
+	for keycode in [KEY_ENTER, KEY_SPACE]:
+		g.show(false, false)
+		g.frame(Guide.WAIT)
+		var turned: String = g.key(KEY_RIGHT)
+		g.frame(Guide.TURN_WAIT)
+		var back: String = g.key(KEY_LEFT)
+		g.frame(Guide.TURN_WAIT)
+		if turned != "next" or back != "back" or g.key(keycode) != "start" or g.open:
+			out.append("the arrow keys do not turn the guide, or key %d does not start" % keycode)
+	for how in [[true, false], [false, true]]: # read before, or opened during a run: start on the first page
+		g.show(how[0], how[1])
+		g.frame(Guide.WAIT)
+		g.press(left)
+		if not g.start_shown() or g.release(left) != "start":
+			out.append("the guide read before (%s) or opened during a run (%s) cannot be started from its first page" % how)
+	g.show(false, false)
+	if g.start_shown():
+		out.append("a guide never read shows its start button before the last page")
+	var spots: Array = [[Touch.ATTACK, 22.5], [Touch.DASH, 16.5], [Touch.DEMO_STICK, 24.5]]
+	for b in [Guide.RIGHT, Guide.LEFT, Ui.GUIDE_BOX]:
+		if not Rect2(Vector2.ZERO, Touch.VIEW).encloses(b):
+			out.append("a part of the guide at %s is off the screen" % b)
+		for spot in spots:
+			var near: Vector2 = spot[0].clamp(b.position, b.end)
+			if near.distance_to(spot[0]) < spot[1]:
+				out.append("the guide's %s covers the control drawn at %s" % [b, spot[0]])
+	if Guide.RIGHT.intersects(Guide.LEFT.grow(Guide.PAD * 2.0)):
+		out.append("the guide's two buttons are too close to tell apart")
 	return out
 
 

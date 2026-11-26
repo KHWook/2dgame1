@@ -14,6 +14,8 @@ const Painter := preload("res://src/art/painter.gd")
 const Looks := preload("res://src/art/looks.gd")
 const Records := preload("res://src/records.gd")
 const Sprites := preload("res://src/art/sprites.gd")
+const Guide := preload("res://src/guide.gd")
+const Coach := preload("res://src/coach.gd")
 
 signal chosen(slot: int) # a card was clicked: main.gd presses that slot's key for the next step
 
@@ -86,35 +88,58 @@ const BEHIND := 0.3 # how solid a line is while the keeper or a warning is behin
 const BEHIND_ENEMY := 0.6 # and while an enemy is
 const BEHIND_MARGIN := 14.0
 const BOT_FOCUS_AT := 50 # steps into its look at an offer the demo bot's slot lifts, so you see which it takes
-## The first screen: what the game is about, before the first night. Each line is [sprite, name, what to know].
-## main.gd shows it once when the game opens (not to the demo bot) and again whenever HELP is pressed.
+## The first screen: a guide of Guide.PAGES pages with pictures (src/guide.gd decides what input does). main.gd
+## shows it when the game opens (not to the demo bot) and again whenever HELP or the "?" button is pressed. Each
+## page is a title and rows of [sprites, name, what to know]; "→" between sprites in a row reads as an arrow.
 const INTRO_TITLE := "횃불 지기"
-const INTRO_GOAL := "밤마다 횃불을 지켜 새벽까지 버텨라"
-const INTRO_LINES := [
-	["flame_m_a", "횃불", "불이 꺼지면 끝난다. 장작을 주워 와 횃불에 넣어라"],
-	["shade_a", "어둠", "빛 밖은 캄캄하다. 적은 눈빛으로만 보인다"],
-	["ember_hot", "불씨", "횃불에 닿으면 붙는다. 빛 밖에서는 식어 가며 시야가 줄어든다"],
-	["bat_a", "빛", "박쥐는 빛 밖에서 빠르고, 그림자는 빛 안에서만 베인다"],
-	["icon_bright", "힘", "해 질 녘과 한밤중에 횃불이 내미는 셋 중 하나를 고른다"],
+const GUIDE_PAGES := [
+	{ "title": INTRO_TITLE, "lead": "밤마다 횃불을 지켜 새벽까지 버텨라", "rows": [
+		[["keeper_down_a", "→", "log", "→", "flame_l_a"], "", ""],
+		[["flame_m_a"], "횃불", "밤새 타서 줄어든다. 꺼지면 끝이다"],
+		[["log"], "장작", "주워서 횃불에 가져가면 불이 다시 산다"],
+		[["icon_bright"], "새벽", "버티면 다음 밤. 밤마다 더 어려워진다"],
+	] },
+	{ "title": "어둠에서 오는 것들", "lead": "칼로 베어서 쫓아내라", "rows": [
+		[["slime_a"], "슬라임", "횃불에 붙어 불을 덮는다. 먼저 베어라"],
+		[["bat_a"], "박쥐", "너를 쫓는다. 빛 밖에서 더 빠르다"],
+		[["shade_a"], "어둠", "빛 밖은 캄캄하다. 적은 눈빛으로만 보인다"],
+		[["icon_spark"], "힘", "해 질 녘과 한밤중에 횃불이 셋 중 하나를 준다"],
+	] },
+	{ "title": "조작", "lead": "", "rows": [] }, # filled for keys or touch in frame()
 ]
-const INTRO_KEYS := "이동 WASD · 방향키     베기 Space · J · X     돌진 Shift · K (힘을 얻은 뒤)"
-const INTRO_MORE := "일시정지 P · Esc     이 설명 다시 보기 H"
-const INTRO_START := "아무 키나 눌러 시작"
-const INTRO_BACK := "아무 키나 눌러 돌아가기"
-## The same lines for a phone (src/touch.gd), shown while the touch controls are.
-const TOUCH_KEYS := "이동 왼쪽 아무 데나 끌기     베기 오른쪽 아무 데나     돌진 칼 옆 버튼 (힘을 얻은 뒤)"
-const TOUCH_MORE := "일시정지 오른쪽 위 버튼     이 설명 다시 보기 그 옆 ?"
-const TOUCH_START := "눌러서 시작"
-const TOUCH_BACK := "눌러서 돌아가기"
+const GUIDE_KEYS := [
+	[["pad_knob"], "이동", "WASD · 방향키"],
+	[["sword"], "베기", "Space · J · X (장작을 들었으면 내려놓기)"],
+	[["icon_dash"], "돌진", "Shift · K (돌진 힘을 얻은 뒤)"],
+	[["pause_bars"], "멈춤", "P · Esc     이 설명 다시 보기 H"],
+]
+## On a phone the controls page has few words: touch.gd draws the stick and the buttons where they really are.
+const GUIDE_TOUCH := [
+	[["pad_knob"], "이동", "왼쪽 아무 데나 누르고 끌기"],
+	[["sword"], "베기", "오른쪽 아무 데나 누르기"],
+	[["pause_bars"], "멈춤", "오른쪽 위 버튼, 그 옆 ?는 이 설명"],
+]
+const GUIDE_TURN_KEYS := "← → 넘기기 · Enter 시작"
+const GUIDE_TURN_TOUCH := "옆으로 밀거나 눌러서 넘기기"
+const GUIDE_NEXT := "다음 ▶"
+const GUIDE_START := "시작"
+const GUIDE_BACK := "돌아가기"
+const GUIDE_DOT := "●"
+const GUIDE_DOT_OFF := "○"
+const GUIDE_BOX := Rect2(80.0, 8.0, 320.0, 204.0) # the page's panel: clear of where the controls page draws the stick and the buttons
+const GUIDE_WAITING := 0.35 # how solid the buttons are while the guide does not listen yet
+## The short lines under the cards, the end and the pause screen: for keys, and for a phone (src/touch.gd).
 const PICK_KEYS := "1 · 2 · 3 키 또는 클릭으로 고르기"
 const PICK_TOUCH := "카드를 눌러 고르기"
 const AGAIN_KEYS := "R 다시 하기"
 const AGAIN_TOUCH := "눌러서 다시 하기"
 const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
 const PAUSE_TOUCH := "눌러서 계속하기 · ? 설명 보기"
-const INTRO_NAME := 30.0 # the width kept for a line's name, so what follows lines up
-const INTRO_BLINK := 3.0 # radians per second the last line breathes
+const INTRO_NAME := 34.0 # the width kept for a line's name, so what follows lines up
+const INTRO_BLINK := 3.0 # radians per second the button that goes on breathes
 const INTRO_SCRIM := 0.7
+const COACH_ABOVE := 9.0 # pixels above the thing the coaching arrow's tip stays
+const COACH_BOB := 1.5
 const PAUSE_COLUMN := 210.0
 const PAUSE_LINES := 22 # the pause list drops the upgrades' words past this many lines, keeping just the names
 
@@ -126,10 +151,20 @@ var bot_slot := 0 # the demo bot's slot, from 1; 0 without a bot
 var bot_looked := 0 # set by main.gd: steps the demo bot has looked at this offer
 var paused := false
 var intro := false # set by main.gd: the first screen is up
-var intro_box: PanelContainer
-var intro_press: Label
-var intro_keys: Label
-var intro_more: Label
+var guide = Guide.new() # what the first screen's input does; main.gd feeds it
+var coach = Coach.new() # the first night's arrows, on for a player who has not read the guide
+var guide_box: PanelContainer
+var guide_pages: Array = [] # per page: its VBoxContainer
+var guide_controls: VBoxContainer # the controls page's rows, rebuilt when touch changes
+var guide_controls_touch := -1 # which rows guide_controls holds: 1 touch, 0 keys, -1 none yet
+var guide_dots: Label
+var guide_turn: Label
+var guide_right: PanelContainer
+var guide_right_label: Label
+var guide_left: PanelContainer
+var guide_left_label: Label
+var coach_label: Label
+var coach_arrow: TextureRect
 var pause_keys: Label
 var touch := false # set by main.gd: the touch controls are showing, so the words say tap instead of keys
 
@@ -267,27 +302,39 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	pause_lines.add_child(pause_columns)
 	pause_box.visible = false
 
-	intro_box = _panel(self, PAUSE_PANEL, 8.0)
-	var intro_lines := VBoxContainer.new()
-	intro_lines.add_theme_constant_override("separation", 4)
-	intro_box.add_child(intro_lines)
-	_label(intro_lines, HUGE, WARM, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_TITLE
-	_label(intro_lines, SMALL, CREAM, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_GOAL
-	for line in INTRO_LINES:
-		var intro_row := HBoxContainer.new()
-		intro_row.add_theme_constant_override("separation", 5)
-		intro_lines.add_child(intro_row)
-		var picture := _icon(intro_row)
-		picture.texture = Sprites.texture(line[0])
-		picture.custom_minimum_size = Vector2(16.0, 16.0)
-		var line_name := _label(intro_row, SMALL, GOLD)
-		line_name.text = line[1]
-		line_name.custom_minimum_size = Vector2(INTRO_NAME, 0.0)
-		_label(intro_row, SMALL, CREAM).text = line[2]
-	intro_keys = _label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
-	intro_more = _label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
-	intro_press = _label(intro_lines, BIG, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-	intro_box.visible = false
+	guide_box = _panel(self, PAUSE_PANEL, 8.0)
+	guide_box.position = GUIDE_BOX.position
+	guide_box.custom_minimum_size = GUIDE_BOX.size
+	var guide_lines := VBoxContainer.new()
+	guide_box.add_child(guide_lines)
+	for page in GUIDE_PAGES:
+		var page_lines := VBoxContainer.new()
+		page_lines.add_theme_constant_override("separation", 5)
+		page_lines.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		guide_lines.add_child(page_lines)
+		_label(page_lines, HUGE, WARM, HORIZONTAL_ALIGNMENT_CENTER).text = page.title
+		if page.lead != "":
+			_label(page_lines, SMALL, CREAM, HORIZONTAL_ALIGNMENT_CENTER).text = page.lead
+		for line in page.rows:
+			_guide_row(page_lines, line)
+		guide_pages.append(page_lines)
+	guide_controls = VBoxContainer.new()
+	guide_controls.add_theme_constant_override("separation", 6)
+	guide_pages[Guide.CONTROLS].add_child(guide_controls)
+	guide_turn = _label(guide_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	guide_dots = _label(guide_lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	guide_right = _guide_button()
+	guide_right_label = guide_right.get_child(0)
+	guide_left = _guide_button()
+	guide_left_label = guide_left.get_child(0)
+	guide_box.visible = false
+	coach_arrow = TextureRect.new()
+	coach_arrow.texture = Sprites.texture("coach_arrow")
+	coach_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	coach_arrow.visible = false
+	add_child(coach_arrow)
+	coach_label = _label(self, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	coach_label.visible = false
 
 	flier = TextureRect.new()
 	flier.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -319,6 +366,7 @@ func after_step(w) -> void:
 		gain_age = 0.0
 		pop = 1.0
 		shown_score = w.score
+	coach.step(w)
 	_hints(w)
 
 
@@ -334,19 +382,13 @@ func frame(w, delta: float) -> void:
 	press.text = PICK_TOUCH if touch else PICK_KEYS
 	again.text = AGAIN_TOUCH if touch else AGAIN_KEYS
 	pause_keys.text = PAUSE_TOUCH if touch else PAUSE_KEYS
-	intro_keys.text = TOUCH_KEYS if touch else INTRO_KEYS
-	intro_more.text = TOUCH_MORE if touch else INTRO_MORE
 	_top(w, delta)
 	if intro: # the offer waits under the first screen, and is dealt once it is gone
 		box.visible = false
 	else:
 		_offer(w, delta)
-	intro_box.visible = intro
-	if intro:
-		intro_press.text = (TOUCH_START if w.steps == 0 else TOUCH_BACK) if touch else (INTRO_START if w.steps == 0 else INTRO_BACK)
-		intro_press.modulate.a = 0.7 + 0.3 * sin(clock_time * INTRO_BLINK)
-		intro_box.reset_size()
-		intro_box.position = ((Painter.VIEW - intro_box.size) / 2.0).round()
+	_guide_frame(delta)
+	_coach_frame(w)
 	_flight(w, delta)
 	_told(w, delta)
 	_hint_frame(w, delta)
@@ -900,6 +942,89 @@ static func _width(label: Label) -> float:
 
 
 ## A label in the palette, with the dark outline every word has.
+## The guide: the page that is up, its dots, and its buttons (the right one breathing once it listens).
+func _guide_frame(delta: float) -> void:
+	guide.frame(delta)
+	guide_box.visible = intro
+	guide_right.visible = intro
+	guide_left.visible = intro and guide.start_shown() and not guide.last()
+	if not intro:
+		return
+	if guide_controls_touch != int(touch):
+		guide_controls_touch = int(touch)
+		for child in guide_controls.get_children():
+			child.free()
+		for line in GUIDE_TOUCH if touch else GUIDE_KEYS:
+			_guide_row(guide_controls, line)
+	for i in guide_pages.size():
+		guide_pages[i].visible = i == guide.page
+	var dots := []
+	for i in Guide.PAGES:
+		dots.append(GUIDE_DOT if i == guide.page else GUIDE_DOT_OFF)
+	guide_dots.text = " ".join(dots)
+	guide_turn.text = GUIDE_TURN_TOUCH if touch else GUIDE_TURN_KEYS
+	var start := GUIDE_BACK if guide.returning else GUIDE_START
+	guide_right_label.text = start if guide.last() else GUIDE_NEXT
+	guide_left_label.text = start
+	var ready: bool = guide.listening()
+	guide_right.position = Guide.RIGHT.position
+	guide_right.size = Guide.RIGHT.size
+	guide_left.position = Guide.LEFT.position
+	guide_left.size = Guide.LEFT.size
+	guide_right.modulate.a = (0.75 + 0.25 * sin(clock_time * INTRO_BLINK)) if ready else GUIDE_WAITING
+	guide_left.modulate.a = 1.0 if ready else GUIDE_WAITING
+
+
+## A row of a guide page: its pictures (a "→" among them is an arrow), a name, and what to know.
+func _guide_row(parent: Node, line: Array) -> void:
+	var r := HBoxContainer.new()
+	r.add_theme_constant_override("separation", 5)
+	r.alignment = BoxContainer.ALIGNMENT_CENTER if line[1] == "" else BoxContainer.ALIGNMENT_BEGIN
+	parent.add_child(r)
+	for sprite in line[0]:
+		if sprite == "→":
+			_label(r, BIG, MUTED).text = sprite
+			continue
+		var picture := _icon(r)
+		var tex := Sprites.texture(sprite)
+		picture.texture = tex
+		# a row of pictures only shows them at twice their size; beside words, in a 16-pixel square
+		picture.custom_minimum_size = tex.get_size() * 2.0 if line[1] == "" else Vector2(16.0, 16.0)
+	if line[1] == "":
+		return
+	var line_name := _label(r, SMALL, GOLD)
+	line_name.text = line[1]
+	line_name.custom_minimum_size = Vector2(INTRO_NAME, 0.0)
+	_label(r, SMALL, CREAM).text = line[2]
+
+
+func _guide_button() -> PanelContainer:
+	var b := _panel(self, CARD_BACK, 2.0)
+	var back: StyleBoxFlat = b.get_theme_stylebox("panel")
+	back.border_color = CARD_EDGE
+	var l := _label(b, BIG, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	b.visible = false
+	return b
+
+
+## The first night's coaching (src/coach.gd): words over a bobbing arrow above what to go to, on the HUD's layer.
+func _coach_frame(w) -> void:
+	var show: Array = [] if intro or paused or taken >= 0 else coach.now(w)
+	coach_arrow.visible = not show.is_empty()
+	coach_label.visible = not show.is_empty()
+	if show.is_empty():
+		return
+	var bob := roundf(COACH_BOB * sin(clock_time * BOB_SPEED * 2.0))
+	var tip: Vector2 = show[1] - Vector2(0.0, COACH_ABOVE + bob)
+	var tex: Texture2D = coach_arrow.texture
+	coach_arrow.position = (tip - Vector2(tex.get_width() / 2.0, tex.get_height())).round()
+	coach_label.text = show[0]
+	coach_label.size = Vector2(_width(coach_label) + 4.0, 12.0)
+	var at := Vector2(tip.x - coach_label.size.x / 2.0, tip.y - tex.get_height() - 13.0)
+	coach_label.position = at.clamp(Vector2(2.0, 2.0), Painter.VIEW - coach_label.size - Vector2(2.0, 2.0)).round()
+
+
 func _label(parent: Node, size: int, colour: Color, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
 	l.horizontal_alignment = align

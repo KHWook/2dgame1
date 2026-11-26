@@ -1186,6 +1186,18 @@ const SPRITES := {
 		"kwk.kwk",
 		"kkk.kkk",
 	],
+	# The first night's coaching arrow (src/ui.gd, src/coach.gd), pointing down at what to go to.
+	"coach_arrow": [
+		"..kkkkk..",
+		"..kYYYk..",
+		"..kYYYk..",
+		"kkkYYYkkk",
+		"kYYYYYYYk",
+		".kYYYYYk.",
+		"..kYYYk..",
+		"...kYk...",
+		"....k....",
+	],
 	"help_mark": [
 		".kkkkk.",
 		"kkwwwkk",
