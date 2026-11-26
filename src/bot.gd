@@ -11,7 +11,7 @@ const DEADZONE := 2.0
 const KEEP := 2.0 # how far outside a foe's touch the bot stands while it fights it
 const DASH_FROM := 60.0 # with the dash upgrade, the bot dashes toward a goal at least this far away
 const HUNGRY := 2 # the bot goes for a berry at this hp or less; above it, hauling logs matters more
-const CLEAR_OF := 6.0 # how far past a marked landing's shock the bot steps to be out of it
+const CLEAR_OF := 6.0 # how far past a marked landing's shock, or a charge's lane, the bot steps to be out of it
 
 var pick := 1 # which offer slot this bot always takes
 
@@ -32,6 +32,7 @@ func frame(w) -> InputFrame:
 	var foe = _nearest(p.pos, w.enemies)
 	var smotherer = _nearest(p.pos, w.enemies.filter(func(e): return e.at_torch))
 	var landing = _landing(w, p.pos)
+	var lane = _lane(w, p.pos)
 	var rush: bool = w.enemies.any(func(e): return e.T.has("lunge") and e.move in ["warn", "lunge"])
 	if landing != null:
 		# a leap is marked on it: step out of the shock sideways to the leap, on the torch's side (not into a fence)
@@ -44,6 +45,16 @@ func frame(w) -> InputFrame:
 		if out.length() < 1.0:
 			out = side
 		goal = landing.move_to + out.normalized() * (landing.T.leap.shock + Config.PLAYER.radius + CLEAR_OF)
+	elif lane != null:
+		# a charge is lined up at it: step out of the lane sideways, on the side it already leans to (the torch's
+		# side when it stands right on the line)
+		var on: Vector2 = lane.pos + lane.aim * maxf(0.0, (p.pos - lane.pos).dot(lane.aim))
+		var out: Vector2 = p.pos - on
+		if out.length() < 1.0:
+			out = lane.aim.orthogonal()
+			if out.dot(Config.TORCH.pos - p.pos) < 0.0:
+				out = -out
+		goal = on + out.normalized() * (_lane_width(lane) + CLEAR_OF)
 	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE and foe.T.get("dark_proof", false) and not w.in_light(foe.pos):
 		pass # blows pass through it out here: walk back to the torch (the goal already) and fight it in the light
 	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE:
@@ -82,6 +93,24 @@ static func _landing(w, at: Vector2):
 		if e.T.has("leap") and e.move in ["warn", "air"] and at.distance_to(e.move_to) < e.T.leap.shock + Config.PLAYER.radius + CLEAR_OF:
 			return e
 	return null
+
+
+## A charger lined up at the bot or charging, whose lane (its body's width along the rest of its line) the bot stands
+## in, or null.
+static func _lane(w, at: Vector2):
+	for e in w.enemies:
+		if not (e.T.has("charge") and e.move in ["warn", "charge"]):
+			continue
+		var along: float = (at - e.pos).dot(e.aim)
+		if along < -e.T.radius or along > e.pos.distance_to(e.move_to) + e.T.radius:
+			continue
+		if absf((at - e.pos).dot(e.aim.orthogonal())) < _lane_width(e):
+			return e
+	return null
+
+
+static func _lane_width(e) -> float:
+	return e.T.radius + Config.PLAYER.radius + 2.0
 
 
 static func _nearest(from: Vector2, enemies: Array):

@@ -24,8 +24,9 @@ const TORCH := {
 	"smother": 8.0, "reach": 12.0, "light_min": 28.0, "light_max": 100.0,
 }
 
-## Logs appear on the ground away from the torch, a few at a time.
-const WOOD := { "first": 1.0, "every": 5.5, "max_on_ground": 3, "keep_away": 45.0 }
+## Logs appear on the ground away from the torch, a few at a time. On a night whose torch burns faster than pace
+## (fuel per second, before upgrades), they come that much more often, so the wood keeps up with the fire.
+const WOOD := { "first": 1.0, "every": 5.5, "max_on_ground": 3, "keep_away": 45.0, "pace": 2.8 }
 
 ## Berries appear now and then, far from the torch. Walking over one heals you if you are hurt.
 const BERRY := { "first": 18.0, "every": 20.0, "max_on_ground": 1, "keep_away": 55.0, "heal": 1 }
@@ -44,8 +45,10 @@ const NIGHTS := [
 	{ "burn": 2.4, "spawn": [2.5, 1.7], "who": { "slime": 0.6, "bat": 0.2, "thief": 0.2 } },
 	{ "burn": 2.8, "spawn": [2.3, 1.55], "who": { "slime": 0.5, "bat": 0.2, "thief": 0.1, "shade": 0.2 } },
 	{ "burn": 3.2, "spawn": [2.0, 1.3], "who": { "slime": 0.45, "bat": 0.2, "thief": 0.1, "shade": 0.15, "big_slime": 0.1 } },
+	{ "burn": 3.5, "spawn": [1.75, 1.15], "who": { "slime": 0.45, "bat": 0.2, "thief": 0.1, "shade": 0.15, "big_slime": 0.1 } },
+	{ "burn": 3.75, "spawn": [1.6, 1.05], "who": { "slime": 0.4, "bat": 0.17, "thief": 0.08, "shade": 0.13, "big_slime": 0.1, "boar": 0.12 } },
 ]
-const LATER_NIGHTS := { "burn": 0.4, "spawn": 0.78 } # per night past the table: fuel per second added, spawn gap multiplied
+const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82 } # per night past the table: fuel per second added, spawn gap multiplied
 
 ## Dawn: the sun clears the field, you rest (heal), and the torch is topped up to at least its starting fuel (its
 ## start_fuel share of the tank, so a big torch is topped up further).
@@ -77,12 +80,17 @@ const ENEMY := {
 ## mark is hurt. lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
 ## every so many seconds it stops for warn seconds, then rushes to the torch at speed, smothers it for stay seconds
 ## (in the light, so it can be cut) and walks back out into the dark.
+## charge (the boar): every so many seconds, on the field with the player within range, it fixes a line at the
+## player and paws the ground for warn seconds, then charges along it at speed for dist pixels (or to the field's
+## edge; blows do not stop it) and stands dazed for rest seconds.
 const ENEMY_TYPES := {
 	"slime": { "hp": 2, "speed": 16.0, "radius": 7.0, "target": "torch" },
 	"bat": { "hp": 1, "speed": 26.0, "radius": 5.0, "target": "player", "dark_speed_mult": 1.5 },
 	"shade": { "hp": 2, "speed": 24.0, "radius": 6.0, "target": "player", "dark_proof": true },
 	"big_slime": { "hp": 5, "speed": 10.0, "radius": 10.0, "target": "torch", "smother": 2.0, "split_count": 2, "splits_into": "slime" },
 	"thief": { "hp": 1, "speed": 40.0, "radius": 6.0, "target": "log", "harmless": true },
+	"boar": { "hp": 3, "speed": 18.0, "radius": 7.0, "target": "player",
+		"charge": { "every": 3.5, "range": 110.0, "warn": 0.8, "speed": 170.0, "dist": 150.0, "rest": 1.2 } },
 	"slime_king": {
 		"hp": 16, "speed": 9.0, "radius": 13.0, "target": "torch", "smother": 2.5, "split_count": 2, "splits_into": "big_slime",
 		"boss": true, "name": "슬라임 왕", "heavy": 0.15, "summon": { "kind": "slime", "every": 8.0, "count": 2 }, "score": 150,

@@ -3,12 +3,13 @@
 ## ./verify --update-golden (and add a docs/DECISIONS.md entry).
 extends RefCounted
 
-## Seed 8 with slot 1 passes four dawns and goes out on the fifth night, the first boss night. On the way it meets
-## every usual enemy kind: the slime king's coming is told ahead, it comes, calls slimes, leaps three times (the bot
-## steps out of each marked landing) and is killed; big slimes split, thieves take logs, blows pass through shades in
-## the dark, bats fly faster out of the light, berries are eaten. It takes upgrades to the second level (bright fire,
-## spark, thorn cloak) and uses bright fire's quicker steps in the light, the warm glow and the thorn cloak pricking.
-## The shade lord, the ember ring and the big torch are not in this run; the rules scenes hold them.
-const SEED := 8
-const STEPS := 60 * 360
+## Seed 14 with slot 1 passes six dawns and falls on the seventh night (the keeper dies). On the way it meets every
+## usual enemy kind: the slime king's coming is told ahead, it comes, leaps (the bot steps out of the marked landing)
+## and is killed; from the sixth night boars line up, paw and charge 13 times (the bot steps out of every lane) and
+## five are cut down while dazed; big slimes split, thieves take logs, blows pass through shades in the dark, bats fly
+## faster out of the light, berries are eaten, logs come faster as the fire burns faster. It takes the ember ring to
+## its third level, bright fire, big torch and slow burn to the second, the spark, spin, thorn cloak, dry logs and
+## the dash. The shade lord, the warm glow and the vampire blade are not in this run; the rules scenes hold them.
+const SEED := 14
+const STEPS := 60 * 400
 const PICK_SLOT := 1

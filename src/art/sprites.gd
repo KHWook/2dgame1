@@ -860,6 +860,30 @@ const SPRITES := {
 		"..kkkkkkkkkkkkkkkkkkkk..",
 		"........................",
 	],
+	"boar_a": [
+		"................",
+		"................",
+		"................",
+		"................",
+		"..........kk....",
+		"...k.k.k.kbk....",
+		"..kBkBkBkbbBk...",
+		".kBBbbbbBbbBBk..",
+		"kBbbbbbbbBBiBBk.",
+		"kBbbbbbbbBBBBkSk",
+		"kBbbbbbbBBBBkSSS",
+		"kBBbbbbBBBBWkSSk",
+		".kBBBBBBBBBkWkk.",
+		"..kBk.kBkkBk....",
+		"..kk..kk..kk....",
+		"................",
+	],
+	"dazed": [
+		".Y.....",
+		"YWY..Y.",
+		".Y..YWY",
+		".....Y.",
+	],
 	"thief_a": [
 		"................",
 		"................",
@@ -983,6 +1007,7 @@ const VARIANTS := {
 		4: "...kkGGhhhGGGGGGGGGkk...", 6: ".kGGGkkGGGGGGGGGGkkGGGk.",
 	}],
 	"thief_b": ["thief_a", { 13: "..kkkkOOkkOOkk..", 14: "......kkk.kkk..." }],
+	"boar_b": ["boar_a", { 13: "...kBkkBk.kBk...", 14: "...kk.kk...kk..." }],
 }
 
 
