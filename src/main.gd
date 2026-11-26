@@ -21,6 +21,7 @@ const KEYS := {
 	KEY_1: "pick_1", KEY_2: "pick_2", KEY_3: "pick_3", KEY_R: "restart",
 }
 const PAUSE_KEYS := [KEY_P, KEY_ESCAPE]
+const HELP_KEY := KEY_H # brings the first screen back
 const SFX_DB := -12.0 # how loud the sound effects play: under the player's own music, if any
 const TORCH_LIGHT := Color("#ffcf8a")
 const TORCH_ENERGY := 1.25 # the night is nearly black, so what you see by is all the torch's
@@ -43,6 +44,7 @@ var torch_lights: Array = [] # one PointLight2D per ring of tongues (Painter.LIG
 var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step made
 var sfx := {} # sound name -> its AudioStreamPlayer
 var paused := false
+var intro := false # the first screen is up (src/ui.gd): the world waits, and the next key or click takes it away
 var player_light: PointLight2D
 
 func _ready() -> void:
@@ -88,11 +90,25 @@ func _ready() -> void:
 	ui = Ui.new()
 	add_child(ui)
 	ui.setup(painter, records, overlay, bot.pick if bot != null else 0, world)
+	_set_intro(bot == null) # the demo bot starts at once
 	ui.chosen.connect(func(slot: int): pending["pick_%d" % (slot + 1)] = true)
+
+
+func _set_intro(on: bool) -> void:
+	intro = on
+	ui.intro = on
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
+	var click := event as InputEventMouseButton
+	if intro: # the key or click that takes the first screen away does nothing else
+		if (k != null and k.pressed and not k.echo) or (click != null and click.pressed):
+			_set_intro(false)
+		return
+	if k != null and k.pressed and not k.echo and k.keycode == HELP_KEY:
+		_set_intro(true)
+		return
 	if k != null and k.pressed and not k.echo and PAUSE_KEYS.has(k.keycode):
 		paused = not paused
 		ui.set_paused(paused, world)
@@ -118,7 +134,7 @@ func _physics_process(_delta: float) -> void:
 	f.held = held.duplicate()
 	f.pressed = pending
 	pending = {}
-	if paused: # presses made while paused are dropped; keys still held count again once it goes on
+	if paused or intro: # presses made while paused are dropped; keys still held count again once it goes on
 		return
 	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
 	juice.frame()

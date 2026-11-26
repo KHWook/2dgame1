@@ -86,6 +86,24 @@ const BEHIND := 0.3 # how solid a line is while the keeper or a warning is behin
 const BEHIND_ENEMY := 0.6 # and while an enemy is
 const BEHIND_MARGIN := 14.0
 const BOT_FOCUS_AT := 50 # steps into its look at an offer the demo bot's slot lifts, so you see which it takes
+## The first screen: what the game is about, before the first night. Each line is [sprite, name, what to know].
+## main.gd shows it once when the game opens (not to the demo bot) and again whenever HELP is pressed.
+const INTRO_TITLE := "횃불 지기"
+const INTRO_GOAL := "밤마다 횃불을 지켜 새벽까지 버텨라"
+const INTRO_LINES := [
+	["flame_m_a", "횃불", "불이 꺼지면 끝난다. 장작을 주워 와 횃불에 넣어라"],
+	["shade_a", "어둠", "빛 밖은 캄캄하다. 적은 눈빛으로만 보인다"],
+	["ember_hot", "불씨", "횃불에 닿으면 붙는다. 빛 밖에서는 식어 가며 시야가 줄어든다"],
+	["bat_a", "빛", "박쥐는 빛 밖에서 빠르고, 그림자는 빛 안에서만 베인다"],
+	["icon_bright", "힘", "해 질 녘과 한밤중에 횃불이 내미는 셋 중 하나를 고른다"],
+]
+const INTRO_KEYS := "이동 WASD · 방향키     베기 Space · J · X     돌진 Shift · K (힘을 얻은 뒤)"
+const INTRO_MORE := "일시정지 P · Esc     이 설명 다시 보기 H"
+const INTRO_START := "아무 키나 눌러 시작"
+const INTRO_BACK := "아무 키나 눌러 돌아가기"
+const INTRO_NAME := 30.0 # the width kept for a line's name, so what follows lines up
+const INTRO_BLINK := 3.0 # radians per second the last line breathes
+const INTRO_SCRIM := 0.7
 const PAUSE_COLUMN := 210.0
 const PAUSE_LINES := 22 # the pause list drops the upgrades' words past this many lines, keeping just the names
 
@@ -96,6 +114,9 @@ var records
 var bot_slot := 0 # the demo bot's slot, from 1; 0 without a bot
 var bot_looked := 0 # set by main.gd: steps the demo bot has looked at this offer
 var paused := false
+var intro := false # set by main.gd: the first screen is up
+var intro_box: PanelContainer
+var intro_press: Label
 
 var hint_box: PanelContainer
 var hint_icon: TextureRect
@@ -228,11 +249,33 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	var pause_title := _label(pause_lines, HUGE, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
 	pause_title.text = "일시정지"
 	var pause_keys := _label(pause_lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-	pause_keys.text = "P / Esc 계속하기"
+	pause_keys.text = "P / Esc 계속하기 · H 설명 보기"
 	pause_columns = HBoxContainer.new()
 	pause_columns.add_theme_constant_override("separation", 10)
 	pause_lines.add_child(pause_columns)
 	pause_box.visible = false
+
+	intro_box = _panel(self, PAUSE_PANEL, 8.0)
+	var intro_lines := VBoxContainer.new()
+	intro_lines.add_theme_constant_override("separation", 4)
+	intro_box.add_child(intro_lines)
+	_label(intro_lines, HUGE, WARM, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_TITLE
+	_label(intro_lines, SMALL, CREAM, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_GOAL
+	for line in INTRO_LINES:
+		var intro_row := HBoxContainer.new()
+		intro_row.add_theme_constant_override("separation", 5)
+		intro_lines.add_child(intro_row)
+		var picture := _icon(intro_row)
+		picture.texture = Sprites.texture(line[0])
+		picture.custom_minimum_size = Vector2(16.0, 16.0)
+		var line_name := _label(intro_row, SMALL, GOLD)
+		line_name.text = line[1]
+		line_name.custom_minimum_size = Vector2(INTRO_NAME, 0.0)
+		_label(intro_row, SMALL, CREAM).text = line[2]
+	_label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_KEYS
+	_label(intro_lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER).text = INTRO_MORE
+	intro_press = _label(intro_lines, BIG, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	intro_box.visible = false
 
 	flier = TextureRect.new()
 	flier.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -277,7 +320,16 @@ func set_paused(on: bool, w) -> void:
 func frame(w, delta: float) -> void:
 	clock_time += delta
 	_top(w, delta)
-	_offer(w, delta)
+	if intro: # the offer waits under the first screen, and is dealt once it is gone
+		box.visible = false
+	else:
+		_offer(w, delta)
+	intro_box.visible = intro
+	if intro:
+		intro_press.text = INTRO_START if w.steps == 0 else INTRO_BACK
+		intro_press.modulate.a = 0.7 + 0.3 * sin(clock_time * INTRO_BLINK)
+		intro_box.reset_size()
+		intro_box.position = ((Painter.VIEW - intro_box.size) / 2.0).round()
 	_flight(w, delta)
 	_told(w, delta)
 	_hint_frame(w, delta)
@@ -286,7 +338,7 @@ func frame(w, delta: float) -> void:
 		pause_box.reset_size()
 		pause_box.position = ((Painter.VIEW - pause_box.size) / 2.0).round()
 	var ended: bool = ENDINGS.has(w.phase)
-	var target := 0.55 if paused else (0.5 if ended else (0.45 if w.phase == "pick" else 0.0))
+	var target := INTRO_SCRIM if intro else 0.55 if paused else (0.5 if ended else (0.45 if w.phase == "pick" else 0.0))
 	if taken >= 0:
 		target = 0.45 * (1.0 - take_age / TAKE_TIME)
 	painter.scrim = move_toward(painter.scrim, target, delta * 3.0)
@@ -482,7 +534,7 @@ func _hovered(shown: Array) -> int:
 
 func _input(event: InputEvent) -> void:
 	var b := event as InputEventMouseButton
-	if b == null or not b.pressed or b.button_index != MOUSE_BUTTON_LEFT or paused or offer_key == "":
+	if b == null or not b.pressed or b.button_index != MOUSE_BUTTON_LEFT or paused or intro or offer_key == "":
 		return
 	var shown := []
 	for i in offers.size():
