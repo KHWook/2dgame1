@@ -1,0 +1,210 @@
+## Touch controls for playing on a phone: a stick that appears where the left thumb lands, a sword button and (once
+## the dash upgrade is held) a dash button on the right, a pause button, and a tap that restarts after the end. Part of
+## the bridge with src/main.gd: it turns screen touches into the same action names the keys give ("left", "attack",
+## ...), so the simulation cannot tell a touch from a key (S1), and each tap counts for exactly one step (D6: take()).
+## The start screen and the cards are tapped through Godot's mouse emulation (src/main.gd, src/ui.gd).
+## Shown once the screen is touched (or the device says it has a touch screen) and hidden again by a key press.
+## Also decides how the 480x270 field is scaled to the window on web and mobile (stretch_for), and asks a phone held
+## upright to be turned.
+extends Node2D
+
+const Sprites := preload("res://src/art/sprites.gd")
+const Config := preload("res://src/sim/config.gd")
+const Ui := preload("res://src/ui.gd")
+
+signal pause_pressed # the pause button, or a tap anywhere while paused
+
+const VIEW: Vector2 = Config.VIEW
+const DEAD := 4.0 # pixels the thumb moves from where it landed before the keeper walks
+const REACH := 13.0 # how far the knob goes from the ring's middle; past it the ring follows the thumb
+const STICK_TOP := 60.0 # the stick starts only below the HUD's top-left panel, so it never covers it
+const ATTACK := Vector2(VIEW.x - 34.0, VIEW.y - 36.0) # the sword button's middle
+const DASH := Vector2(VIEW.x - 76.0, VIEW.y - 22.0)
+const PAUSE := Vector2(VIEW.x - 14.0, 44.0) # under the score and the night, clear of the "+10" that rises there
+const ATTACK_REACH := 22.0 # touch radius: a little bigger than the drawn button, so a thumb that is close counts
+const DASH_REACH := 17.0
+const PAUSE_REACH := 13.0
+const LOOK := 0.45 # how solid the controls are while untouched
+const LOOK_DOWN := 0.85 # and while pressed
+const REST := 0.8 # seconds after the end before a tap restarts, so a thumb still swinging does not skip the end screen
+const DIRECTIONS := [["right"], ["right", "down"], ["down"], ["down", "left"], ["left"], ["left", "up"], ["up"], ["up", "right"]]
+## Integer scaling keeps every pixel the same size, but on some phones it leaves the field small inside wide borders
+## (1280x720: 2x of 2.67x fits). Below this share of the size that would fit, scale by a fraction instead.
+const WHOLE_ENOUGH := 0.85
+const ROTATE := "가로로 돌려 주세요"
+
+var on := false # the controls are shown and listen
+var mode := "off" # set by main.gd every frame: "play", "pick", "ended", "paused", or "off" (the start screen)
+var dash_shown := false # set by main.gd: the dash upgrade is held
+var stick := -1 # the touch index steering, -1 when none
+var stick_from := Vector2.ZERO # the ring's middle
+var stick_at := Vector2.ZERO # the thumb
+var buttons := {} # touch index -> the action it holds down: "attack" or "dash"
+var presses := {} # actions pressed since main.gd last took them
+var ended_for := 0.0 # real seconds in "ended"
+var rotate_label: Label
+
+
+func _ready() -> void:
+	on = DisplayServer.is_touchscreen_available()
+	rotate_label = Label.new()
+	var f: Font = Ui.font(Ui.BIG)
+	if f != null:
+		rotate_label.add_theme_font_override("font", f)
+	rotate_label.add_theme_font_size_override("font_size", Ui.BIG)
+	rotate_label.add_theme_color_override("font_color", Ui.WARM)
+	rotate_label.add_theme_color_override("font_outline_color", Ui.INK)
+	rotate_label.add_theme_constant_override("outline_size", Ui.OUTLINE_SIZE)
+	rotate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rotate_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	rotate_label.size = VIEW
+	rotate_label.text = ROTATE
+	rotate_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rotate_label.visible = false
+	add_child(rotate_label)
+
+
+func _input(event: InputEvent) -> void:
+	if handle(event):
+		get_viewport().set_input_as_handled()
+
+
+## Takes one input event; true when it was a touch this used. A key press hides the controls, a touch shows them.
+func handle(event: InputEvent) -> bool:
+	var k := event as InputEventKey
+	if k != null and k.pressed:
+		on = false
+		release()
+		return false
+	var t := event as InputEventScreenTouch
+	var d := event as InputEventScreenDrag
+	if t == null and d == null:
+		return false
+	if t != null and t.pressed:
+		on = true
+	if d != null:
+		if d.index != stick:
+			return false
+		stick_at = d.position
+		var off := stick_at - stick_from
+		if off.length() > REACH: # the ring follows the thumb, so turning back answers at once
+			stick_from = stick_at - off.normalized() * REACH
+		return true
+	if not t.pressed:
+		if t.index == stick:
+			stick = -1
+		buttons.erase(t.index)
+		return true
+	match mode:
+		"paused":
+			pause_pressed.emit()
+		"ended":
+			if ended_for >= REST:
+				presses["restart"] = true
+		"play":
+			if t.position.distance_to(PAUSE) <= PAUSE_REACH:
+				pause_pressed.emit()
+			elif t.position.distance_to(ATTACK) <= ATTACK_REACH:
+				_press(t.index, "attack")
+			elif dash_shown and t.position.distance_to(DASH) <= DASH_REACH:
+				_press(t.index, "dash")
+			elif t.position.x < VIEW.x / 2.0 and t.position.y >= STICK_TOP and stick < 0:
+				stick = t.index
+				stick_from = t.position
+				stick_at = t.position
+		_:
+			return false # the start screen and the cards are tapped as mouse clicks
+	return true
+
+
+func _press(index: int, action: String) -> void:
+	buttons[index] = action
+	presses[action] = true
+
+
+## Lets go of everything, as when the window loses focus.
+func release() -> void:
+	stick = -1
+	buttons.clear()
+
+
+## The actions held right now: the stick's direction (one of eight, none inside the dead zone) and the buttons down.
+func held() -> Dictionary:
+	var out := {}
+	if not on or mode != "play":
+		return out
+	for action in buttons.values():
+		out[action] = true
+	if stick >= 0:
+		for action in direction(stick_at - stick_from):
+			out[action] = true
+	return out
+
+
+## The actions pressed since the last call, each once (D6).
+func take() -> Dictionary:
+	var out := presses
+	presses = {}
+	return out if on else {}
+
+
+## The keys a stick pushed this far stand for: none inside the dead zone, else one of eight directions.
+static func direction(off: Vector2) -> Array:
+	if off.length() < DEAD:
+		return []
+	return DIRECTIONS[posmod(roundi(off.angle() / (PI / 4.0)), 8)]
+
+
+## How to scale the field to a window this size: integer while that fills enough of it, else fractional.
+static func stretch_for(window: Vector2) -> int:
+	var fits := minf(window.x / VIEW.x, window.y / VIEW.y)
+	var whole := floorf(fits)
+	return Window.CONTENT_SCALE_STRETCH_INTEGER if whole >= 1.0 and whole / fits >= WHOLE_ENOUGH else Window.CONTENT_SCALE_STRETCH_FRACTIONAL
+
+
+## A touch device held upright: the field would be a thin strip, so the game waits and asks to be turned.
+func upright() -> bool:
+	if not on or not is_inside_tree():
+		return false
+	var s := get_tree().root.size
+	return s.y > s.x
+
+
+## Call every drawn frame, after main.gd has set mode.
+func frame(delta: float) -> void:
+	ended_for = ended_for + delta if mode == "ended" else 0.0
+	if mode != "play":
+		release()
+	if rotate_label != null: # made in _ready, so not there for a test that never adds this to a tree
+		rotate_label.visible = upright()
+	queue_redraw()
+
+
+func _draw() -> void:
+	if upright():
+		draw_rect(Rect2(Vector2.ZERO, VIEW), Color(0.05, 0.04, 0.09, 0.92))
+		return
+	if not on or not (mode == "play" or mode == "paused"):
+		return
+	_sprite("button_small", PAUSE, mode == "paused")
+	_sprite("pause_bars", PAUSE, mode == "paused")
+	if mode != "play":
+		return
+	var attacking := buttons.values().has("attack")
+	_sprite("button", ATTACK, attacking)
+	_sprite("sword", ATTACK + Vector2(1.0, 0.0), attacking)
+	if dash_shown:
+		var dashing := buttons.values().has("dash")
+		_sprite("button_small", DASH, dashing)
+		_sprite("icon_dash", DASH, dashing)
+	if stick >= 0:
+		_sprite("pad_ring", stick_from, true)
+		var knob := stick_from + (stick_at - stick_from).limit_length(REACH)
+		_sprite("pad_knob", knob, true)
+
+
+## A sprite centred on a point, on whole pixels, see-through unless pressed (a pressed one also sits a pixel lower).
+func _sprite(name: String, at: Vector2, down: bool) -> void:
+	var tex := Sprites.texture(name)
+	var top := (at - tex.get_size() / 2.0).round() + (Vector2(0.0, 1.0) if down and name != "pad_ring" and name != "pad_knob" else Vector2.ZERO)
+	draw_texture(tex, top, Color(1.0, 1.0, 1.0, LOOK_DOWN if down else LOOK))

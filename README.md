@@ -68,6 +68,35 @@ godot --path . -- --bot --skip=19000  # 봇이 먼저 그만큼(스텝) 플레�
 godot --path . -- --bot --slot=2  # 봇이 늘 고르는 강화 칸
 ```
 
+## 웹/모바일
+
+휴대폰이나 PC 브라우저에서 바로 할 수 있습니다: **https://khwook.github.io/2dgame1/** (GitHub Pages, `main`에 올라갈 때마다 다시 빌드). 휴대폰은 가로로 들고 하세요. 세로로 들면 게임이 멈추고 "가로로 돌려 주세요"가 뜹니다. 안드로이드 브라우저에서는 첫 화면을 누르면 전체 화면으로 바뀝니다(아이폰 Safari는 웹 페이지의 전체 화면을 지원하지 않아서 그대로입니다. 공유 → "홈 화면에 추가"로 열면 주소창 없이 열립니다).
+
+![휴대폰에서 보는 모습](docs/shots/mobile.png)
+
+| 터치 | 동작 |
+|---|---|
+| 화면 왼쪽 아무 데나 누르고 끌기 | 이동 (손가락이 닿은 자리에 조이스틱이 나타납니다. 8방향) |
+| 오른쪽 아래 칼 버튼 | 베기 (장작을 들고 있으면 내려놓기). 이동하면서 같이 누를 수 있습니다 |
+| 칼 버튼 왼쪽 작은 버튼 | 돌진 (돌진 강화를 얻은 뒤에만 보입니다) |
+| 오른쪽 위 ‖ 버튼 | 일시정지. 아무 데나 누르면 계속 |
+| 첫 화면, 끝 화면을 누르기 | 시작, 다시 하기 |
+| 카드 누르기 | 강화 고르기 |
+
+터치 버튼은 화면을 처음 만졌을 때(또는 터치 화면이 있는 기기에서) 나타나고, 키보드를 누르면 사라집니다. 웹에서도 키보드로 할 수 있습니다.
+
+배포를 켜려면 저장소 주인이 한 번 **Settings → Pages → Source: GitHub Actions**로 바꿔야 합니다(`.github/workflows/pages.yml`). 비공개 저장소의 Pages는 유료 요금제(Pro, Team 등)에서만 됩니다. 워크플로는 Godot 4.7과 웹 템플릿을 받아 `./verify`를 돌리고, 통과하면 내보내서 올립니다.
+
+직접 웹으로 내보내기(Godot 4.7 내보내기 템플릿 필요, 에디터의 Editor → Manage Export Templates 또는 [릴리스](https://github.com/godotengine/godot/releases/tag/4.7-stable)의 `.tpz`):
+
+```
+mkdir -p build/web && touch build/.gdignore
+godot --headless --path . --export-release "Web" build/web/index.html
+python3 -m http.server 8000 --directory build/web   # http://localhost:8000
+```
+
+내보낸 판은 스레드를 쓰지 않는 판이라 특별한 서버 헤더(COOP/COEP) 없이 어느 정적 호스팅에서도 돕니다.
+
 ## 개발
 
 ```
@@ -80,6 +109,7 @@ godot --path . -- --bot --slot=2  # 봇이 늘 고르는 강화 칸
 - `src/art/` — 그림. 스프라이트는 `sprites.gd` 안의 글자 격자(글자 하나 = 픽셀 하나)이고, `painter.gd`가 월드를 읽어 그립니다.
 - `src/main.gd` — 엔진과 시뮬레이션 사이의 유일한 다리(입력, 스텝, 빛, 소리).
 - `src/ui.gd` — 화면의 모든 글자와 그 움직임(HUD 글자, 강화 카드, 안내, 일시정지·끝 화면).
+- `src/touch.gd` — 휴대폰의 조이스틱과 버튼. 터치를 키와 같은 동작 이름으로 바꿉니다.
 - `assets/fonts/` — 한글 픽셀 폰트 [Galmuri](https://github.com/quiple/galmuri)(SIL OFL 1.1, 한글에 필요한 글자만 잘라 넣음). 저장소의 유일한 바이너리 에셋입니다.
 - `tools/` — 검사 도구. 각 규칙 id의 설명은 [docs/PRINCIPLES.md](docs/PRINCIPLES.md)에 있습니다.
 - 결정과 그 이유는 [docs/DECISIONS.md](docs/DECISIONS.md)에 기록합니다.
