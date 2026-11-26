@@ -26,8 +26,6 @@ const TORCH_LIGHT := Color("#ffcf8a")
 const TORCH_ENERGY := 1.25 # the night is nearly black, so what you see by is all the torch's
 const DAY_ENERGY := 0.3 # the torch still glows a little once the sun is up
 const FLARE_ENERGY := 0.5 # how much brighter the torch burns for a moment when it is fed
-const KEEPER_ENERGY := 0.45 # the keeper's own small glow, so you can see yourself out in the dark
-const KEEPER_GLOW := 0.35 # its size, as a scale of the light's picture (Painter.LIGHT_SIZE)
 const BOT_LOOKS := 90 # steps a demo bot leaves an offer on screen before it picks, so a person watching can read it
 
 var world
@@ -84,7 +82,6 @@ func _ready() -> void:
 	var glow := ImageTexture.create_from_image(Painter.light_image())
 	player_light = PointLight2D.new()
 	player_light.texture = glow
-	player_light.texture_scale = KEEPER_GLOW
 	add_child(player_light)
 	overlay = Node2D.new()
 	overlay.draw.connect(func(): painter.paint_overlay(overlay, world))
@@ -156,9 +153,11 @@ func _process(delta: float) -> void:
 		torch_lights[i].texture_scale = world.light_radius() * 2.0 / Painter.LIGHT_SIZE
 		torch_lights[i].rotation = Painter.light_turn(world, i)
 		torch_lights[i].energy = energy / torch_lights.size()
-	# The keeper's glow fades where the torch already lights them, so the two never add up to a white blot.
+	# The keeper's ember (painter.gd) fades where the torch already lights them, so the two never add up to a white blot.
 	var from_torch: float = world.player.pos.distance_to(Config.TORCH.pos) / world.light_radius()
-	player_light.energy = KEEPER_ENERGY * (1.0 - day) * (clampf(from_torch, 0.0, 1.0) if world.fuel > 0.0 else 1.0)
+	player_light.energy = painter.ember_glow(world) * (1.0 - day) * (clampf(from_torch, 0.0, 1.0) if world.fuel > 0.0 else 1.0)
+	player_light.texture_scale = painter.ember_reach() * 2.0 / Painter.LIGHT_SIZE
+	player_light.color = painter.ember_colour()
 	player_light.position = world.player.pos
 
 

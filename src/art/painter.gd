@@ -148,6 +148,23 @@ const CAST := Color(0.02, 0.01, 0.06, 0.5)
 const CAST_LENGTH := [0.9, 2.4] # times the thing's height: at the torch, at the edge of the light
 const CAST_FADE := [0.75, 1.1] # it fades out between these shares of the light's radius
 const CAST_NEAR := 6.0 # pixels: closer to the torch than this the shadow has no direction, so none is thrown
+## The keeper's ember: fire taken from the torch to see by. It catches only at the torch itself, as close as a log
+## is fed from (world.gd), keeps what it has anywhere in the torch's light, and cools out of it, lighting less and
+## less around the keeper and turning from gold to red. Walking back into the light does not bring it back: the
+## keeper has to go and touch the torch. It is only for seeing: the rules' light is the torch's alone
+## (world.in_light), so the ember is small and red where the torch's light is wide and warm.
+const EMBER_COOL := 10.0 # seconds out of the torch's light until it has cooled all the way
+const EMBER_KINDLE := 0.4 # seconds at the torch until it burns full again
+const EMBER_REACH := [13.0, 46.0] # pixels it lights around the keeper: cooled, full
+const EMBER_GLOW := [0.4, 0.85] # how bright that light is: cooled, full
+const EMBER_COLOUR := ["X", "F"] # PALETTE keys of its light: cooled, full
+const EMBER_AT := Vector2(6.0, -4.0) # where it floats: this far to the side away from the sword hand, and up
+const EMBER_BOB_STEPS := 24 # steps per half bob
+const EMBER_HOT := 0.6 # it is drawn as the big ember above this share, the small one below
+const EMBER_DIM := 0.6 # how solid the ember itself looks when cooled
+const EMBER_CATCH := 0.7 # reaching the torch cooler than this share, it flares as it catches
+const EMBER_FLARE := 0.35 # seconds that flare lasts
+const EMBER_FLARE_GLOW := 0.6 # how much brighter its light is at the start of the flare
 
 ## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing: a ring at the shock
 ## that fills in as the landing nears, blinking, with the king crouched and flashing while it waits and lifted off
@@ -197,6 +214,9 @@ var scrim := 0.0 # set by main.gd's ui: how dark the dim over the field is, 0 to
 var hidden_pick := "" # set by the ui: an upgrade whose icon is still flying to its tile, drawn empty until it lands
 var flash_pick := "" # set by the ui: the tile that just got its upgrade, ringed while flash runs from 1 to 0
 var flash := 0.0
+var ember := 1.0 # how much of the keeper's ember is left, 1 full to 0 cooled
+var ember_flare := 0.0 # seconds left of the flare of an ember that just caught again
+var ember_at_torch := true # whether the keeper touched the torch on the last step
 var score_panel := Vector2.ZERO # set by the ui: the size of the night and score words, top right
 
 
@@ -231,6 +251,31 @@ func icon(upgrade: String) -> Texture2D:
 ## Call once after each world.step(), so the effects can answer what the step did.
 func step(w) -> void:
 	effects.step(w)
+	var at_torch: bool = w.fuel > 0.0 and w.player.pos.distance_to(T.pos) < T.reach + Config.PLAYER.radius
+	if at_torch and not ember_at_torch and ember < EMBER_CATCH:
+		ember_flare = EMBER_FLARE
+	ember_at_torch = at_torch
+	if at_torch:
+		ember = minf(1.0, ember + Config.STEP / EMBER_KINDLE)
+	elif not w.in_light(w.player.pos) or w.fuel <= 0.0:
+		ember = maxf(0.0, ember - Config.STEP / EMBER_COOL)
+	ember_flare = maxf(0.0, ember_flare - Config.STEP)
+
+
+## How far the keeper's ember lights around them right now, in pixels. main.gd sizes the keeper's light with it.
+func ember_reach() -> float:
+	return lerpf(EMBER_REACH[0], EMBER_REACH[1], ember)
+
+
+## How bright that light is, and its colour.
+func ember_glow(w) -> float:
+	if w.player.dead:
+		return 0.0
+	return lerpf(EMBER_GLOW[0], EMBER_GLOW[1], ember) + EMBER_FLARE_GLOW * ember_flare / EMBER_FLARE
+
+
+func ember_colour() -> Color:
+	return Sprites.PALETTE[EMBER_COLOUR[0]].lerp(Sprites.PALETTE[EMBER_COLOUR[1]], ember)
 
 
 ## How much brighter the torch burns right now because it was just fed, 1 fading to 0. main.gd adds it to the light.
@@ -318,6 +363,7 @@ func paint_overlay(c: CanvasItem, w) -> void:
 			var stars := Sprites.texture("dazed", (w.steps / DAZED_STEPS) % 2 == 1)
 			c.draw_texture(stars, (e.pos + DAZED_AT).round())
 	_dash_bar(c, w)
+	_ember(c, w)
 	_beacons(c, w)
 	c.draw_set_transform(Vector2.ZERO)
 	if scrim > 0.0:
@@ -687,6 +733,19 @@ func _edge_arrows(c: CanvasItem, w) -> void:
 		var arrow := PackedVector2Array([tip.round(), (back + side).round(), (back - side).round()])
 		c.draw_colored_polygon(arrow, Color(Sprites.PALETTE[EDGE_ARROW_COLOUR], EDGE_ARROW_ALPHA))
 		c.draw_polyline(PackedVector2Array([arrow[0], arrow[1], arrow[2], arrow[0]]), Color(Sprites.PALETTE["k"], EDGE_ARROW_ALPHA), 1.0)
+
+
+## The ember floating at the keeper's side, away from the sword hand: big and gold while it is hot, small and
+## dimmer as it cools.
+func _ember(c: CanvasItem, w) -> void:
+	var p = w.player
+	if p.dead or not _keeper_shows(w):
+		return
+	var side: float = -1.0 if p.face.rotated(PI / 2.0).x > 0.0 else 1.0
+	var bob := Vector2(0.0, -1.0 if (w.steps / EMBER_BOB_STEPS) % 2 == 0 else 0.0)
+	var tex := Sprites.texture("ember_hot" if ember > EMBER_HOT or ember_flare > 0.0 else "ember")
+	var at: Vector2 = p.pos + Vector2(EMBER_AT.x * side, EMBER_AT.y) + bob - tex.get_size() / 2.0
+	c.draw_texture(tex, at.round(), Color(1.0, 1.0, 1.0, lerpf(EMBER_DIM, 1.0, ember)))
 
 
 ## The dash's cooldown under the keeper, while it is not ready.
