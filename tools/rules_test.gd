@@ -28,6 +28,7 @@ static func run() -> Array:
 	out.append_array(_rebalanced())
 	out.append_array(_dark())
 	out.append_array(_bosses())
+	out.append_array(_patterns())
 	out.append_array(_logs())
 	out.append_array(_nights())
 	out.append_array(_setup())
@@ -381,6 +382,99 @@ static func _bosses() -> Array:
 	_play(w, SWING + 20, "attack")
 	_expect(out, "the slime king breaks into two big slimes and scores its own worth", [w.enemies.filter(func(e): return e.kind == "big_slime").size(), w.score], [2, Config.ENEMY_TYPES.slime_king.score])
 	return out
+
+
+## Boss patterns, each warned before it strikes. The slime king marks where you stand, crouches, flies, and hurts you
+## on landing only if you stayed in the shock; it does not leap at you from far off. The shade lord circles outside the
+## light, where blows pass through it, rushes the torch after warning, can be cut there, and goes back out. And a
+## boss's coming is told BOSS.warn seconds ahead, from the edge where it then comes.
+static func _patterns() -> Array:
+	var out := []
+	var K: Dictionary = Config.ENEMY_TYPES.slime_king
+	var L: Dictionary = K.leap
+	var airborne := int(round((L.warn + L.air) / Config.STEP))
+	for flee in [false, true]:
+		var w = _night(DARK + Vector2(0.0, 40.0))
+		w.fuel = 1.0e6
+		var king = _add(w, "slime_king", Vector2(-L.range * 0.6, 0.0))
+		king.move_t = 0.0
+		var mark: Vector2 = w.player.pos
+		var told := _play(w, 1)
+		_expect(out, "the slime king marks where you stand and says so (flee %s)" % flee, [king.move, king.move_to, told.has("warn")], ["warn", mark, true])
+		var took_off: Vector2 = king.pos
+		_play(w, airborne - 2, "", "up" if flee else "")
+		_expect(out, "the slime king is still up and has hurt no one just before it lands (flee %s)" % flee, [king.move, w.player.hp], ["air", Config.PLAYER.hp])
+		_expect(out, "the slime king does not touch you while in the air (flee %s)" % flee, king.touches(w.player), false)
+		told = _play(w, 3, "", "up" if flee else "")
+		_expect(out, "the slime king lands on the mark and says so (flee %s)" % flee, [king.move, king.pos, told.has("landed"), king.pos != took_off], ["", mark, true, true])
+		_expect(out, "the landing hurts you only if you stayed in the shock (flee %s)" % flee, w.player.hp, Config.PLAYER.hp - (0 if flee else 1))
+		_expect(out, "fleeing gets you out of the shock in time", (not flee) or w.player.pos.distance_to(mark) > L.shock + Config.PLAYER.radius, true)
+		told = _play(w, int(L.every / Config.STEP) - 5)
+		_expect(out, "the slime king waits leap.every before it leaps again (flee %s)" % flee, told.has("warn"), false)
+	var w = _night(DARK + Vector2(0.0, 40.0))
+	var king = _add(w, "slime_king", Vector2(-(L.range + 20.0), 0.0))
+	king.move_t = 0.0
+	_play(w, 10)
+	_expect(out, "the slime king does not leap at you from out of range", king.move, "")
+	# shade lord: circles in the dark, blows pass through it there
+	var SL: Dictionary = Config.ENEMY_TYPES.shade_lord
+	var R: Dictionary = SL.lunge
+	w = _night(Vector2(0.0, 40.0))
+	w.fuel = 50.0
+	var lord = Enemy.new("shade_lord", Config.TORCH.pos + Vector2(150.0, 0.0))
+	w.enemies.append(lord)
+	lord.summon_t = NEVER
+	lord.move_t = R.every
+	var lit_steps := 0
+	var start_angle: float = (lord.pos - Config.TORCH.pos).angle()
+	var told := []
+	for i in int((R.every - 0.5) / Config.STEP):
+		told += _play(w, 1)
+		lit_steps += 1 if w.in_light(lord.pos) else 0
+	var ring: float = w.light_radius() + R.ring + SL.radius
+	_expect(out, "the shade lord keeps out of the light while it circles", [lit_steps, lord.at_torch, told.has("warn")], [0, false, false])
+	_expect(out, "the shade lord circles the light at its ring", absf(lord.pos.distance_to(Config.TORCH.pos) - ring) < 3.0, true)
+	_expect(out, "the shade lord goes round the torch", absf(angle_difference(start_angle, (lord.pos - Config.TORCH.pos).angle())) > 0.5, true)
+	lord.hp = SL.hp
+	_damage_once(w, lord)
+	_expect(out, "blows pass through the shade lord while it circles in the dark", lord.hp, SL.hp)
+	# it warns, stops, then rushes the torch
+	var told2 := _play(w, int(0.5 / Config.STEP) + 2)
+	var at_warn: Vector2 = lord.pos
+	_expect(out, "the shade lord warns before it rushes, at the torch", [told2.has("warn"), lord.move, lord.move_to], [true, "warn", Config.TORCH.pos])
+	_play(w, int(R.warn / Config.STEP) - 3)
+	_expect(out, "the shade lord stands still while it warns", [lord.move, lord.pos.distance_to(at_warn) < 0.01], ["warn", true])
+	_play(w, int(ring / R.speed / Config.STEP) + 10)
+	_expect(out, "the shade lord rushes to the torch and stays there smothering it, in the light", [lord.move, lord.at_torch, w.in_light(lord.pos)], ["stay", true, true])
+	_damage_once(w, lord)
+	_expect(out, "at the torch the shade lord can be cut", lord.hp, SL.hp - 1)
+	_play(w, int(R.stay / Config.STEP) + int(3.0 / Config.STEP))
+	_expect(out, "after staying a while the shade lord goes back out into the dark", [lord.move, lord.at_torch, w.in_light(lord.pos)], ["", false, false])
+	# a boss's coming is told ahead, from the edge it comes from
+	w = _night(DARK)
+	w.night = Config.BOSS.every
+	w.boss_due = true
+	w.time = Config.NIGHT.length * Config.BOSS.at - Config.BOSS.warn - Config.STEP * 0.5
+	told = []
+	var coming_at = null
+	for i in 1:
+		w.step(InputFrame.new())
+		for ev in w.events:
+			told.append(ev.kind)
+			if ev.kind == "coming":
+				coming_at = ev.pos
+	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("coming"), told.has("boss"), w.boss_from == coming_at and coming_at != null], [true, false, true])
+	told = _play(w, int(Config.BOSS.warn / Config.STEP) - 2)
+	_expect(out, "the boss does not come during its warning", told.has("boss"), false)
+	told = _play(w, 3)
+	var bosses: Array = w.enemies.filter(func(e): return e.T.get("boss", false))
+	_expect(out, "the boss comes where its coming pointed", [told.has("boss"), bosses.size(), bosses.size() > 0 and coming_at != null and bosses[0].pos.distance_to(coming_at) < 2.0, w.boss_from], [true, 1, true, null])
+	return out
+
+
+## One blow of 1 on e from beside it, by the torch's own world rules (_damage), without a swing.
+static func _damage_once(w, e) -> void:
+	w._damage(e, 1, e.pos + Vector2(4.0, 0.0))
 
 
 static func _logs() -> Array:

@@ -10,7 +10,9 @@
 ## for a blow that went through an enemy the dark protects; "banished", the same for an enemy the dawn clears
 ## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
 ## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "boss" { enemy, pos }
-## for a boss that came out of the dark.
+## for a boss that came out of the dark; "coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
+## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), and "landed" { pos, enemy } for the slime
+## king coming down from its leap (src/sim/enemy.gd).
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -45,6 +47,7 @@ var next_spark := 0.0
 var next_thorn := 0.0
 var sparks: Array = [] # embers the torch fired: { pos, vel, life }
 var boss_due := false # a boss is still to come tonight
+var boss_from = null # where the boss will come from once its warning is given, until it comes; null otherwise
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
 var events: Array = [] # what happened in the last step; see the top of this file
 
@@ -78,6 +81,7 @@ func reset() -> void:
 	sparks = []
 	blade_kills = 0
 	boss_due = _boss_night()
+	boss_from = null
 	player = Player.new()
 	_offer()
 
@@ -244,6 +248,7 @@ func _dawn() -> void:
 	next_thorn = 0.0
 	sparks = []
 	boss_due = _boss_night()
+	boss_from = null
 	player.hp = mini(max_hp(), player.hp + Config.DAWN.heal)
 	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
 	_offer()
@@ -399,9 +404,13 @@ func _spawns() -> void:
 		var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(time / N.length, 0.0, 1.0))
 		next_spawn = time + apart * pow(Config.LATER_NIGHTS.spawn, _nights_past()) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
 		enemies.append(Enemy.new(_who(row.who), _edge_point()))
-	if boss_due and time >= N.length * Config.BOSS.at:
+	if boss_due and time >= N.length * Config.BOSS.at - Config.BOSS.warn:
 		boss_due = false
-		var boss = Enemy.new(boss_kind(), _edge_point())
+		boss_from = _edge_point()
+		events.append({ "kind": "coming", "enemy": boss_kind(), "pos": boss_from })
+	if boss_from != null and time >= N.length * Config.BOSS.at:
+		var boss = Enemy.new(boss_kind(), boss_from)
+		boss_from = null
 		enemies.append(boss)
 		events.append({ "kind": "boss", "enemy": boss.kind, "pos": boss.pos })
 	if time >= next_wood:

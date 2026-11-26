@@ -313,9 +313,13 @@ func _process(_delta: float) -> void:
 	painter.score_text_width = _width(hud)
 	_words()
 	var b = Painter.boss(world)
-	boss_name.visible = b != null and world.phase == "night"
+	var coming: bool = world.boss_from != null
+	boss_name.visible = (b != null or coming) and world.phase == "night"
 	if b != null:
 		boss_name.text = b.T.name
+	elif coming: # the painter points at the edge it comes from
+		var who: String = Config.ENEMY_TYPES[world.boss_kind()].name
+		boss_name.text = "%s%s 다가온다!" % [who, _subject(who)]
 	var day: float = painter.daylight(world)
 	sky.color = painter.sky(world)
 	torch_light.texture_scale = world.light_radius() * 2.0 / 128.0
@@ -324,6 +328,12 @@ func _process(_delta: float) -> void:
 	var from_torch: float = world.player.pos.distance_to(Config.TORCH.pos) / world.light_radius()
 	player_light.energy = KEEPER_ENERGY * (1.0 - day) * (clampf(from_torch, 0.0, 1.0) if world.fuel > 0.0 else 1.0)
 	player_light.position = world.player.pos
+
+
+## The subject particle that goes after a Korean word: 이 after a final consonant, 가 after a vowel.
+static func _subject(word: String) -> String:
+	var last := word.unicode_at(word.length() - 1)
+	return "이" if last >= 0xAC00 and last <= 0xD7A3 and (last - 0xAC00) % 28 != 0 else "가"
 
 
 ## Says what each kind of thing does the first time it turns up, one line at a time.

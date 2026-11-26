@@ -1,6 +1,10 @@
 ## An enemy, seen from above. Its row in Config.ENEMY_TYPES says what it goes for: the torch, to smother it; the
 ## player, to hurt them; or a log, to carry it off the field. It gets knocked back when hit. In the torch's light
 ## the warm glow slows it; out of it, a kind with dark_speed_mult hunts faster.
+## A boss also has a pattern, always warned before it strikes (move says which part it is in): the slime king leaps
+## at the player and shakes the ground where it lands; the shade lord circles in the dark and now and then rushes
+## the torch. The world tells the screen "warn" { pos, at, enemy } when one is about to strike (at: where it will) and
+## "landed" { pos, enemy } when the slime king comes down.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -18,6 +22,10 @@ var gone := false # left the field with a log: it is removed, but that is not a 
 var at_torch := false # a smotherer that has reached the torch
 var carrying := false # a thief holding a log
 var summon_t := 0.0 # time until it next calls its kind (a boss with summon in its row)
+var move := "" # a boss's pattern: "" (walking), "warn" (about to strike), "air" (the king's leap), "lunge", "stay" (the lord's rush and its time at the torch)
+var move_t := 0.0 # time left in this part of the pattern, or, walking, until the next strike
+var move_from := Vector2.ZERO # where the leap took off
+var move_to := Vector2.ZERO # where it lands, or where the rush goes
 
 
 func _init(kind_: String, pos_: Vector2) -> void:
@@ -27,15 +35,37 @@ func _init(kind_: String, pos_: Vector2) -> void:
 	hp = T.hp
 	if T.has("summon"):
 		summon_t = T.summon.every
+	if T.has("leap"):
+		move_t = T.leap.every
+	if T.has("lunge"):
+		move_t = T.lunge.every
 
 
 func step(world) -> void:
 	flash = maxf(0.0, flash - Config.STEP)
+	var flying := move == "air" # through the step it lands on, too
+	if T.has("leap"):
+		_leap(world)
+	if T.has("lunge"):
+		_lunge(world)
+	if flying:
+		at_torch = false
+		knock = Vector2.ZERO
+		if T.has("summon"):
+			_summon(world)
+		return
 	var stop: float = Config.TORCH.reach + T.radius if T.target == "torch" else 0.0
+	at_torch = T.target == "torch" and (Config.TORCH.pos - pos).length() <= stop
+	if move == "lunge" and at_torch:
+		move = "stay"
+		move_t = T.lunge.stay
 	var to := _goal(world) - pos
-	at_torch = T.target == "torch" and to.length() <= stop
 	var speed: float = T.speed * (world.mod("glow_slow", 1.0) if world.in_light(pos) else T.get("dark_speed_mult", 1.0))
-	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if at_torch else to.normalized() * speed)
+	if move == "lunge":
+		speed = T.lunge.speed
+	# Most smotherers stop at the torch; the shade lord stops only while it warns and while it stays, so it can leave.
+	var halt: bool = move in ["warn", "stay"] or (at_torch and not T.has("lunge"))
+	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to.normalized() * speed)
 	knock *= pow(E.knock_decay, Config.STEP)
 	if knock.length() < E.knock_stop:
 		knock = Vector2.ZERO
@@ -57,9 +87,74 @@ func _summon(world) -> void:
 		world.born.append(get_script().new(T.summon.kind, pos + around))
 
 
-## Where it is heading. A thief goes for the nearest log, shadows the player when there is none, and once it has
+## The slime king's leap. Walking, it counts down to the next one, which it starts only with the player in range: it
+## marks where the player stands and crouches; then it flies there, and where it lands it hurts a player too close.
+func _leap(world) -> void:
+	var L: Dictionary = T.leap
+	var p = world.player
+	match move:
+		"":
+			move_t = maxf(0.0, move_t - Config.STEP)
+			if move_t <= 0.0 and not p.dead and pos.distance_to(p.pos) <= L.range:
+				move = "warn"
+				move_t = L.warn
+				move_from = pos
+				move_to = p.pos
+				world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
+		"warn":
+			move_t -= Config.STEP
+			move_from = pos
+			if move_t <= 0.0:
+				move = "air"
+				move_t = L.air
+		"air":
+			move_t -= Config.STEP
+			pos = move_from.lerp(move_to, clampf(1.0 - move_t / L.air, 0.0, 1.0))
+			if move_t <= 0.0:
+				pos = move_to
+				move = ""
+				move_t = L.every
+				world.events.append({ "kind": "landed", "pos": pos, "enemy": kind })
+				if pos.distance_to(p.pos) < L.shock + Config.PLAYER.radius:
+					p.hurt(pos)
+
+
+## The shade lord's rush. Circling, it counts down to the next one; then it stops and looks at the torch, rushes it,
+## stays a while smothering it (step() turns the rush into the stay when it gets there), and goes back out.
+func _lunge(world) -> void:
+	var L: Dictionary = T.lunge
+	match move:
+		"":
+			move_t -= Config.STEP
+			if move_t <= 0.0:
+				move = "warn"
+				move_t = L.warn
+				move_to = Config.TORCH.pos
+				world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
+		"warn":
+			move_t -= Config.STEP
+			if move_t <= 0.0:
+				move = "lunge"
+		"stay":
+			move_t -= Config.STEP
+			if move_t <= 0.0:
+				move = ""
+				move_t = L.every
+
+
+## Where it is heading. A boss that circles the light aims a little ahead of itself on a ring outside it, unless it is
+## rushing the torch. A thief goes for the nearest log, shadows the player when there is none, and once it has
 ## one runs straight away from the torch.
 func _goal(world) -> Vector2:
+	if T.has("lunge") and move == "":
+		var out: Vector2 = pos - Config.TORCH.pos
+		var r: float = world.light_radius() + T.lunge.ring + T.radius
+		# aiming at a point on the ring ahead would cut inside it; aiming this much further out keeps it on the ring.
+		# Where the ring runs past the field (a big light) it goes along the edge instead, so it stays on screen and
+		# out from under the HUD.
+		var aim: Vector2 = Config.TORCH.pos + (out if out != Vector2.ZERO else Vector2.RIGHT).normalized().rotated(E.orbit_lead) * r / cos(E.orbit_lead)
+		var inside := Config.FIELD.grow_individual(-T.radius, -E.orbit_top, -T.radius, -T.radius)
+		return aim.clamp(inside.position, inside.end)
 	if T.target == "torch":
 		return Config.TORCH.pos
 	if T.target == "log":
@@ -91,7 +186,10 @@ func _thieve(world) -> void:
 		carrying = true
 
 
+## Up in the air during a leap: it touches nothing until it lands.
 func touches(p) -> bool:
+	if move == "air":
+		return false
 	return pos.distance_to(p.pos) < T.radius + Config.PLAYER.radius
 
 

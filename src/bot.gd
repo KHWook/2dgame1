@@ -11,6 +11,7 @@ const DEADZONE := 2.0
 const KEEP := 2.0 # how far outside a foe's touch the bot stands while it fights it
 const DASH_FROM := 60.0 # with the dash upgrade, the bot dashes toward a goal at least this far away
 const HUNGRY := 2 # the bot goes for a berry at this hp or less; above it, hauling logs matters more
+const CLEAR_OF := 6.0 # how far past a marked landing's shock the bot steps to be out of it
 
 var pick := 1 # which offer slot this bot always takes
 
@@ -30,7 +31,20 @@ func frame(w) -> InputFrame:
 	var goal: Vector2 = Config.TORCH.pos
 	var foe = _nearest(p.pos, w.enemies)
 	var smotherer = _nearest(p.pos, w.enemies.filter(func(e): return e.at_torch))
-	if foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE and foe.T.get("dark_proof", false) and not w.in_light(foe.pos):
+	var landing = _landing(w, p.pos)
+	var rush: bool = w.enemies.any(func(e): return e.T.has("lunge") and e.move in ["warn", "lunge"])
+	if landing != null:
+		# a leap is marked on it: step out of the shock sideways to the leap, on the torch's side (not into a fence)
+		var side: Vector2 = (landing.move_to - landing.pos).normalized().orthogonal()
+		if side == Vector2.ZERO:
+			side = Vector2.DOWN
+		if side.dot(Config.TORCH.pos - landing.move_to) < 0.0:
+			side = -side
+		var out: Vector2 = p.pos - landing.move_to
+		if out.length() < 1.0:
+			out = side
+		goal = landing.move_to + out.normalized() * (landing.T.leap.shock + Config.PLAYER.radius + CLEAR_OF)
+	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE and foe.T.get("dark_proof", false) and not w.in_light(foe.pos):
 		pass # blows pass through it out here: walk back to the torch (the goal already) and fight it in the light
 	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE:
 		var away: Vector2 = (p.pos - foe.pos).normalized()
@@ -41,6 +55,8 @@ func frame(w) -> InputFrame:
 			f.pressed["attack"] = true
 	elif smotherer != null:
 		goal = smotherer.pos # something is on the torch: that comes before logs and berries
+	elif rush:
+		pass # the shade lord is about to rush the torch, where it can be cut: be there (the goal already)
 	elif not p.carrying and p.hp <= HUNGRY and not w.berries.is_empty():
 		goal = _nearest_point(p.pos, w.berries)
 	elif not p.carrying and not w.logs.is_empty():
@@ -58,6 +74,14 @@ func frame(w) -> InputFrame:
 	if d.y > DEADZONE: f.held["down"] = true
 	if d.y < -DEADZONE: f.held["up"] = true
 	return f
+
+
+## A boss's marked landing whose shock would reach the bot where it stands, or null.
+static func _landing(w, at: Vector2):
+	for e in w.enemies:
+		if e.T.has("leap") and e.move in ["warn", "air"] and at.distance_to(e.move_to) < e.T.leap.shock + Config.PLAYER.radius + CLEAR_OF:
+			return e
+	return null
 
 
 static func _nearest(from: Vector2, enemies: Array):
