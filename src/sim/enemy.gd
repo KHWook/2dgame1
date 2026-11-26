@@ -5,6 +5,8 @@
 ## at the player and shakes the ground where it lands; the shade lord circles in the dark and now and then rushes
 ## the torch. The world tells the screen "warn" { pos, at, enemy } when one is about to strike (at: where it will) and
 ## "landed" { pos, enemy } when the slime king comes down.
+## A charger (the boar) has a pattern too: it stops and paws the ground with its line drawn, charges straight along
+## it, and stands dazed where the charge ends. It tells "warn" as well, at: the end of its line.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -22,10 +24,11 @@ var gone := false # left the field with a log: it is removed, but that is not a 
 var at_torch := false # a smotherer that has reached the torch
 var carrying := false # a thief holding a log
 var summon_t := 0.0 # time until it next calls its kind (a boss with summon in its row)
-var move := "" # a boss's pattern: "" (walking), "warn" (about to strike), "air" (the king's leap), "lunge", "stay" (the lord's rush and its time at the torch)
+var move := "" # a pattern: "" (walking), "warn" (about to strike), "air" (the king's leap), "lunge", "stay" (the lord's rush and its time at the torch), "charge", "rest" (a charger's run and its daze after)
 var move_t := 0.0 # time left in this part of the pattern, or, walking, until the next strike
 var move_from := Vector2.ZERO # where the leap took off
-var move_to := Vector2.ZERO # where it lands, or where the rush goes
+var move_to := Vector2.ZERO # where it lands, or where the rush goes, or where a charge would end
+var aim := Vector2.ZERO # the way a charger charges, fixed when it starts to warn
 
 
 func _init(kind_: String, pos_: Vector2) -> void:
@@ -39,6 +42,8 @@ func _init(kind_: String, pos_: Vector2) -> void:
 		move_t = T.leap.every
 	if T.has("lunge"):
 		move_t = T.lunge.every
+	if T.has("charge"):
+		move_t = T.charge.every
 
 
 func step(world) -> void:
@@ -48,6 +53,8 @@ func step(world) -> void:
 		_leap(world)
 	if T.has("lunge"):
 		_lunge(world)
+	if T.has("charge"):
+		_charge(world)
 	if flying:
 		at_torch = false
 		knock = Vector2.ZERO
@@ -59,17 +66,24 @@ func step(world) -> void:
 	if move == "lunge" and at_torch:
 		move = "stay"
 		move_t = T.lunge.stay
-	var to := _goal(world) - pos
+	var to: Vector2 = (_goal(world) - pos).normalized()
 	var speed: float = T.speed * (world.mod("glow_slow", 1.0) if world.in_light(pos) else T.get("dark_speed_mult", 1.0))
 	if move == "lunge":
 		speed = T.lunge.speed
+	if move == "charge": # nothing turns a charge aside, blows neither
+		speed = T.charge.speed
+		to = aim
+		knock = Vector2.ZERO
 	# Most smotherers stop at the torch; the shade lord stops only while it warns and while it stays, so it can leave.
-	var halt: bool = move in ["warn", "stay"] or (at_torch and not T.has("lunge"))
-	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to.normalized() * speed)
+	var halt: bool = move in ["warn", "stay", "rest"] or (at_torch and not T.has("lunge"))
+	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to * speed)
 	knock *= pow(E.knock_decay, Config.STEP)
 	if knock.length() < E.knock_stop:
 		knock = Vector2.ZERO
 	pos += vel * Config.STEP
+	if move == "charge" and not Config.FIELD.has_point(pos): # it runs into the trees at the edge and stops there
+		pos = pos.clamp(Config.FIELD.position, Config.FIELD.end)
+		_daze()
 	if T.target == "log":
 		_thieve(world)
 	if T.has("summon"):
@@ -140,6 +154,43 @@ func _lunge(world) -> void:
 			if move_t <= 0.0:
 				move = ""
 				move_t = L.every
+
+
+## A charger's run. Walking, it counts down to the next one, which it starts only on the field with the player in
+## range: it fixes its line at the player and paws the ground; then it charges along the line for charge.dist (step()
+## moves it and stops it at the field's edge) and stands dazed for charge.rest, when it is easy to hit.
+func _charge(world) -> void:
+	var C: Dictionary = T.charge
+	var p = world.player
+	match move:
+		"":
+			move_t = maxf(0.0, move_t - Config.STEP)
+			if move_t <= 0.0 and not p.dead and pos.distance_to(p.pos) <= C.range and Config.FIELD.has_point(pos):
+				move = "warn"
+				move_t = C.warn
+				aim = (p.pos - pos).normalized() if p.pos != pos else Vector2.RIGHT
+				move_to = pos + aim * C.dist
+				world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
+		"warn":
+			move_t -= Config.STEP
+			move_to = pos + aim * C.dist # a blow can push it while it paws; the line goes with it
+			if move_t <= 0.0:
+				move = "charge"
+				move_t = C.dist / C.speed
+		"charge":
+			move_t -= Config.STEP
+			if move_t <= 0.0:
+				_daze()
+		"rest":
+			move_t -= Config.STEP
+			if move_t <= 0.0:
+				move = ""
+				move_t = C.every
+
+
+func _daze() -> void:
+	move = "rest"
+	move_t = T.charge.rest
 
 
 ## Where it is heading. A boss that circles the light aims a little ahead of itself on a ring outside it, unless it is

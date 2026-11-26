@@ -26,6 +26,7 @@ const ENEMIES := {
 	"shade": { "steps": 14, "bits": ["7", "8", "l"], "glow": "shade_eyes" },
 	"big_slime": { "steps": 18, "anchor": Vector2(12.0, 13.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 2.0), "bits": ["h", "G", "j"] },
 	"thief": { "steps": 6, "turns": true, "bits": ["o", "O", "n"] },
+	"boar": { "steps": 7, "turns": true, "bits": ["b", "B", "S"] },
 	"slime_king": { "steps": 20, "anchor": Vector2(16.0, 17.0), "shadow": "shadow_huge", "shadow_at": Vector2(-14.0, 5.0), "bits": ["h", "g", "Y"] },
 	"shade_lord": { "steps": 16, "anchor": Vector2(12.0, 14.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 6.0), "bits": ["7", "8", "Y"], "glow": "shade_lord_eyes" },
 }
@@ -37,6 +38,7 @@ const HINTS := {
 	"thief": "도둑 비버: 장작을 물고 달아난다",
 	"shade": "그림자: 횃불 빛 안에서만 벨 수 있다",
 	"big_slime": "큰 슬라임: 죽으면 둘로 갈라진다",
+	"boar": "멧돼지: 멈춰 선이 그어지면 곧장 돌진한다, 옆으로 비켜라. 돌진 뒤 어지러울 때 베라",
 	"slime_king": "슬라임 왕: 가까이 가면 뛰어올라 덮친다, 빨간 원 밖으로 피하라",
 	"shade_lord": "그림자 군주: 어둠 속을 돌다 횃불로 달려든다, 빛 안에 있을 때 베라",
 	"berry": "열매: 다쳤을 때 밟으면 체력이 회복된다",

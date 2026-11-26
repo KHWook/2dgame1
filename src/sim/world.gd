@@ -414,7 +414,7 @@ func _spawns() -> void:
 		enemies.append(boss)
 		events.append({ "kind": "boss", "enemy": boss.kind, "pos": boss.pos })
 	if time >= next_wood:
-		next_wood = time + Config.WOOD.every * mod("wood_mult", 1.0)
+		next_wood = time + Config.WOOD.every * minf(1.0, Config.WOOD.pace / burn()) * mod("wood_mult", 1.0)
 		if logs.size() < Config.WOOD.max_on_ground + mod("wood_extra", 0):
 			var spot = _free_spot(Config.WOOD.keep_away)
 			if spot != null:

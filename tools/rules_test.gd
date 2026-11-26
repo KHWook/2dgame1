@@ -29,6 +29,7 @@ static func run() -> Array:
 	out.append_array(_dark())
 	out.append_array(_bosses())
 	out.append_array(_patterns())
+	out.append_array(_charger())
 	out.append_array(_logs())
 	out.append_array(_nights())
 	out.append_array(_setup())
@@ -472,6 +473,70 @@ static func _patterns() -> Array:
 	return out
 
 
+## The boar lines up on you, paws the ground for charge.warn (hurting no one), then charges straight down the line it
+## showed: it hurts you if you stayed in its lane and not if you stepped aside. Blows do not stop the charge; it ends
+## after charge.dist or at the field's edge, and the boar stands dazed for charge.rest before it walks again and waits
+## charge.every. It does not charge from out of range or from beyond the field.
+static func _charger() -> Array:
+	var out := []
+	var B: Dictionary = Config.ENEMY_TYPES.boar
+	var C: Dictionary = B.charge
+	var warn_steps := int(round(C.warn / Config.STEP))
+	var run_steps := int(round(C.dist / C.speed / Config.STEP))
+	for dodge in [false, true]:
+		var w = _night(DARK + Vector2(-20.0, 30.0))
+		w.fuel = 1.0e6
+		var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+		boar.move_t = 0.0
+		var told := _play(w, 1)
+		var from: Vector2 = boar.pos
+		_expect(out, "the boar lines up on you and says so (dodge %s)" % dodge, [boar.move, boar.aim.is_equal_approx(Vector2.RIGHT), told.has("warn")], ["warn", true, true])
+		_play(w, warn_steps - 2, "", "up" if dodge else "")
+		_expect(out, "the boar stands pawing and has hurt no one before it charges (dodge %s)" % dodge, [boar.move, boar.pos.distance_to(from) < 0.01, w.player.hp], ["warn", true, Config.PLAYER.hp])
+		_play(w, 2 + int(run_steps / 2.0), "", "up" if dodge else "")
+		_expect(out, "the boar charges along the line it showed (dodge %s)" % dodge, [boar.move, absf(boar.pos.y - from.y) < 0.01, boar.pos.x - from.x > C.dist * 0.4], ["charge", true, true])
+		_expect(out, "the charge hurts you only if you stayed in its lane (dodge %s)" % dodge, w.player.hp, Config.PLAYER.hp - (0 if dodge else 1))
+		_play(w, run_steps - int(run_steps / 2.0) + 1)
+		_expect(out, "the charge ends after charge.dist and the boar is dazed (dodge %s)" % dodge, [boar.move, absf(boar.pos.distance_to(from) - C.dist) < C.speed * Config.STEP * 1.5], ["rest", true])
+		var dazed_at: Vector2 = boar.pos
+		_play(w, int(C.rest / Config.STEP) - 2)
+		_expect(out, "a dazed boar stands still (dodge %s)" % dodge, [boar.move, boar.pos.distance_to(dazed_at) < 0.01], ["rest", true])
+		_play(w, 3)
+		_expect(out, "after its daze the boar walks again (dodge %s)" % dodge, boar.move, "")
+		told = _play(w, int(C.every / Config.STEP) - 5)
+		_expect(out, "the boar waits charge.every before it charges again (dodge %s)" % dodge, told.has("warn"), false)
+	# a blow does not stop a charge
+	var w = _night(DARK + Vector2(-20.0, 30.0))
+	var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+	boar.move_t = 0.0
+	_play(w, warn_steps + 3)
+	var before: Vector2 = boar.pos
+	_damage_once(w, boar)
+	_play(w, 1)
+	_expect(out, "a blow hurts a charging boar but does not stop or turn it", [boar.hp, boar.move, (boar.pos - before).normalized().is_equal_approx(Vector2.RIGHT), boar.pos.distance_to(before) > C.speed * Config.STEP * 0.9], [B.hp - 1, "charge", true, true])
+	# it stops at the edge of the field
+	w = _night(Vector2(0.0, 0.0))
+	w.player.pos = Vector2(Config.FIELD.end.x - 20.0, Config.TORCH.pos.y)
+	boar = _add(w, "boar", Vector2(-60.0, 0.0))
+	boar.move_t = 0.0
+	_play(w, warn_steps + run_steps + 2)
+	_expect(out, "a charge stops at the field's edge, and the boar is dazed there", [boar.move, Config.FIELD.grow(0.01).has_point(boar.pos), boar.pos.x > Config.FIELD.end.x - 1.0], ["rest", true, true])
+	# not from out of range, nor from beyond the field
+	w = _night(DARK)
+	boar = _add(w, "boar", Vector2(-(C.range + 20.0), 0.0))
+	boar.move_t = 0.0
+	_play(w, 10)
+	_expect(out, "the boar does not charge from out of range", boar.move, "")
+	w = _night(Vector2(0.0, 0.0))
+	w.player.pos = Vector2(Config.FIELD.position.x + 30.0, Config.TORCH.pos.y)
+	boar = Enemy.new("boar", Vector2(Config.FIELD.position.x - Config.ENEMY.edge, Config.TORCH.pos.y))
+	w.enemies.append(boar)
+	boar.move_t = 0.0
+	_play(w, 1)
+	_expect(out, "the boar does not charge from beyond the field", boar.move, "")
+	return out
+
+
 ## One blow of 1 on e from beside it, by the torch's own world rules (_damage), without a swing.
 static func _damage_once(w, e) -> void:
 	w._damage(e, 1, e.pos + Vector2(4.0, 0.0))
@@ -527,6 +592,14 @@ static func _nights() -> Array:
 	var first: float = w.burn()
 	w.night = Config.NIGHTS.size() + 2
 	_expect(out, "the torch burns faster on nights past the table", is_equal_approx(w.burn(), Config.NIGHTS[-1].burn + 2.0 * Config.LATER_NIGHTS.burn) and w.burn() > first, true)
+	for night in [1, Config.NIGHTS.size() + 2]:
+		w = _night(DARK)
+		w.night = night
+		w.next_wood = 0.0
+		_play(w, 1)
+		var gap: float = Config.WOOD.every * minf(1.0, Config.WOOD.pace / w.burn())
+		_expect(out, "night %d: logs come every WOOD.every, more often as the fire burns past WOOD.pace" % night, snappedf(w.next_wood - w.time, 0.001), snappedf(gap, 0.001))
+		_expect(out, "night %d: the logs keep up with the fire (a full night's logs hold a night's burn)" % night, Config.NIGHT.length / gap * Config.TORCH.log_fuel >= w.burn() * Config.NIGHT.length * 1.5, true)
 	return out
 
 
