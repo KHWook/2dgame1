@@ -44,6 +44,12 @@ const HINTS := {
 	"berry": "열매: 다쳤을 때 밟으면 체력이 회복된다",
 }
 
+## Which side an upgrade works on, so the HUD, the pause screen and the end screen group them: the torch and its
+## fire, or the keeper (every upgrade not listed here). Order within a group is the order they were taken.
+const TORCH_SIDE := ["slow_burn", "big_logs", "ember_ring", "warm_glow", "woodpile", "bright", "spark", "big_torch"]
+const SIDES := ["torch", "keeper"]
+const SIDE_NAMES := { "torch": "횃불의 힘", "keeper": "기사의 힘" }
+
 static var _looks := {} # kind -> its finished look, made the first time it is asked for
 
 
@@ -53,6 +59,10 @@ static func enemy(kind: String) -> Dictionary:
 		look.merge(ENEMIES.get(kind, {}), true)
 		_looks[kind] = look
 	return _looks[kind]
+
+
+static func side(upgrade: String) -> String:
+	return "torch" if TORCH_SIDE.has(upgrade) else "keeper"
 
 
 ## The sprite an enemy shows on this simulation step. offset keeps a crowd from moving in step.
@@ -77,4 +87,7 @@ static func problems() -> Array:
 			out.append("Enemy kind '%s' is faster in the dark but does not show it. Fix: give it a dark_glow in ENEMIES in src/art/looks.gd." % kind)
 	for id in Config.UPGRADES:
 		wanted.append(ICON % id)
+	for id in TORCH_SIDE:
+		if not Config.UPGRADES.has(id):
+			out.append("TORCH_SIDE names '%s', which is not an upgrade. Fix: remove it from TORCH_SIDE in src/art/looks.gd." % id)
 	return out + Sprites.missing(wanted)

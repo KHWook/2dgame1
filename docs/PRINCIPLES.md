@@ -16,6 +16,7 @@
 - `src/sim/`: 시뮬레이션. `World.step(input_frame)` 한 번이 고정 스텝 하나다. 노드도, 엔진 입력도, 시계도 없다.
 - `src/main.gd`: 엔진과 시뮬레이션 사이의 유일한 다리. 키 이벤트를 `InputFrame`으로 바꾸고, `_physics_process`(60 Hz)마다 `world.step`을 부르고, `_draw`에서 월드를 읽어서 그린다.
 - `src/art/`: 그림. `sprites.gd`는 글자 격자로 그린 스프라이트(글자 하나가 픽셀 하나), `painter.gd`는 월드를 읽어서 어떤 그림을 어디에 그릴지 정한다. `effects.gd`는 `world.events`를 읽어 잠깐 보이는 이펙트를 띄운다. `looks.gd`는 적 종류와 강화의 생김새 표다.
+- `src/ui.gd`: 화면의 글자(Label)와 그 움직임. 강화 카드, HUD 글자, 안내, 일시정지·끝 화면. 월드를 읽기만 하고, 움직임은 실제 시간으로 돌아서 월드를 멈추지 않는다. `main.gd`가 만들고 부른다.
 - `src/records.gd`: 지난 판의 점수 기록(`user://records.json`). 파일과 날짜를 다루므로 시뮬레이션 밖에 있다.
 - `tools/`: 검사, 규칙 장면 테스트, 리플레이. `./verify`가 입구다.
 
@@ -41,6 +42,7 @@ Godot 내장 물리(`CharacterBody2D`, `move_and_slide`)는 게임 규칙에 쓰
 | N1 | 튜닝 숫자는 `src/sim/config.gd`의 표에 둔다 | 글. 검사 후보 |
 | A1 | 스프라이트 격자는 줄 너비가 같고 모든 글자가 `PALETTE`에 있다 | `Sprites.problems()` (`./verify`) |
 | A2 | 규칙 데이터가 이름으로 찾는 스프라이트(적 종류마다 `<종류>_a`·`<종류>_b`, 강화마다 `icon_<id>`)는 전부 그려져 있고, 적 종류마다 첫 등장 안내(`Looks.HINTS`)가 있다 | `Looks.problems()` (`./verify`) |
+| A3 | 화면에 쓰는 글자(`src/`의 문자열에서 ASCII가 아닌 것)는 전부 픽셀 폰트(`assets/fonts/`, 한글에 필요한 만큼 잘라 넣음)에 있다. 다른 폰트로 대신 그려지는 글자가 없게 | `ui.gd`의 `font_problems()` (`./verify`의 fonts 줄, 자체 bad/good 포함) |
 | R1 | 적 종류·강화·줍는 것을 더하면 그 규칙을 보여 주는 장면을 `tools/rules_test.gd`에 더한다 | 장면 테스트(`./verify`) + 글 |
 | B1 | `src/`와 `tools/`의 스크립트는 전부 컴파일된다. 리플레이가 부르지 않는 화면 쪽 스크립트도 포함 | check B1 |
 
