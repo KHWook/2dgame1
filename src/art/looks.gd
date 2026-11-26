@@ -14,13 +14,15 @@ const FRAMES := ["%s_a", "%s_b"]
 ## pixel of the sprite that sits on its position. shadow, shadow_at: the shadow sprite and where its top-left goes.
 ## flies: painted above everything that stands, bobbing. turns: mirrored when it heads left. bits: PALETTE keys of
 ## the pixels that fly off it when it is hit. glow: a sprite painted over it that the night does not dim.
+## dark_glow: the same, painted only while it is outside the torch's light, with a streak behind it (a kind with
+## dark_speed_mult in its row, so you see where it is faster).
 const DEFAULT := {
 	"steps": 12, "anchor": Vector2(8.0, 10.0), "shadow": "shadow", "shadow_at": Vector2(-6.0, 1.0),
-	"flies": false, "turns": false, "bits": ["W", "a", "A"], "glow": "",
+	"flies": false, "turns": false, "bits": ["W", "a", "A"], "glow": "", "dark_glow": "",
 }
 const ENEMIES := {
 	"slime": { "steps": 14, "bits": ["h", "g", "G"] },
-	"bat": { "steps": 5, "anchor": Vector2(8.0, 11.0), "shadow": "shadow_small", "shadow_at": Vector2(-4.0, 4.0), "flies": true, "bits": ["p", "P", "q"] },
+	"bat": { "steps": 5, "anchor": Vector2(8.0, 11.0), "shadow": "shadow_small", "shadow_at": Vector2(-4.0, 4.0), "flies": true, "bits": ["p", "P", "q"], "dark_glow": "bat_eyes" },
 	"shade": { "steps": 14, "bits": ["7", "8", "l"], "glow": "shade_eyes" },
 	"big_slime": { "steps": 18, "anchor": Vector2(12.0, 13.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 2.0), "bits": ["h", "G", "j"] },
 	"thief": { "steps": 6, "turns": true, "bits": ["o", "O", "n"] },
@@ -31,7 +33,7 @@ const ENEMIES := {
 ## One line that says what a thing does, shown the first time it turns up in a game. One per enemy kind, and "berry".
 const HINTS := {
 	"slime": "슬라임: 횃불에 붙어 불을 덮는다",
-	"bat": "박쥐: 기사를 쫓아온다",
+	"bat": "박쥐: 기사를 쫓아온다, 빛 밖에서는 더 빠르다",
 	"thief": "도둑 비버: 장작을 물고 달아난다",
 	"shade": "그림자: 횃불 빛 안에서만 벨 수 있다",
 	"big_slime": "큰 슬라임: 죽으면 둘로 갈라진다",
@@ -66,8 +68,11 @@ static func problems() -> Array:
 			out.append("Enemy kind '%s' has no hint. Fix: add a line for it to HINTS in src/art/looks.gd." % kind)
 		var look := enemy(kind)
 		wanted.append_array([FRAMES[0] % kind, FRAMES[1] % kind, look.shadow])
-		if look.glow != "":
-			wanted.append(look.glow)
+		for g in [look.glow, look.dark_glow]:
+			if g != "":
+				wanted.append(g)
+		if Config.ENEMY_TYPES[kind].get("dark_speed_mult", 1.0) > 1.0 and look.dark_glow == "":
+			out.append("Enemy kind '%s' is faster in the dark but does not show it. Fix: give it a dark_glow in ENEMIES in src/art/looks.gd." % kind)
 	for id in Config.UPGRADES:
 		wanted.append(ICON % id)
 	return out + Sprites.missing(wanted)
