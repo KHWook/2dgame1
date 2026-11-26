@@ -15,19 +15,21 @@ const FRAMES := ["%s_a", "%s_b"]
 ## flies: painted above everything that stands, bobbing. turns: mirrored when it heads left. bits: PALETTE keys of
 ## the pixels that fly off it when it is hit. glow: a sprite painted over it that the night does not dim.
 ## dark_glow: the same, painted only while it is outside the torch's light, with a streak behind it (a kind with
-## dark_speed_mult in its row, so you see where it is faster).
+## dark_speed_mult in its row, so you see where it is faster). in_dark: [PALETTE key, PALETTE key]: the pixels of its
+## own sprite drawn with the first key (its eyes) show in the second colour while it is outside the light, where the
+## night is too dark to see the rest of it. A kind with a glow or a dark_glow needs none.
 const DEFAULT := {
 	"steps": 12, "anchor": Vector2(8.0, 10.0), "shadow": "shadow", "shadow_at": Vector2(-6.0, 1.0),
-	"flies": false, "turns": false, "bits": ["W", "a", "A"], "glow": "", "dark_glow": "",
+	"flies": false, "turns": false, "bits": ["W", "a", "A"], "glow": "", "dark_glow": "", "in_dark": [],
 }
 const ENEMIES := {
-	"slime": { "steps": 14, "bits": ["h", "g", "G"] },
+	"slime": { "steps": 14, "bits": ["h", "g", "G"], "in_dark": ["W", "h"] },
 	"bat": { "steps": 5, "anchor": Vector2(8.0, 11.0), "shadow": "shadow_small", "shadow_at": Vector2(-4.0, 4.0), "flies": true, "bits": ["p", "P", "q"], "dark_glow": "bat_eyes" },
 	"shade": { "steps": 14, "bits": ["7", "8", "l"], "glow": "shade_eyes" },
-	"big_slime": { "steps": 18, "anchor": Vector2(12.0, 13.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 2.0), "bits": ["h", "G", "j"] },
-	"thief": { "steps": 6, "turns": true, "bits": ["o", "O", "n"] },
-	"boar": { "steps": 7, "turns": true, "bits": ["b", "B", "S"] },
-	"slime_king": { "steps": 20, "anchor": Vector2(16.0, 17.0), "shadow": "shadow_huge", "shadow_at": Vector2(-14.0, 5.0), "bits": ["h", "g", "Y"] },
+	"big_slime": { "steps": 18, "anchor": Vector2(12.0, 13.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 2.0), "bits": ["h", "G", "j"], "in_dark": ["W", "h"] },
+	"thief": { "steps": 6, "turns": true, "bits": ["o", "O", "n"], "in_dark": ["W", "y"] },
+	"boar": { "steps": 7, "turns": true, "bits": ["b", "B", "S"], "in_dark": ["i", "i"] },
+	"slime_king": { "steps": 20, "anchor": Vector2(16.0, 17.0), "shadow": "shadow_huge", "shadow_at": Vector2(-14.0, 5.0), "bits": ["h", "g", "Y"], "in_dark": ["W", "h"] },
 	"shade_lord": { "steps": 16, "anchor": Vector2(12.0, 14.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 6.0), "bits": ["7", "8", "Y"], "glow": "shade_lord_eyes" },
 }
 
@@ -70,8 +72,8 @@ static func frame(kind: String, steps: int, offset: int = 0) -> String:
 	return FRAMES[(steps / enemy(kind).steps + offset) % 2] % kind
 
 
-## Rule A2: messages for every sprite the rules' data asks for by name that is not drawn, and for every enemy kind
-## that has no hint.
+## Rule A2: messages for every sprite the rules' data asks for by name that is not drawn, for every enemy kind
+## that has no hint, and for every enemy kind that would not show at all out in the dark.
 static func problems() -> Array:
 	var wanted := []
 	var out := []
@@ -85,9 +87,40 @@ static func problems() -> Array:
 				wanted.append(g)
 		if Config.ENEMY_TYPES[kind].get("dark_speed_mult", 1.0) > 1.0 and look.dark_glow == "":
 			out.append("Enemy kind '%s' is faster in the dark but does not show it. Fix: give it a dark_glow in ENEMIES in src/art/looks.gd." % kind)
+		var frames := [FRAMES[0] % kind, FRAMES[1] % kind]
+		if Sprites.missing(frames).is_empty():
+			out.append_array(dark_problems(kind, look, frames.map(func(f): return Sprites.rows(f))))
 	for id in Config.UPGRADES:
 		wanted.append(ICON % id)
 	for id in TORCH_SIDE:
 		if not Config.UPGRADES.has(id):
 			out.append("TORCH_SIDE names '%s', which is not an upgrade. Fix: remove it from TORCH_SIDE in src/art/looks.gd." % id)
 	return out + Sprites.missing(wanted)
+
+
+## What is wrong with how one enemy kind shows outside the light, given the grids of its frames: the night is nearly
+## black there, so it needs a glow, a dark_glow, or in_dark pixels that are on every frame.
+static func dark_problems(kind: String, look: Dictionary, frames: Array) -> Array:
+	if look.glow != "" or look.dark_glow != "":
+		return []
+	if look.in_dark.size() != 2:
+		return ["Enemy kind '%s' cannot be seen in the dark. Fix: give it in_dark (the PALETTE key of its eyes, then of the colour they glow), a glow or a dark_glow in ENEMIES in src/art/looks.gd." % kind]
+	for grid in frames:
+		if not grid.any(func(row): return look.in_dark[0] in row):
+			return ["Enemy kind '%s' has a frame with no '%s' pixel, so it vanishes in the dark on that frame. Fix: draw its eyes with that key on both frames, or change in_dark in src/art/looks.gd." % [kind, look.in_dark[0]]]
+	return []
+
+
+## A2's dark rule checks itself (G4).
+static func selftest() -> Array:
+	var fails := []
+	var blind: Dictionary = DEFAULT.duplicate()
+	var eyed: Dictionary = DEFAULT.duplicate()
+	eyed.in_dark = ["W", "h"]
+	if dark_problems("x", blind, [["kW"]]).is_empty():
+		fails.append("[A2] missed an enemy with nothing to show in the dark")
+	if dark_problems("x", eyed, [["kW"], ["kk"]]).is_empty():
+		fails.append("[A2] missed a frame without its in_dark pixels")
+	if not dark_problems("x", eyed, [["kW"], ["Wk"]]).is_empty():
+		fails.append("[A2] flagged an enemy whose eyes show on both frames")
+	return fails
