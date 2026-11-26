@@ -1,6 +1,6 @@
 ## Short-lived pictures that answer what just happened in the world (world.events): pixels that fly off an enemy
 ## that is hit (and fire, from a blade that burns), a puff where one dies, sparks, a ring of embers and a brighter torch when it is fed, and hearts
-## rising off a keeper who ate a berry.
+## rising off a keeper who ate a berry, and dust where the slime king lands.
 ## View only (D4): it reads the world and never writes to it. It runs on simulation steps with its own seeded
 ## generator, so the same night always shows the same effects.
 extends RefCounted
@@ -21,11 +21,13 @@ const BURSTS := {
 	"shot": { "count": 5, "fan": 0.7, "speed": [20.0, 60.0], "life": [0.15, 0.3], "keep": 0.05 }, # the torch fires a spark
 	"arrive": { "count": 24, "fan": PI, "speed": [40.0, 140.0], "life": [0.3, 0.7], "keep": 0.02 }, # a boss comes
 	"burn": { "count": 8, "fan": 1.2, "speed": [30.0, 90.0], "life": [0.25, 0.5], "keep": 0.05 }, # a fire blade's blow
+	"landed": { "count": 28, "fan": PI, "speed": [60.0, 130.0], "life": [0.25, 0.45], "keep": 0.02 }, # the slime king comes down
 	"heal": { "count": 9, "fan": 1.0, "speed": [20.0, 55.0], "life": [0.4, 0.8], "keep": 0.15 }, # rise off the keeper
 }
 ## PALETTE keys of flying pixels that are not an enemy's own (those are in looks.gd).
 const FIRE := ["f", "F", "x"]
 const HEAL := ["i", "W", "I"]
+const DUST := ["m", "M", "c"] # thrown up off the ground
 const HEAD := Vector2(0.0, -8.0) # from the keeper's position
 const BIG_UNTIL := 0.5 # a flying pixel is 2x2 for this share of its life, then 1x1
 const POOF := ["poof_a", "poof_b", "poof_c", "poof_d"]
@@ -65,6 +67,9 @@ func step(w) -> void:
 				_burst(BURSTS.shot, ev.pos, Vector2.UP, FIRE)
 			"boss":
 				_burst(BURSTS.arrive, ev.pos, Vector2.UP, Looks.enemy(ev.enemy).bits)
+				poofs.append({ "pos": ev.pos, "age": 0 })
+			"landed":
+				_burst(BURSTS.landed, ev.pos, Vector2.UP, DUST + Looks.enemy(ev.enemy).bits)
 				poofs.append({ "pos": ev.pos, "age": 0 })
 			"healed":
 				_burst(BURSTS.heal, ev.pos + HEAD, Vector2.UP, HEAL)

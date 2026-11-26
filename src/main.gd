@@ -10,6 +10,8 @@ const Bot := preload("res://src/bot.gd")
 const Painter := preload("res://src/art/painter.gd")
 const Looks := preload("res://src/art/looks.gd")
 const Records := preload("res://src/records.gd")
+const Juice := preload("res://src/art/juice.gd")
+const Sfx := preload("res://src/audio/sfx.gd")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -18,6 +20,8 @@ const KEYS := {
 	KEY_SHIFT: "dash", KEY_K: "dash",
 	KEY_1: "pick_1", KEY_2: "pick_2", KEY_3: "pick_3", KEY_R: "restart",
 }
+const PAUSE_KEYS := [KEY_P, KEY_ESCAPE]
+const SFX_DB := -12.0 # how loud the sound effects play: under the player's own music, if any
 const ENDINGS := { "out": "횃불이 꺼졌다", "dead": "쓰러졌다" }
 const TORCH_LIGHT := Color("#ffcf8a")
 const TORCH_ENERGY := 1.0
@@ -80,6 +84,10 @@ var hints_told := {} # things already explained; each is explained once, however
 var hints_waiting: Array = [] # lines queued behind the one that is showing
 var hint_steps := 0 # steps the showing hint has left
 var torch_light: PointLight2D
+var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step made
+var sfx := {} # sound name -> its AudioStreamPlayer
+var paused := false
+var pause_label: Label
 var player_light: PointLight2D
 
 
@@ -100,6 +108,14 @@ func _ready() -> void:
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
 		world.step(bot.frame(world))
 	painter = Painter.new(seed_value)
+	juice = Juice.new(seed_value)
+	juice.seen(world)
+	for name in Sfx.SOUNDS:
+		var player := AudioStreamPlayer.new()
+		player.stream = Sfx.make(name)
+		player.volume_db = SFX_DB
+		add_child(player)
+		sfx[name] = player
 	sky = CanvasModulate.new()
 	add_child(sky)
 	var glow := GradientTexture2D.new()
@@ -169,6 +185,13 @@ func _ready() -> void:
 	boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.BOSS_BAR.position.y - 13.0)
 	boss_name.size = Vector2(Painter.BOSS_BAR.size.x, 10.0)
 	_outline(boss_name)
+	pause_label = _label(layer, HORIZONTAL_ALIGNMENT_CENTER)
+	pause_label.add_theme_font_size_override("font_size", CLOCK_SIZE)
+	pause_label.text = "일시정지"
+	pause_label.position = Vector2(0.0, roundf(Painter.VIEW.y / 2.0 - 8.0))
+	pause_label.size = Vector2(Painter.VIEW.x, 16.0)
+	pause_label.visible = false
+	_outline(pause_label)
 
 
 ## One offer card: the key that takes it in a badge at the top, the icon enlarged, the name, then what it does.
@@ -224,6 +247,10 @@ func _label(parent: Node, align: HorizontalAlignment) -> Label:
 
 func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
+	if k != null and k.pressed and not k.echo and PAUSE_KEYS.has(k.keycode):
+		paused = not paused
+		pause_label.visible = paused
+		return
 	if k == null or not KEYS.has(k.keycode):
 		return
 	var action: String = KEYS[k.keycode]
@@ -245,6 +272,15 @@ func _physics_process(_delta: float) -> void:
 	f.held = held.duplicate()
 	f.pressed = pending
 	pending = {}
+	if paused: # presses made while paused are dropped; keys still held count again once it goes on
+		return
+	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
+	juice.frame()
+	position = juice.offset # the field and its lights; the HUD is on its own layer and stays put
+	painter.shake = juice.offset
+	if holding:
+		overlay.queue_redraw()
+		return
 	bot_looked = bot_looked + 1 if bot != null and world.phase == "pick" else 0
 	if bot_looked > 0 and bot_looked < BOT_LOOKS:
 		return
@@ -252,6 +288,9 @@ func _physics_process(_delta: float) -> void:
 	if bot == null: # the demo bot's runs are not the player's records
 		records.step(world, seed_value, Time.get_datetime_string_from_system(false, true))
 	painter.step(world)
+	juice.step(world)
+	for name in juice.sounds:
+		sfx[name].play()
 	_hints()
 	queue_redraw()
 	overlay.queue_redraw()
@@ -274,9 +313,13 @@ func _process(_delta: float) -> void:
 	painter.score_text_width = _width(hud)
 	_words()
 	var b = Painter.boss(world)
-	boss_name.visible = b != null and world.phase == "night"
+	var coming: bool = world.boss_from != null
+	boss_name.visible = (b != null or coming) and world.phase == "night"
 	if b != null:
 		boss_name.text = b.T.name
+	elif coming: # the painter points at the edge it comes from
+		var who: String = Config.ENEMY_TYPES[world.boss_kind()].name
+		boss_name.text = "%s%s 다가온다!" % [who, _subject(who)]
 	var day: float = painter.daylight(world)
 	sky.color = painter.sky(world)
 	torch_light.texture_scale = world.light_radius() * 2.0 / 128.0
@@ -285,6 +328,12 @@ func _process(_delta: float) -> void:
 	var from_torch: float = world.player.pos.distance_to(Config.TORCH.pos) / world.light_radius()
 	player_light.energy = KEEPER_ENERGY * (1.0 - day) * (clampf(from_torch, 0.0, 1.0) if world.fuel > 0.0 else 1.0)
 	player_light.position = world.player.pos
+
+
+## The subject particle that goes after a Korean word: 이 after a final consonant, 가 after a vowel.
+static func _subject(word: String) -> String:
+	var last := word.unicode_at(word.length() - 1)
+	return "이" if last >= 0xAC00 and last <= 0xD7A3 and (last - 0xAC00) % 28 != 0 else "가"
 
 
 ## Says what each kind of thing does the first time it turns up, one line at a time.

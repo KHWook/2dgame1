@@ -25,7 +25,11 @@ static func run() -> Array:
 	out.append_array(_upgrades())
 	out.append_array(_levels())
 	out.append_array(_new_upgrades())
+	out.append_array(_rebalanced())
+	out.append_array(_dark())
 	out.append_array(_bosses())
+	out.append_array(_patterns())
+	out.append_array(_charger())
 	out.append_array(_logs())
 	out.append_array(_nights())
 	out.append_array(_setup())
@@ -155,6 +159,7 @@ static func _upgrades() -> Array:
 	_play(w, 1, "pick_1")
 	_expect(out, "sturdy raises max hp and heals by one", [w.max_hp(), w.player.hp], [Config.PLAYER.hp + 1, Config.PLAYER.hp + 1])
 	w = _night(DARK, ["thorns"])
+	w.next_thorn = NEVER # only the blow back, not the prickling (that has its own scene)
 	var slime = _add(w, "slime", Vector2(8.0, 0.0))
 	_play(w, 1)
 	_expect(out, "with thorns the enemy that hurts you is hurt too", [w.player.hp, slime.hp], [Config.PLAYER.hp - 1, Config.ENEMY_TYPES.slime.hp - 1])
@@ -259,6 +264,98 @@ static func _new_upgrades() -> Array:
 	return out
 
 
+## An enemy that stays where it is put.
+static func _still(e):
+	e.T = e.T.duplicate()
+	e.T.speed = 0.0
+	e.T.heavy = 0.0
+	return e
+
+
+## What the upgrade rebalance asks of the ember ring, bright fire, thorn cloak and big torch.
+static func _rebalanced() -> Array:
+	var out := []
+	var er: Dictionary = Config.UPGRADES.ember_ring
+	# ember ring: scorches down to 1 hp, never kills, once every ember_every
+	var w = _night(Vector2(0.0, 60.0), ["ember_ring"])
+	var big = _still(Enemy.new("big_slime", Config.TORCH.pos + Vector2(20.0, 0.0)))
+	var slime = _still(Enemy.new("slime", Config.TORCH.pos + Vector2(-20.0, 0.0)))
+	w.enemies.append_array([big, slime])
+	w.fuel = 1.0e6 # the big slime smothers the torch the whole time; keep it lit
+	_play(w, 1)
+	_expect(out, "the ember ring scorches what is beside the torch", [big.hp, slime.hp], [Config.ENEMY_TYPES.big_slime.hp - 1, 1])
+	_play(w, int(er.ember_every / Config.STEP) - 2)
+	_expect(out, "the ember ring waits ember_every before it scorches again", big.hp, Config.ENEMY_TYPES.big_slime.hp - 1)
+	_play(w, int(10.0 / Config.STEP))
+	_expect(out, "the ember ring never kills: the last point is left to you", [big.hp, slime.hp, big.dead or slime.dead, w.score, w.phase], [1, 1, false, 0, "night"])
+	# ember ring: smotherers at the torch smother less
+	for has in [false, true]:
+		w = _night(DARK, ["ember_ring"] if has else [])
+		w.next_ember = NEVER
+		w.enemies.append(Enemy.new("slime", Config.TORCH.pos + Vector2(19.0, 0.0)))
+		var before: float = w.fuel
+		_play(w, 1)
+		var want: float = (Config.NIGHTS[0].burn + Config.TORCH.smother * (er.smother_mult if has else 1.0)) * Config.STEP
+		_expect(out, "a slime at the torch smothers less with the ember ring (%s)" % has, is_equal_approx(before - w.fuel, want), true)
+	# bright fire: faster on foot in the light, the usual speed outside it
+	for at in [LIT, DARK]:
+		for has in [false, true]:
+			w = _night(at, ["bright"] if has else [])
+			var from: Vector2 = w.player.pos
+			_play(w, 10, "", "up")
+			var want: float = Config.PLAYER.speed * Config.STEP * 10.0 * (Config.UPGRADES.bright.lit_speed_mult if has and at == LIT else 1.0)
+			_expect(out, "bright fire speeds you up only in the light (%s, %s)" % ["lit" if at == LIT else "dark", has], is_equal_approx(from.y - w.player.pos.y, want), true)
+	# thorn cloak: an enemy pressed up against you, not touching, is pricked every thorn_every
+	var th: Dictionary = Config.UPGRADES.thorns
+	for has in [false, true]:
+		w = _night(DARK, ["thorns"] if has else [])
+		var gap: float = Config.ENEMY_TYPES.slime.radius + Config.PLAYER.radius + th.thorn_reach * 0.5
+		slime = _still(_add(w, "slime", Vector2(gap, 0.0)))
+		slime.hp = 99
+		_play(w, 1)
+		_expect(out, "the thorn cloak pricks an enemy close by without being hit (%s)" % has, [slime.hp, w.player.hp], [98 if has else 99, Config.PLAYER.hp])
+		_play(w, int(th.thorn_every / Config.STEP) - 2)
+		_expect(out, "the thorn cloak waits thorn_every before it pricks again (%s)" % has, slime.hp, 98 if has else 99)
+		_play(w, 3)
+		_expect(out, "the thorn cloak pricks again after thorn_every (%s)" % has, slime.hp, 97 if has else 99)
+	w = _night(DARK, ["thorns"])
+	slime = _still(_add(w, "slime", Vector2(Config.ENEMY_TYPES.slime.radius + Config.PLAYER.radius + th.thorn_reach + 2.0, 0.0)))
+	_play(w, 1)
+	_expect(out, "the thorn cloak does not reach an enemy farther off", slime.hp, Config.ENEMY_TYPES.slime.hp)
+	# big torch: dawn tops it up in proportion to the tank
+	for picks in [[], ["big_torch"], ["big_torch", "big_torch"]]:
+		w = _night(DARK, picks)
+		w.fuel = 1.0
+		w.time = Config.NIGHT.length - Config.STEP * 0.5
+		_play(w, 1)
+		var want: float = Config.TORCH.start_fuel * w.max_fuel() / Config.TORCH.max_fuel
+		_expect(out, "dawn tops the torch up to its share of the tank (big torch level %d)" % picks.size(), [is_equal_approx(w.fuel, want), w.fuel > Config.TORCH.start_fuel], [true, not picks.is_empty()])
+	return out
+
+
+## The dark is where bats hunt: out of the torch's light they fly faster, in it they keep their speed (and the warm
+## glow still slows them there). A kind without dark_speed_mult, a slime, is the same speed in both.
+static func _dark() -> Array:
+	var out := []
+	var steps := 10
+	for kind in ["bat", "slime"]:
+		var T: Dictionary = Config.ENEMY_TYPES[kind]
+		for at in [LIT, DARK]:
+			for glow in [false, true]:
+				var w = _night(at, ["warm_glow"] if glow else [])
+				# a bat starts beside the player, a slime where the player stands (and walks off to the torch)
+				var e = _add(w, kind, Vector2(20.0, 0.0) if kind == "bat" else Vector2.ZERO)
+				w.player.pos += Vector2(0.0, 40.0) if kind == "slime" else Vector2.ZERO
+				var from: Vector2 = e.pos
+				var lit: bool = at == LIT
+				_expect(out, "the %s starts %s the light" % [kind, "in" if lit else "out of"], w.in_light(from), lit)
+				_play(w, steps)
+				var mult: float = (Config.UPGRADES.warm_glow.glow_slow if glow else 1.0) if lit else T.get("dark_speed_mult", 1.0)
+				_expect(out, "a %s's speed %s the light (warm glow %s)" % [kind, "in" if lit else "out of", glow], snappedf(from.distance_to(e.pos), 0.001), snappedf(T.speed * mult * Config.STEP * steps, 0.001))
+	_expect(out, "bats are faster in the dark", Config.ENEMY_TYPES.bat.get("dark_speed_mult", 1.0) > 1.0, true)
+	return out
+
+
 static func _bosses() -> Array:
 	var out := []
 	var every: int = Config.BOSS.every
@@ -286,6 +383,163 @@ static func _bosses() -> Array:
 	_play(w, SWING + 20, "attack")
 	_expect(out, "the slime king breaks into two big slimes and scores its own worth", [w.enemies.filter(func(e): return e.kind == "big_slime").size(), w.score], [2, Config.ENEMY_TYPES.slime_king.score])
 	return out
+
+
+## Boss patterns, each warned before it strikes. The slime king marks where you stand, crouches, flies, and hurts you
+## on landing only if you stayed in the shock; it does not leap at you from far off. The shade lord circles outside the
+## light, where blows pass through it, rushes the torch after warning, can be cut there, and goes back out. And a
+## boss's coming is told BOSS.warn seconds ahead, from the edge where it then comes.
+static func _patterns() -> Array:
+	var out := []
+	var K: Dictionary = Config.ENEMY_TYPES.slime_king
+	var L: Dictionary = K.leap
+	var airborne := int(round((L.warn + L.air) / Config.STEP))
+	for flee in [false, true]:
+		var w = _night(DARK + Vector2(0.0, 40.0))
+		w.fuel = 1.0e6
+		var king = _add(w, "slime_king", Vector2(-L.range * 0.6, 0.0))
+		king.move_t = 0.0
+		var mark: Vector2 = w.player.pos
+		var told := _play(w, 1)
+		_expect(out, "the slime king marks where you stand and says so (flee %s)" % flee, [king.move, king.move_to, told.has("warn")], ["warn", mark, true])
+		var took_off: Vector2 = king.pos
+		_play(w, airborne - 2, "", "up" if flee else "")
+		_expect(out, "the slime king is still up and has hurt no one just before it lands (flee %s)" % flee, [king.move, w.player.hp], ["air", Config.PLAYER.hp])
+		_expect(out, "the slime king does not touch you while in the air (flee %s)" % flee, king.touches(w.player), false)
+		told = _play(w, 3, "", "up" if flee else "")
+		_expect(out, "the slime king lands on the mark and says so (flee %s)" % flee, [king.move, king.pos, told.has("landed"), king.pos != took_off], ["", mark, true, true])
+		_expect(out, "the landing hurts you only if you stayed in the shock (flee %s)" % flee, w.player.hp, Config.PLAYER.hp - (0 if flee else 1))
+		_expect(out, "fleeing gets you out of the shock in time", (not flee) or w.player.pos.distance_to(mark) > L.shock + Config.PLAYER.radius, true)
+		told = _play(w, int(L.every / Config.STEP) - 5)
+		_expect(out, "the slime king waits leap.every before it leaps again (flee %s)" % flee, told.has("warn"), false)
+	var w = _night(DARK + Vector2(0.0, 40.0))
+	var king = _add(w, "slime_king", Vector2(-(L.range + 20.0), 0.0))
+	king.move_t = 0.0
+	_play(w, 10)
+	_expect(out, "the slime king does not leap at you from out of range", king.move, "")
+	# shade lord: circles in the dark, blows pass through it there
+	var SL: Dictionary = Config.ENEMY_TYPES.shade_lord
+	var R: Dictionary = SL.lunge
+	w = _night(Vector2(0.0, 40.0))
+	w.fuel = 50.0
+	var lord = Enemy.new("shade_lord", Config.TORCH.pos + Vector2(150.0, 0.0))
+	w.enemies.append(lord)
+	lord.summon_t = NEVER
+	lord.move_t = R.every
+	var lit_steps := 0
+	var start_angle: float = (lord.pos - Config.TORCH.pos).angle()
+	var told := []
+	for i in int((R.every - 0.5) / Config.STEP):
+		told += _play(w, 1)
+		lit_steps += 1 if w.in_light(lord.pos) else 0
+	var ring: float = w.light_radius() + R.ring + SL.radius
+	_expect(out, "the shade lord keeps out of the light while it circles", [lit_steps, lord.at_torch, told.has("warn")], [0, false, false])
+	_expect(out, "the shade lord circles the light at its ring", absf(lord.pos.distance_to(Config.TORCH.pos) - ring) < 3.0, true)
+	_expect(out, "the shade lord goes round the torch", absf(angle_difference(start_angle, (lord.pos - Config.TORCH.pos).angle())) > 0.5, true)
+	lord.hp = SL.hp
+	_damage_once(w, lord)
+	_expect(out, "blows pass through the shade lord while it circles in the dark", lord.hp, SL.hp)
+	# it warns, stops, then rushes the torch
+	var told2 := _play(w, int(0.5 / Config.STEP) + 2)
+	var at_warn: Vector2 = lord.pos
+	_expect(out, "the shade lord warns before it rushes, at the torch", [told2.has("warn"), lord.move, lord.move_to], [true, "warn", Config.TORCH.pos])
+	_play(w, int(R.warn / Config.STEP) - 3)
+	_expect(out, "the shade lord stands still while it warns", [lord.move, lord.pos.distance_to(at_warn) < 0.01], ["warn", true])
+	_play(w, int(ring / R.speed / Config.STEP) + 10)
+	_expect(out, "the shade lord rushes to the torch and stays there smothering it, in the light", [lord.move, lord.at_torch, w.in_light(lord.pos)], ["stay", true, true])
+	_damage_once(w, lord)
+	_expect(out, "at the torch the shade lord can be cut", lord.hp, SL.hp - 1)
+	_play(w, int(R.stay / Config.STEP) + int(3.0 / Config.STEP))
+	_expect(out, "after staying a while the shade lord goes back out into the dark", [lord.move, lord.at_torch, w.in_light(lord.pos)], ["", false, false])
+	# a boss's coming is told ahead, from the edge it comes from
+	w = _night(DARK)
+	w.night = Config.BOSS.every
+	w.boss_due = true
+	w.time = Config.NIGHT.length * Config.BOSS.at - Config.BOSS.warn - Config.STEP * 0.5
+	told = []
+	var coming_at = null
+	for i in 1:
+		w.step(InputFrame.new())
+		for ev in w.events:
+			told.append(ev.kind)
+			if ev.kind == "coming":
+				coming_at = ev.pos
+	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("coming"), told.has("boss"), w.boss_from == coming_at and coming_at != null], [true, false, true])
+	told = _play(w, int(Config.BOSS.warn / Config.STEP) - 2)
+	_expect(out, "the boss does not come during its warning", told.has("boss"), false)
+	told = _play(w, 3)
+	var bosses: Array = w.enemies.filter(func(e): return e.T.get("boss", false))
+	_expect(out, "the boss comes where its coming pointed", [told.has("boss"), bosses.size(), bosses.size() > 0 and coming_at != null and bosses[0].pos.distance_to(coming_at) < 2.0, w.boss_from], [true, 1, true, null])
+	return out
+
+
+## The boar lines up on you, paws the ground for charge.warn (hurting no one), then charges straight down the line it
+## showed: it hurts you if you stayed in its lane and not if you stepped aside. Blows do not stop the charge; it ends
+## after charge.dist or at the field's edge, and the boar stands dazed for charge.rest before it walks again and waits
+## charge.every. It does not charge from out of range or from beyond the field.
+static func _charger() -> Array:
+	var out := []
+	var B: Dictionary = Config.ENEMY_TYPES.boar
+	var C: Dictionary = B.charge
+	var warn_steps := int(round(C.warn / Config.STEP))
+	var run_steps := int(round(C.dist / C.speed / Config.STEP))
+	for dodge in [false, true]:
+		var w = _night(DARK + Vector2(-20.0, 30.0))
+		w.fuel = 1.0e6
+		var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+		boar.move_t = 0.0
+		var told := _play(w, 1)
+		var from: Vector2 = boar.pos
+		_expect(out, "the boar lines up on you and says so (dodge %s)" % dodge, [boar.move, boar.aim.is_equal_approx(Vector2.RIGHT), told.has("warn")], ["warn", true, true])
+		_play(w, warn_steps - 2, "", "up" if dodge else "")
+		_expect(out, "the boar stands pawing and has hurt no one before it charges (dodge %s)" % dodge, [boar.move, boar.pos.distance_to(from) < 0.01, w.player.hp], ["warn", true, Config.PLAYER.hp])
+		_play(w, 2 + int(run_steps / 2.0), "", "up" if dodge else "")
+		_expect(out, "the boar charges along the line it showed (dodge %s)" % dodge, [boar.move, absf(boar.pos.y - from.y) < 0.01, boar.pos.x - from.x > C.dist * 0.4], ["charge", true, true])
+		_expect(out, "the charge hurts you only if you stayed in its lane (dodge %s)" % dodge, w.player.hp, Config.PLAYER.hp - (0 if dodge else 1))
+		_play(w, run_steps - int(run_steps / 2.0) + 1)
+		_expect(out, "the charge ends after charge.dist and the boar is dazed (dodge %s)" % dodge, [boar.move, absf(boar.pos.distance_to(from) - C.dist) < C.speed * Config.STEP * 1.5], ["rest", true])
+		var dazed_at: Vector2 = boar.pos
+		_play(w, int(C.rest / Config.STEP) - 2)
+		_expect(out, "a dazed boar stands still (dodge %s)" % dodge, [boar.move, boar.pos.distance_to(dazed_at) < 0.01], ["rest", true])
+		_play(w, 3)
+		_expect(out, "after its daze the boar walks again (dodge %s)" % dodge, boar.move, "")
+		told = _play(w, int(C.every / Config.STEP) - 5)
+		_expect(out, "the boar waits charge.every before it charges again (dodge %s)" % dodge, told.has("warn"), false)
+	# a blow does not stop a charge
+	var w = _night(DARK + Vector2(-20.0, 30.0))
+	var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+	boar.move_t = 0.0
+	_play(w, warn_steps + 3)
+	var before: Vector2 = boar.pos
+	_damage_once(w, boar)
+	_play(w, 1)
+	_expect(out, "a blow hurts a charging boar but does not stop or turn it", [boar.hp, boar.move, (boar.pos - before).normalized().is_equal_approx(Vector2.RIGHT), boar.pos.distance_to(before) > C.speed * Config.STEP * 0.9], [B.hp - 1, "charge", true, true])
+	# it stops at the edge of the field
+	w = _night(Vector2(0.0, 0.0))
+	w.player.pos = Vector2(Config.FIELD.end.x - 20.0, Config.TORCH.pos.y)
+	boar = _add(w, "boar", Vector2(-60.0, 0.0))
+	boar.move_t = 0.0
+	_play(w, warn_steps + run_steps + 2)
+	_expect(out, "a charge stops at the field's edge, and the boar is dazed there", [boar.move, Config.FIELD.grow(0.01).has_point(boar.pos), boar.pos.x > Config.FIELD.end.x - 1.0], ["rest", true, true])
+	# not from out of range, nor from beyond the field
+	w = _night(DARK)
+	boar = _add(w, "boar", Vector2(-(C.range + 20.0), 0.0))
+	boar.move_t = 0.0
+	_play(w, 10)
+	_expect(out, "the boar does not charge from out of range", boar.move, "")
+	w = _night(Vector2(0.0, 0.0))
+	w.player.pos = Vector2(Config.FIELD.position.x + 30.0, Config.TORCH.pos.y)
+	boar = Enemy.new("boar", Vector2(Config.FIELD.position.x - Config.ENEMY.edge, Config.TORCH.pos.y))
+	w.enemies.append(boar)
+	boar.move_t = 0.0
+	_play(w, 1)
+	_expect(out, "the boar does not charge from beyond the field", boar.move, "")
+	return out
+
+
+## One blow of 1 on e from beside it, by the torch's own world rules (_damage), without a swing.
+static func _damage_once(w, e) -> void:
+	w._damage(e, 1, e.pos + Vector2(4.0, 0.0))
 
 
 static func _logs() -> Array:
@@ -338,6 +592,14 @@ static func _nights() -> Array:
 	var first: float = w.burn()
 	w.night = Config.NIGHTS.size() + 2
 	_expect(out, "the torch burns faster on nights past the table", is_equal_approx(w.burn(), Config.NIGHTS[-1].burn + 2.0 * Config.LATER_NIGHTS.burn) and w.burn() > first, true)
+	for night in [1, Config.NIGHTS.size() + 2]:
+		w = _night(DARK)
+		w.night = night
+		w.next_wood = 0.0
+		_play(w, 1)
+		var gap: float = Config.WOOD.every * minf(1.0, Config.WOOD.pace / w.burn())
+		_expect(out, "night %d: logs come every WOOD.every, more often as the fire burns past WOOD.pace" % night, snappedf(w.next_wood - w.time, 0.001), snappedf(gap, 0.001))
+		_expect(out, "night %d: the logs keep up with the fire (a full night's logs hold a night's burn)" % night, Config.NIGHT.length / gap * Config.TORCH.log_fuel >= w.burn() * Config.NIGHT.length * 1.5, true)
 	return out
 
 

@@ -10,7 +10,9 @@
 ## for a blow that went through an enemy the dark protects; "banished", the same for an enemy the dawn clears
 ## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
 ## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "boss" { enemy, pos }
-## for a boss that came out of the dark.
+## for a boss that came out of the dark; "coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
+## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), and "landed" { pos, enemy } for the slime
+## king coming down from its leap (src/sim/enemy.gd).
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -42,8 +44,10 @@ var next_wood := 0.0
 var next_berry := 0.0
 var next_ember := 0.0
 var next_spark := 0.0
+var next_thorn := 0.0
 var sparks: Array = [] # embers the torch fired: { pos, vel, life }
 var boss_due := false # a boss is still to come tonight
+var boss_from = null # where the boss will come from once its warning is given, until it comes; null otherwise
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
 var events: Array = [] # what happened in the last step; see the top of this file
 
@@ -73,9 +77,11 @@ func reset() -> void:
 	next_berry = Config.BERRY.first
 	next_ember = 0.0
 	next_spark = 0.0
+	next_thorn = 0.0
 	sparks = []
 	blade_kills = 0
 	boss_due = _boss_night()
+	boss_from = null
 	player = Player.new()
 	_offer()
 
@@ -180,6 +186,7 @@ func step(inp) -> void:
 			var thorns: int = mod("thorns", 0)
 			if thorns > 0:
 				_damage(e, thorns, player.pos)
+	_prickle()
 	_torch()
 	_sparks()
 	enemies = enemies.filter(func(e): return not e.dead and not e.gone) + born
@@ -238,10 +245,12 @@ func _dawn() -> void:
 	next_berry = Config.BERRY.first
 	next_ember = 0.0
 	next_spark = 0.0
+	next_thorn = 0.0
 	sparks = []
 	boss_due = _boss_night()
+	boss_from = null
 	player.hp = mini(max_hp(), player.hp + Config.DAWN.heal)
-	fuel = maxf(fuel, T.start_fuel)
+	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
 	_offer()
 
 
@@ -282,13 +291,14 @@ func _forage() -> void:
 			break
 
 
-## Fuel the torch uses per second right now: tonight's burn with upgrades, plus whatever is smothering it.
+## Fuel the torch uses per second right now: tonight's burn with upgrades, plus whatever is smothering it (less
+## with the ember ring: an enemy at the torch is always inside the ring).
 func burn_rate() -> float:
 	var smothering := 0.0
 	for e in enemies:
 		if e.at_torch and not e.dead:
 			smothering += e.T.get("smother", 1.0)
-	return burn() * mod("burn_mult", 1.0) + T.smother * smothering
+	return burn() * mod("burn_mult", 1.0) + T.smother * smothering * mod("smother_mult", 1.0)
 
 
 func _torch() -> void:
@@ -297,7 +307,8 @@ func _torch() -> void:
 	if ring > 0.0 and time >= next_ember:
 		next_ember = time + mod("ember_every", 1.0)
 		for e in enemies:
-			if e.pos.distance_to(T.pos) <= ring:
+			# The ring scorches but never kills: the last point is left for you to strike.
+			if e.hp > 1 and e.pos.distance_to(T.pos) <= ring:
 				_damage(e, 1, T.pos)
 	var every: float = mod("spark_every", 0.0)
 	if every > 0.0 and time >= next_spark:
@@ -310,6 +321,17 @@ func _torch() -> void:
 			var from: Vector2 = T.pos + Config.SPARK.mouth
 			sparks.append({ "pos": from, "vel": (target.pos - from).normalized() * Config.SPARK.speed, "life": Config.SPARK.life })
 			events.append({ "kind": "shot", "pos": from })
+
+
+## The thorn cloak pricks every enemy pressed up against you every so often, besides hurting the ones that hit you.
+func _prickle() -> void:
+	var every: float = mod("thorn_every", 0.0)
+	if every <= 0.0 or time < next_thorn or player.dead:
+		return
+	next_thorn = time + every
+	for e in enemies:
+		if not e.dead and e.pos.distance_to(player.pos) < e.T.radius + Config.PLAYER.radius + mod("thorn_reach", 0.0):
+			_damage(e, 1, player.pos)
 
 
 ## Sparks fly straight and burn the first enemy they touch.
@@ -382,13 +404,17 @@ func _spawns() -> void:
 		var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(time / N.length, 0.0, 1.0))
 		next_spawn = time + apart * pow(Config.LATER_NIGHTS.spawn, _nights_past()) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
 		enemies.append(Enemy.new(_who(row.who), _edge_point()))
-	if boss_due and time >= N.length * Config.BOSS.at:
+	if boss_due and time >= N.length * Config.BOSS.at - Config.BOSS.warn:
 		boss_due = false
-		var boss = Enemy.new(boss_kind(), _edge_point())
+		boss_from = _edge_point()
+		events.append({ "kind": "coming", "enemy": boss_kind(), "pos": boss_from })
+	if boss_from != null and time >= N.length * Config.BOSS.at:
+		var boss = Enemy.new(boss_kind(), boss_from)
+		boss_from = null
 		enemies.append(boss)
 		events.append({ "kind": "boss", "enemy": boss.kind, "pos": boss.pos })
 	if time >= next_wood:
-		next_wood = time + Config.WOOD.every * mod("wood_mult", 1.0)
+		next_wood = time + Config.WOOD.every * minf(1.0, Config.WOOD.pace / burn()) * mod("wood_mult", 1.0)
 		if logs.size() < Config.WOOD.max_on_ground + mod("wood_extra", 0):
 			var spot = _free_spot(Config.WOOD.keep_away)
 			if spot != null:

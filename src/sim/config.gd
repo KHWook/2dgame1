@@ -24,8 +24,9 @@ const TORCH := {
 	"smother": 8.0, "reach": 12.0, "light_min": 28.0, "light_max": 100.0,
 }
 
-## Logs appear on the ground away from the torch, a few at a time.
-const WOOD := { "first": 1.0, "every": 5.5, "max_on_ground": 3, "keep_away": 45.0 }
+## Logs appear on the ground away from the torch, a few at a time. On a night whose torch burns faster than pace
+## (fuel per second, before upgrades), they come that much more often, so the wood keeps up with the fire.
+const WOOD := { "first": 1.0, "every": 5.5, "max_on_ground": 3, "keep_away": 45.0, "pace": 2.8 }
 
 ## Berries appear now and then, far from the torch. Walking over one heals you if you are hurt.
 const BERRY := { "first": 18.0, "every": 20.0, "max_on_ground": 1, "keep_away": 55.0, "heal": 1 }
@@ -44,21 +45,27 @@ const NIGHTS := [
 	{ "burn": 2.4, "spawn": [2.5, 1.7], "who": { "slime": 0.6, "bat": 0.2, "thief": 0.2 } },
 	{ "burn": 2.8, "spawn": [2.3, 1.55], "who": { "slime": 0.5, "bat": 0.2, "thief": 0.1, "shade": 0.2 } },
 	{ "burn": 3.2, "spawn": [2.0, 1.3], "who": { "slime": 0.45, "bat": 0.2, "thief": 0.1, "shade": 0.15, "big_slime": 0.1 } },
+	{ "burn": 3.5, "spawn": [1.75, 1.15], "who": { "slime": 0.45, "bat": 0.2, "thief": 0.1, "shade": 0.15, "big_slime": 0.1 } },
+	{ "burn": 3.75, "spawn": [1.6, 1.05], "who": { "slime": 0.4, "bat": 0.17, "thief": 0.08, "shade": 0.13, "big_slime": 0.1, "boar": 0.12 } },
 ]
-const LATER_NIGHTS := { "burn": 0.4, "spawn": 0.78 } # per night past the table: fuel per second added, spawn gap multiplied
+const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82 } # per night past the table: fuel per second added, spawn gap multiplied
 
-## Dawn: the sun clears the field, you rest (heal), and the torch is topped up to at least its starting fuel.
+## Dawn: the sun clears the field, you rest (heal), and the torch is topped up to at least its starting fuel (its
+## start_fuel share of the tank, so a big torch is topped up further).
 const DAWN := { "heal": 1 }
 
 ## Every few nights a boss comes, partway through the night, besides the usual enemies (which come a little less
 ## often that night). kinds take turns: the first boss night brings the first, the next the second, and so on.
-const BOSS := { "every": 5, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35 }
+## warn: seconds before it comes that the world picks the edge it comes from and says so (the screen points there).
+const BOSS := { "every": 5, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35, "warn": 2.0 }
 
 const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 
 const ENEMY := {
 	"knock": 150.0, "knock_decay": 0.002, "knock_stop": 4.0, "flash": 0.12, "edge": 12.0,
 	"steal": 8.0, "split_spread": 6.0, "split_knock": 70.0, "summon_gap": 6.0,
+	"orbit_lead": 0.4, # radians ahead on its circle a boss that circles the light aims for: it goes round, not in
+	"orbit_top": 64.0, # it keeps this far below the top of the field, where the HUD would hide it
 }
 
 ## Enemy kinds: add a row to add an enemy (and draw <kind>_a and <kind>_b in src/art/sprites.gd).
@@ -66,20 +73,33 @@ const ENEMY := {
 ## Optional: smother (how many slimes it counts as at the torch), split_count and splits_into (what it breaks into
 ## when it dies), dark_proof (blows pass through it outside the torch's light), harmless (touching it does not hurt),
 ## boss (comes on boss nights only, see BOSS; name is what the screen calls it), heavy (share of a blow's knockback it
-## takes), summon (every so many seconds it calls count enemies of kind around itself), score (worth more than a kill).
+## takes), summon (every so many seconds it calls count enemies of kind around itself), score (worth more than a kill),
+## dark_speed_mult (how much faster it moves outside the torch's light: the dark is where it hunts).
+## leap (the slime king): every so many seconds, when the player is within range, it marks the spot where the player
+## stands, crouches there for warn seconds, flies for air seconds and lands on the mark; a player within shock of the
+## mark is hurt. lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
+## every so many seconds it stops for warn seconds, then rushes to the torch at speed, smothers it for stay seconds
+## (in the light, so it can be cut) and walks back out into the dark.
+## charge (the boar): every so many seconds, on the field with the player within range, it fixes a line at the
+## player and paws the ground for warn seconds, then charges along it at speed for dist pixels (or to the field's
+## edge; blows do not stop it) and stands dazed for rest seconds.
 const ENEMY_TYPES := {
 	"slime": { "hp": 2, "speed": 16.0, "radius": 7.0, "target": "torch" },
-	"bat": { "hp": 1, "speed": 32.0, "radius": 5.0, "target": "player" },
+	"bat": { "hp": 1, "speed": 26.0, "radius": 5.0, "target": "player", "dark_speed_mult": 1.5 },
 	"shade": { "hp": 2, "speed": 24.0, "radius": 6.0, "target": "player", "dark_proof": true },
 	"big_slime": { "hp": 5, "speed": 10.0, "radius": 10.0, "target": "torch", "smother": 2.0, "split_count": 2, "splits_into": "slime" },
 	"thief": { "hp": 1, "speed": 40.0, "radius": 6.0, "target": "log", "harmless": true },
+	"boar": { "hp": 3, "speed": 18.0, "radius": 7.0, "target": "player",
+		"charge": { "every": 3.5, "range": 110.0, "warn": 0.8, "speed": 170.0, "dist": 150.0, "rest": 1.2 } },
 	"slime_king": {
 		"hp": 16, "speed": 9.0, "radius": 13.0, "target": "torch", "smother": 2.5, "split_count": 2, "splits_into": "big_slime",
 		"boss": true, "name": "슬라임 왕", "heavy": 0.15, "summon": { "kind": "slime", "every": 8.0, "count": 2 }, "score": 150,
+		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0 },
 	},
 	"shade_lord": {
-		"hp": 18, "speed": 13.0, "radius": 10.0, "target": "torch", "smother": 3.0, "dark_proof": true,
+		"hp": 18, "speed": 28.0, "radius": 10.0, "target": "torch", "smother": 2.0, "dark_proof": true,
 		"boss": true, "name": "그림자 군주", "heavy": 0.2, "summon": { "kind": "shade", "every": 7.0, "count": 2 }, "score": 150,
+		"lunge": { "every": 7.0, "warn": 1.0, "speed": 110.0, "stay": 3.5, "ring": 16.0 },
 	},
 }
 
@@ -92,9 +112,10 @@ const UPGRADES := {
 		"levels": [{ "text": "연료가 40% 천천히 탄다", "burn_mult": 0.6 }] },
 	"big_logs": { "name": "마른 장작", "text": "장작 하나에 연료 +12", "log_bonus": 12.0,
 		"levels": [{ "text": "장작 하나에 연료 +20", "log_bonus": 20.0 }] },
-	"ember_ring": { "name": "불씨 고리", "text": "횃불 가까이 온 적에게 1초마다 피해", "ember_radius": 26.0, "ember_every": 1.0,
-		"levels": [{ "text": "고리가 넓어지고 0.75초마다 피해", "ember_radius": 32.0, "ember_every": 0.75 },
-			{ "text": "고리가 더 넓어지고 0.5초마다 피해", "ember_radius": 38.0, "ember_every": 0.5 }] },
+	"ember_ring": { "name": "불씨 고리", "text": "횃불 곁의 적을 1.5초마다 그을려 체력 1까지 깎고, 덮는 힘을 25% 줄인다",
+		"ember_radius": 26.0, "ember_every": 1.5, "smother_mult": 0.75,
+		"levels": [{ "text": "고리가 넓어지고 1.2초마다 그을린다, 덮는 힘 40% 줄임", "ember_radius": 32.0, "ember_every": 1.2, "smother_mult": 0.6 },
+			{ "text": "고리가 더 넓어지고 0.9초마다 그을린다, 덮는 힘 절반", "ember_radius": 38.0, "ember_every": 0.9, "smother_mult": 0.5 }] },
 	"warm_glow": { "name": "따뜻한 빛", "text": "빛 안의 적이 40% 느려진다", "glow_slow": 0.6,
 		"levels": [{ "text": "빛 안의 적이 55% 느려진다", "glow_slow": 0.45 }] },
 	"woodpile": { "name": "장작더미", "text": "장작이 더 자주, 더 많이 나온다", "wood_mult": 0.65, "wood_extra": 2,
@@ -102,12 +123,13 @@ const UPGRADES := {
 	"quick_hands": { "name": "날랜 손", "text": "장작을 들어도 느려지지 않는다", "carry_full": true },
 	"long_blade": { "name": "긴 칼날", "text": "베기 거리 +8", "reach_bonus": 8.0,
 		"levels": [{ "text": "베기 거리 +14", "reach_bonus": 14.0 }] },
-	"bright": { "name": "밝은 불", "text": "빛 반경 +30%", "light_mult": 1.3,
-		"levels": [{ "text": "빛 반경 +50%", "light_mult": 1.5 }] },
+	"bright": { "name": "밝은 불", "text": "빛 반경 +30%, 빛 안에서 15% 빨리 걷는다", "light_mult": 1.3, "lit_speed_mult": 1.15,
+		"levels": [{ "text": "빛 반경 +50%, 빛 안에서 25% 빨리 걷는다", "light_mult": 1.5, "lit_speed_mult": 1.25 }] },
 	"sturdy": { "name": "튼튼한 몸", "text": "최대 체력 +1, 체력 1 회복", "hp_bonus": 1,
 		"levels": [{ "hp_bonus": 2 }, { "hp_bonus": 3 }] },
-	"thorns": { "name": "가시 망토", "text": "나를 때린 적도 피해 1", "thorns": 1,
-		"levels": [{ "text": "나를 때린 적도 피해 2", "thorns": 2 }] },
+	"thorns": { "name": "가시 망토", "text": "나를 때린 적도 피해 1, 바짝 붙은 적은 1초마다 찔린다", "thorns": 1,
+		"thorn_every": 1.0, "thorn_reach": 6.0,
+		"levels": [{ "text": "나를 때린 적도 피해 2, 바짝 붙은 적은 0.7초마다 찔린다", "thorns": 2, "thorn_every": 0.7 }] },
 	"wide_swing": { "name": "넓은 베기", "text": "베기 범위가 넓어진다", "arc_bonus": -0.5,
 		"levels": [{ "text": "베기 범위가 더 넓어진다", "arc_bonus": -0.8 }] },
 	"fire_blade": { "name": "불붙은 칼", "text": "빛 안에서 베면 피해 +1", "lit_damage": 1,
@@ -118,9 +140,9 @@ const UPGRADES := {
 		"levels": [{ "text": "두 번째 베기마다 한 바퀴를 벤다", "spin_every": 2 }] },
 	"spark": { "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
 		"levels": [{ "text": "횃불이 1.6초마다 불씨를 쏜다", "spark_every": 1.6 },
-			{ "text": "횃불이 1초마다 불씨를 쏜다", "spark_every": 1.0 }] },
-	"vampire": { "name": "흡혈 칼날", "text": "칼로 12번 처치할 때마다 체력 1", "vamp_kills": 12,
-		"levels": [{ "text": "칼로 8번 처치할 때마다 체력 1", "vamp_kills": 8 }] },
-	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30", "fuel_bonus": 30.0,
-		"levels": [{ "text": "연료 최대치 +60", "fuel_bonus": 60.0 }] },
+			{ "text": "횃불이 1.2초마다 불씨를 쏜다", "spark_every": 1.2 }] },
+	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1", "vamp_kills": 8,
+		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1", "vamp_kills": 5 }] },
+	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
+		"levels": [{ "text": "연료 최대치 +60, 새벽에 그만큼 더 채워진다", "fuel_bonus": 60.0 }] },
 }
