@@ -71,11 +71,11 @@ const SIDE_NAMES := { "torch": "횃불의 힘", "keeper": "기사의 힘" }
 ## How each character (Config.CHARACTERS) looks. sprite: the prefix of its pictures, each drawn as <sprite>_<down,
 ## up, side>_<a,b> walking, _lift_<a,b> with logs overhead, _atk while it attacks, and <sprite>_dead (CHARACTER_FRAMES).
 ## weapon: what it swings (WEAPONS), "" for none. cloak: the thorn cloak upgrade shows on it (its thorns_* fit
-## the body). heavy: its swing's trail is drawn thick.
+## the body). heavy: its swing's trail is drawn thick. button: the sprite on the touch attack button (src/touch.gd).
 const CHARACTERS := {
-	"knight": { "sprite": "keeper", "weapon": "sword", "cloak": true, "heavy": false },
-	"woodcutter": { "sprite": "woodcutter", "weapon": "axe", "cloak": true, "heavy": true },
-	"mage": { "sprite": "mage", "weapon": "", "cloak": true, "heavy": false },
+	"knight": { "sprite": "keeper", "weapon": "sword", "cloak": true, "heavy": false, "button": "sword" },
+	"woodcutter": { "sprite": "woodcutter", "weapon": "axe", "cloak": true, "heavy": true, "button": "axe" },
+	"mage": { "sprite": "mage", "weapon": "", "cloak": true, "heavy": false, "button": "icon_wide_swing_mage" },
 }
 const CHARACTER_FRAMES := ["%s_down_a", "%s_down_b", "%s_up_a", "%s_up_b", "%s_side_a", "%s_side_b",
 	"%s_down_lift_a", "%s_down_lift_b", "%s_up_lift_a", "%s_up_lift_b", "%s_side_lift_a", "%s_side_lift_b",
@@ -185,6 +185,7 @@ static func problems() -> Array:
 		if CHARACTERS[id].has("sprite"):
 			for f in CHARACTER_FRAMES:
 				wanted.append(f % CHARACTERS[id].sprite)
+			wanted.append(CHARACTERS[id].get("button", "sword"))
 			var weapon: String = CHARACTERS[id].get("weapon", "")
 			if weapon != "":
 				for f in WEAPON_FRAMES:
@@ -203,7 +204,7 @@ static func character_problems(ids: Array, looks: Dictionary) -> Array:
 		if not looks.has(id):
 			out.append("Character '%s' has no look. Fix: add it to CHARACTERS in src/art/looks.gd (and draw its frames in src/art/sprites.gd)." % id)
 			continue
-		for key in ["sprite", "weapon", "cloak", "heavy"]:
+		for key in ["sprite", "weapon", "cloak", "heavy", "button"]:
 			if not looks[id].has(key):
 				out.append("Character '%s' has no %s in its look. Fix: add it to CHARACTERS in src/art/looks.gd." % [id, key])
 		if looks[id].get("weapon", "") != "" and not WEAPONS.has(looks[id].weapon):
@@ -265,10 +266,10 @@ static func selftest() -> Array:
 		fails.append("[A2] missed a boss with tiers")
 	if not tier_problems("x", false, maps, names, maps.size()).is_empty():
 		fails.append("[A2] flagged a regular kind with every tier coloured and named")
-	var look := { "sprite": "x", "weapon": "", "cloak": false, "heavy": false }
+	var look := { "sprite": "x", "weapon": "", "cloak": false, "heavy": false, "button": "x" }
 	if character_problems(["a", "b"], { "a": look }).is_empty():
 		fails.append("[A2] missed a character with no look")
-	if character_problems(["a"], { "a": { "sprite": "x", "weapon": "spoon", "cloak": false, "heavy": false } }).is_empty():
+	if character_problems(["a"], { "a": { "sprite": "x", "weapon": "spoon", "cloak": false, "heavy": false, "button": "x" } }).is_empty():
 		fails.append("[A2] missed a character swinging a weapon nobody drew")
 	if not character_problems(["a"], { "a": look }).is_empty():
 		fails.append("[A2] flagged a character with a full look")

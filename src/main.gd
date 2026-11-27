@@ -15,6 +15,7 @@ const Sfx := preload("res://src/audio/sfx.gd")
 const Ui := preload("res://src/ui.gd")
 const Touch := preload("res://src/touch.gd")
 const Guide := preload("res://src/guide.gd")
+const Looks := preload("res://src/art/looks.gd")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -290,6 +291,7 @@ func _process(delta: float) -> void:
 		_perf(delta)
 	touch.mode = "off" if intro or choosing else "paused" if paused else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
 	touch.dash_shown = world.mod("dash_every", 0.0) > 0.0
+	touch.attack_icon = Looks.character(world.character).button
 	touch.guide_controls = intro and ui.guide.page == Guide.CONTROLS
 	touch.frame(delta)
 	ui.touch = touch.on

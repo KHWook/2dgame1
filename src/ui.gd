@@ -370,6 +370,7 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	choose_hint.position = Vector2(0.0, Chooser.TOP + Chooser.CARD.y + 6.0)
 	for i in Chooser.ids().size():
 		choose_cards.append(_char_card(i, Chooser.ids()[i]))
+	move_child(choose_hint, -1) # over the lifted card, never under it
 	choose_title.visible = false
 	choose_hint.visible = false
 
