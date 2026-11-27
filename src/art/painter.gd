@@ -284,6 +284,8 @@ const SPIT_DRIPS := [[3.0, 0.8], [6.0, 0.55], [9.0, 0.3]] # [pixels behind it, h
 ## enemy that hears it (the "drummed" sprite), so you see whom it drives.
 const DRUM := Color("#ffd84a")
 const DRUM_RING := [0.75, 0.25] # how solid the ring is: on the beat, between beats
+const DRUM_DASHES := 12 # dashes round the ring
+const DRUM_DASH_LINES := 3 # straight lines each dash is drawn as
 const DRUMMED_AT := Vector2(-2.0, -15.0) # the mark's top-left, from the enemy's position
 ## A boss on its way: Config.BOSS.warn seconds ahead, the edge it comes from glows and an arrow there points out at it.
 const COMING_BAND := Vector2(70.0, 4.0) # along the edge, into the field
@@ -927,6 +929,8 @@ static func _lift(e) -> Vector2:
 func _telegraphs(c: CanvasItem, w) -> void:
 	var colour: Color = Sprites.PALETTE[MARK]
 	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
+	var drum_lines := PackedVector2Array()
+	var drum_colours := PackedColorArray()
 	for e in w.enemies:
 		if e.T.has("leap") and e.move in ["warn", "air"]:
 			_landing_mark(c, w, e)
@@ -945,11 +949,19 @@ func _telegraphs(c: CanvasItem, w) -> void:
 			c.draw_circle((e.pos + e.aim * e.T.radius).round(), 1.0 + e.T.spit.radius * k, Color(SPIT, 0.9))
 		elif e.T.has("drum") and Config.FIELD.has_point(e.pos): # how far its drum reaches, bright on the beat
 			var since: float = 1.0 - clampf(e.move_t / e.T.drum.beat, 0.0, 1.0)
-			_dashed_ring(c, e.pos.round(), e.T.drum.radius, 0.0, Color(DRUM, lerpf(DRUM_RING[0], DRUM_RING[1], minf(1.0, since * 3.0))))
+			var ring := Color(DRUM, lerpf(DRUM_RING[0], DRUM_RING[1], minf(1.0, since * 3.0)))
+			for i in DRUM_DASHES * DRUM_DASH_LINES: # the dashes of every drummer's ring go out as one draw (below)
+				var a: float = TAU * (i / DRUM_DASH_LINES + 0.55 * (i % DRUM_DASH_LINES) / DRUM_DASH_LINES) / DRUM_DASHES
+				var b: float = a + TAU * 0.55 / DRUM_DASH_LINES / DRUM_DASHES
+				drum_lines.append(e.pos.round() + Vector2.from_angle(a) * e.T.drum.radius)
+				drum_lines.append(e.pos.round() + Vector2.from_angle(b) * e.T.drum.radius)
+				drum_colours.append(ring)
 		elif e.T.has("charge") and e.move in ["warn", "charge"]:
 			_charge_mark(c, w, e, blink)
 		elif e.T.has("charge") and e.move == "rest" and skid_frame(e) >= 0: # a skid puff where it stopped
 			c.draw_texture(Sprites.texture(Effects.POOF[skid_frame(e)]), (e.pos + e.aim * 4.0 - Effects.POOF_ANCHOR).round(), Color(1.0, 0.92, 0.8, 0.8))
+	if not drum_lines.is_empty():
+		c.draw_multiline_colors(drum_lines, drum_colours, 1.0)
 
 
 ## Which frame of the skid puff (Effects.POOF) shows where a charger has just stopped: from the first as its stop
