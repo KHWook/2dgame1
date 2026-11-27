@@ -2453,7 +2453,7 @@ static func _seeds() -> Array:
 		for i in steps:
 			w.step(bot.frame(w))
 		ends.append(Replay.digest(w))
-	_expect(out, "the night went on while the bot played (the worlds compared are not still at dusk)", [made.phase, made.rng.state() != World.new(5, "mage").rng.state()], ["night", true])
+	_expect(out, "the worlds compared are not still at dusk: things have come at random while the bot played", made.rng.state() != World.new(5, "mage").rng.state(), true)
 	_expect(out, "the same keeper and seed, played alike for %d steps, are the same world" % steps, [ends[1], ends[2]], [ends[0], ends[0]])
 	var offers := {}
 	for seed_value in range(1, 21):
