@@ -91,6 +91,12 @@ const TIER_NIGHTS := [
 ## start_fuel share of the tank, so a big torch is topped up further).
 const DAWN := { "heal": 1 }
 
+## The keeper hardens as the nights go on, to keep up with crowds that grow faster than a few hearts can take. From
+## the night from: hp_first more hearts that night and one more on every hp_every-th night after it, at most hp_most
+## more; from that night on dawn heals the keeper fully (new hearts too); and after a hit it cannot be
+## hurt for invuln_grow seconds longer per night from from on (counting that night), at most invuln_most in all.
+const HARDEN := { "from": 10, "hp_first": 3, "hp_every": 2, "hp_most": 6, "invuln_grow": 0.15, "invuln_most": 2.4 }
+
 ## Every few nights bosses come, partway through the night, besides the usual enemies (which come a little less
 ## often that night). counts: how many come, from the night of a row (until the next row's). The first comes at at
 ## (a share of the night), each next one apart seconds after the one before. kinds take turns: the first boss night

@@ -39,6 +39,7 @@ static func run() -> Array:
 	out.append_array(_boss_nights())
 	out.append_array(_hops())
 	out.append_array(_split())
+	out.append_array(_harden())
 	out.append_array(_charger())
 	out.append_array(_logs())
 	out.append_array(_nights())
@@ -875,6 +876,56 @@ static func _split() -> Array:
 		swung = swung or f.is_pressed("attack")
 		w.step(f)
 	_expect(out, "the bot does not swing at a decoy", swung, false)
+	return out
+
+
+## The keeper hardens late (Config.HARDEN): three more hearts on night 10, one more on nights 12, 14 and 16, no more
+## after; from night 10 dawn heals fully (and the night's new hearts come full), before it only DAWN.heal; and a hit
+## keeps the next off longer night by night from night 10, up to invuln_most.
+static func _harden() -> Array:
+	var out := []
+	var H: Dictionary = Config.HARDEN
+	var w = _night(LIT)
+	var hearts := []
+	var shield := []
+	for night in [9, 10, 11, 12, 16, 30]:
+		w.night = night
+		hearts.append(w.hardened_hp())
+		shield.append(snappedf(w.keeper_invuln(), 0.001))
+	_expect(out, "the keeper gains hearts on nights 10, 12, 14 and 16 (3, 1, 1, 1)", hearts, [0, 3, 3, 4, 6, 6])
+	_expect(out, "the keeper's shield after a hit grows from night 10, up to invuln_most", shield,
+		[Config.PLAYER.invuln, snappedf(Config.PLAYER.invuln + H.invuln_grow, 0.001), snappedf(Config.PLAYER.invuln + H.invuln_grow * 2, 0.001), snappedf(Config.PLAYER.invuln + H.invuln_grow * 3, 0.001), snappedf(minf(H.invuln_most, Config.PLAYER.invuln + H.invuln_grow * 7), 0.001), H.invuln_most])
+	_expect(out, "the max hp counts the hearts", w.max_hp(), Config.PLAYER.hp + 6)
+	for night in [8, 9, 11]:
+		w = _night(LIT)
+		w.night = night
+		w.player.hp = 2
+		w.time = Config.NIGHT.length - Config.STEP * 0.5
+		_play(w, 1)
+		var want: int = w.max_hp() if night + 1 >= H.from else 2 + Config.DAWN.heal
+		_expect(out, "the dawn after night %d heals the keeper to %d" % [night, want], [w.night, w.player.hp], [night + 1, want])
+	# the longer shield holds off a hit the usual one would let through
+	w = _night(LIT)
+	w.night = 11
+	w.time = Config.NIGHT.length - Config.STEP * 0.5
+	_play(w, 1) # dawn into night 12: tonight's shield is set
+	w.offer = []
+	w.phase = "night"
+	w.next_spawn = NEVER
+	var bat = _add(w, "bat", Vector2(4.0, 0.0))
+	bat.T = bat.T.duplicate()
+	bat.T.speed = 0.0
+	var hp: int = w.player.hp
+	_play(w, 1)
+	_expect(out, "a hit on night 12 shields the keeper for keeper_invuln()", [w.player.hp, snappedf(w.player.invuln, 0.001)], [hp - 1, snappedf(w.keeper_invuln(), 0.001)])
+	bat.pos = w.player.pos + Vector2(4.0, 0.0)
+	_play(w, int((Config.PLAYER.invuln + 0.05) / Config.STEP))
+	bat.pos = w.player.pos + Vector2(4.0, 0.0)
+	_play(w, 1)
+	_expect(out, "past the usual shield, the night's longer one still holds", w.player.hp, hp - 1)
+	w = World.new(3)
+	w.begin_at(12, 1)
+	_expect(out, "a run begun at night 12 has its hearts full and its shield set", [w.player.hp, w.max_hp() >= Config.PLAYER.hp + 4, w.player.invuln_for], [w.max_hp(), true, w.keeper_invuln()])
 	return out
 
 

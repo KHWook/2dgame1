@@ -103,6 +103,7 @@ func begin_at(n: int, slot: int) -> void:
 		_offer()
 	night = n
 	bosses_due = _plan_bosses()
+	player.invuln_for = keeper_invuln()
 	player.hp = max_hp()
 	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
 
@@ -196,7 +197,21 @@ func in_light(p: Vector2) -> bool:
 
 
 func max_hp() -> int:
-	return Config.PLAYER.hp + mod("hp_bonus", 0)
+	return Config.PLAYER.hp + mod("hp_bonus", 0) + hardened_hp()
+
+
+## The hearts the keeper has gained by tonight (Config.HARDEN): hp_first on night from and one every hp_every nights after.
+func hardened_hp() -> int:
+	var H: Dictionary = Config.HARDEN
+	if night < H.from:
+		return 0
+	return mini(H.hp_most, H.hp_first + (night - H.from) / H.hp_every)
+
+
+## How long a hit keeps the keeper from the next tonight (Config.HARDEN): longer night by night from from.
+func keeper_invuln() -> float:
+	var H: Dictionary = Config.HARDEN
+	return minf(H.invuln_most, Config.PLAYER.invuln + H.invuln_grow * maxi(0, night - H.from + 1))
 
 
 ## How far the swing reaches, and how wide it is: arc() is the cosine of the angle each side of the facing it sweeps.
@@ -314,8 +329,8 @@ func _end_or_offer() -> void:
 		_offer()
 
 
-## The night is over. The sun clears the field, you rest, the torch is topped up, and the next night begins with
-## the torch's offer.
+## The night is over. The sun clears the field, you rest (fully, from Config.HARDEN.from: with the hearts that night
+## gives), the torch is topped up, and the next night begins with the torch's offer.
 func _dawn() -> void:
 	score += Config.SCORE.dawn
 	events.append({ "kind": "dawn", "night": night })
@@ -337,7 +352,9 @@ func _dawn() -> void:
 	next_thorn = 0.0
 	sparks = []
 	bosses_due = _plan_bosses()
-	player.hp = mini(max_hp(), player.hp + Config.DAWN.heal)
+	player.invuln_for = keeper_invuln()
+	var heal: int = max_hp() if night >= Config.HARDEN.from else Config.DAWN.heal
+	player.hp = mini(max_hp(), player.hp + heal)
 	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
 	_offer()
 
