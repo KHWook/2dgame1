@@ -37,7 +37,11 @@ func _initialize() -> void:
 	OS.add_logger(errors)
 	var args := OS.get_cmdline_user_args()
 	if args.has("--balance"):
-		print(Balance.run(args.has("--late")))
+		var character := "knight"
+		for a in args:
+			if a.begins_with("--char="):
+				character = a.substr(7)
+		print(Balance.run(args.has("--late"), character))
 		print("verify: PASS")
 		quit(0)
 		return

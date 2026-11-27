@@ -42,19 +42,18 @@ const HEDGE_SIDES := { "top": 0, "right": 1, "bottom": 2, "left": 3 } # quarter 
 const HEDGE_DEPTH := 9
 
 ## The sword. The swing sweeps the arc the simulation hits (world.swing_half()), always turning the same way, and the
-## picture runs through four stages, as shares of Config.PLAYER.attack_time: it winds up past the start of the arc,
+## picture runs through four stages, as shares of the keeper's attack_time (World.stats): it winds up past the start of the arc,
 ## strikes across it (the blow starts landing at PLAYER.attack_hit_at, in the middle of this), holds at the end while
 ## the trail fades, and goes back to rest in the hand. The trail shows until the blow stops landing
-## (PLAYER.attack_hit_until), so while it is on screen, whatever it covers is struck.
+## (attack_hit_until: _hold()), so while it is on screen, whatever it covers is struck. The woodcutter's axe swings
+## the same way (Looks.CHARACTERS says which weapon a character holds); the mage holds none and shoots embers.
 const SWING_WIND := 0.18
 const SWING_STRIKE := 0.46
-const SWING_HOLD: float = Config.PLAYER.attack_hit_until / Config.PLAYER.attack_time
 const WIND_BACK := 0.5 # radians the blade is pulled back past the start of the arc
 const OVERSHOOT := 0.25 # radians it flies past the end before it settles
 const LUNGE := 1.0 # pixels the keeper leans into the blow while it strikes and holds
 const SHOULDER := Vector2(0.0, 0.5) # the sword hand turns around this point of the keeper
 const ARM := 5.0 # pixels from the shoulder to the hand while swinging
-const GRIP := Vector2(1.5, 2.5) # the pixel of the sword sprite held in the hand: the middle of the fist
 ## At rest the sword hangs from the hand on the side the swing starts from, pointing down and a little ahead.
 const REST_HAND := Vector2(3.5, 1.0) # where that hand is, along the side and down from it
 const REST_DROP := Vector2(0.0, 2.5)
@@ -70,7 +69,7 @@ const SLASH := [[1.0, "W"], [0.7, "a"], [0.4, "A"]]
 const SLASH_FIRE := [[1.0, "f"], [0.85, "F"], [0.65, "F"], [0.45, "x"], [0.25, "X"]]
 const SLASH_GLEAM := [0.6, "l"] # the outermost line, at the reach, with the long blade
 const WIDE_LINE := 2.0 # pixels per trail line with the wide swing
-const SWORD := "sword%s%s" # + "_long" with the long blade, + "_fire" while the fire blade burns
+const SWORD := "%s%s%s" # the weapon + "_long" with the long blade, + "_fire" while the fire blade burns
 const SWORD_FLAMES := 4 # flames shed along the trail of a burning blade
 const FLAME_RISE := 7.0 # pixels they rise while the swing holds
 const FLAME_STEPS_FAST := 3 # simulation steps per frame of the flames on the blade
@@ -127,6 +126,12 @@ const DASH_GHOSTS := 3
 const DASH_GHOST_GAP := 6.0
 const DASH_GHOST := Color(0.65, 0.85, 1.0, 0.45)
 const SPARK_TAIL := [[0.012, "F"], [0.024, "x"], [0.036, "X"]] # pixels behind a spark: [seconds back along its flight, colour]
+## The keeper's embers (a shooter's bolts): a disc as big as what it hits (World.bolt_radius, World.in_bolt), brighter
+## in the torch's light where it burns harder, with its core and a tail of [pixels back along its flight, colour].
+const BOLT_DISC := Color("#f58230")
+const BOLT_DISC_LIT := Color("#ffc94a")
+const BOLT_TAIL := [[3.0, "F"], [6.0, "x"], [9.0, "X"]]
+const STACK_STEP := Vector2(0.0, -3.0) # each more log a keeper carries sits this far above the one under it
 
 ## An enemy faster in the dark (looks.gd's dark_glow) streaks its burning eyes behind it: this many copies, this many
 ## pixels apart, the nearest this solid.
@@ -167,25 +172,48 @@ const EMBER_CATCH := 0.7 # reaching the torch cooler than this share, it flares 
 const EMBER_FLARE := 0.35 # seconds that flare lasts
 const EMBER_FLARE_GLOW := 0.6 # how much brighter its light is at the start of the flare
 
-## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing: a ring at the shock
-## that fills in as the landing nears, blinking, with the king crouched and flashing while it waits and lifted off
-## its shadow in the air. The shade lord, about to rush, flashes and lays a dashed line from itself to the torch.
+## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing (mark_radius(): the
+## shock): the king's shadow grows on the ground from the middle to the shock as it falls, cracks run out through it,
+## a dashed ring at the shock turns, and dust trickles down inside it; the king crouches and flashes while it waits
+## and is lifted off its shadow in the air. The shade lord, about to rush, flashes and lays a dashed line from itself
+## to the torch.
 const MARK := "i" # PALETTE key of the marked landing and the rush line
-const MARK_FILL := 0.35 # how solid the ring's inside is the moment it lands
+const MARK_RING := Color("#ff7a5c") # the turning ring at the shock: warm, softer than the hearts' red
+const MARK_SHADOW := Color("#0b0814") # the falling king's shadow
+const MARK_SHADOW_MOST := 0.55 # how dark it is as the king lands
+const MARK_SHADOW_FROM := 0.25 # share of the shock the shadow starts at
+const MARK_DASHES := 12 # dashes round the ring
+const MARK_TURN := 1.5 # radians per second the ring turns
+const MARK_CRACKS := 6 # cracks running out from the middle
+const MARK_CRACK_KINKS := 3 # bends in each
+const MARK_CRACK := Color("#2a1e18")
+const MARK_DUST := 5 # dust pixels trickling inside the ring
 const MARK_BLINK_STEPS := 4
 const LEAP_HEIGHT := 26.0 # pixels the king rises at the top of its leap
 const RUSH_DASH := 4.0 # pixels per dash of the rush line, and per gap
-## The shade lord about to split: it flashes inside a red ring, and as many rings of smoke as it will have decoys
-## slide round from it along its ring to where they will appear.
+## The shade lord about to split: it flashes inside a turning dashed ring, and as many wisps of smoke as it will have
+## decoys (a little turning ring of smoke pixels each) slide round from it along its ring to where they will appear.
 const SPLIT_SMOKE := "7"
-## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) on a
-## red band laid from itself to where the charge ends, as wide as the charge hurts (charge_band: Enemy.lane_half()
-## each side of its line, round at the ends): outside the band is safe. The band fills from the boar toward its end
-## as the wind-up runs out, and stays, solid, under the charge. Dazed after, stars turn over its head.
-const LANE_FAINT := 0.12 # how solid the band is the moment it is drawn
-const LANE_FULL := 0.45 # how solid the filled part is (and the whole band while it charges)
-const LANE_EDGE := 0.75 # its outline, blinking
+const SPLIT_WISP := 8 # smoke pixels in each wisp
+## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro,
+## kicking up dust) on a soft warm band laid from itself to where the charge ends, as wide as the charge hurts
+## (charge_band: Enemy.lane_half() each side of its line, round at the ends): outside the band is safe, and its edge
+## line is the strongest part of it. The band fills from the boar toward its end as the wind-up runs out, chevrons
+## slide along it toward the end (faster as the wind-up runs out: chevrons()), and stays under the charge, which
+## leaves a trail of dust; where it stops it skids in a puff. Dazed after, stars turn over its head.
+const LANE := Color("#e8956a") # a soft warm orange: a warning, not a wall of red
+const LANE_FAINT := 0.06 # how solid the band is the moment it is drawn
+const LANE_FULL := 0.15 # how solid the filled part is (and the whole band while it charges)
+const LANE_EDGE := 0.6 # its outline, blinking down to 0.7 of this
 const LANE_ROUND := 8 # points on each round end
+const CHEVRON_GAP := 12.0 # pixels between chevrons along the band
+const CHEVRON_SIZE := 3.0 # pixels from a chevron's tip back to its arms
+const CHEVRON_SPEED := [12.0, 70.0] # pixels a second they slide: as the wind-up starts, as it ends
+const CHEVRON := 0.55 # how solid they are
+const PAW_DUST := 3 # dust pixels kicked up behind it while it paws
+const TRAIL_DUST := 10 # dust pixels left along the way behind it while it charges
+const TRAIL_LENGTH := 28.0 # pixels behind it the trail reaches
+const DUST := ["m", "M", "c"] # PALETTE keys of dust thrown up off the ground
 const PAW_STEPS := 3 # simulation steps per shuffle while it paws
 const DAZED_AT := Vector2(-3.0, -13.0) # the stars' top-left, from the charger's position
 const DAZED_STEPS := 8 # simulation steps per turn of the stars
@@ -193,6 +221,8 @@ const DAZED_STEPS := 8 # simulation steps per turn of the stars
 const COMING_BAND := Vector2(70.0, 4.0) # along the edge, into the field
 const COMING_ARROW := 7.0 # pixels from the arrow's tip to its back
 const COMING_IN := 12.0 # from the edge to the arrow's tip
+const COMING_SMOKE := 14 # smoke pixels curling in over the edge it comes from
+const COMING_SMOKE_KEY := "A" # half of them pale, so they show on the black past the light
 const COMING_BLINK_STEPS := 8
 ## An enemy coming in from beyond the field (under the treetops, or not yet on screen): a small arrow on that edge,
 ## inside the treetops, points out at it until it is on the field.
@@ -275,8 +305,9 @@ func _init(seed_value: int) -> void:
 					break
 
 
-func icon(upgrade: String, alone := false) -> Texture2D:
-	return Sprites.alone(Looks.ICON % upgrade) if alone else Sprites.texture(Looks.ICON % upgrade)
+func icon(upgrade: String, alone := false, who := "knight") -> Texture2D:
+	var name := Looks.icon(upgrade, who)
+	return Sprites.alone(name) if alone else Sprites.texture(name)
 
 
 ## Call once after each world.step(), so the effects can answer what the step did.
@@ -421,6 +452,7 @@ func paint_overlay(c: CanvasItem, w) -> void:
 	for id in tiles:
 		_tile(c, w, id, tiles[id])
 	_sparks(c, w)
+	_bolts(c, w)
 	_coming(c, w)
 	_boss_bar(c, w)
 	_night_bar(c, w)
@@ -480,7 +512,7 @@ func _tile(c: CanvasItem, w, id: String, at: Vector2) -> void:
 	c.draw_rect(Rect2(at, TILE), Sprites.PALETTE[TILE_FULL] if level >= most else TILE_EDGE[side])
 	c.draw_rect(Rect2(at + Vector2.ONE, TILE - Vector2(2.0, 2.0)), TILE_BACK[side])
 	if id != hidden_pick:
-		c.draw_texture(icon(id), at + TILE_ICON)
+		c.draw_texture(icon(id, false, w.character), at + TILE_ICON)
 		if id == "dash" and w.player.dash_wait > 0.0: # shaded over the share of the wait still to go
 			var left: float = w.player.dash_wait / w.mod("dash_every", 1.0)
 			c.draw_rect(Rect2(at + TILE_ICON, Vector2(ICON_SIZE, ceilf(ICON_SIZE * left))), ICON_WAIT)
@@ -577,6 +609,25 @@ func _sparks(c: CanvasItem, w) -> void:
 		for t in SPARK_TAIL:
 			c.draw_rect(Rect2((sp.pos - sp.vel * t[0]).round(), Vector2.ONE), Sprites.PALETTE[t[1]])
 		c.draw_texture(tex, (sp.pos - tex.get_size() / 2.0).round())
+
+
+## The keeper's embers right now, as [middle, radius, lit]: the disc each is drawn as, the same as what it hits.
+static func bolt_discs(w) -> Array:
+	return w.bolts.map(func(b): return [b.pos, b.radius, w.in_light(b.pos)])
+
+
+## The keeper's embers glow: a disc of what they hit, a bright core and a short tail, where the night does not dim them.
+func _bolts(c: CanvasItem, w) -> void:
+	c.draw_set_transform(shake)
+	var core := Sprites.texture("bolt")
+	for i in w.bolts.size():
+		var b: Dictionary = w.bolts[i]
+		var disc: Array = bolt_discs(w)[i]
+		for t in BOLT_TAIL:
+			c.draw_rect(Rect2((b.pos - b.dir * t[0]).round(), Vector2.ONE), Sprites.PALETTE[t[1]])
+		c.draw_circle(disc[0], disc[1], Color(BOLT_DISC_LIT if disc[2] else BOLT_DISC, 0.75))
+		c.draw_texture(core, (b.pos - core.get_size() / 2.0).round())
+	c.draw_set_transform(Vector2.ZERO)
 
 
 ## The bosses on the field (not their decoys), in the order they came.
@@ -688,8 +739,9 @@ func _standing(w) -> Array:
 		out.append([e.pos.y + 4.0, out.size(), tex, (e.pos + _lift(e) + _paw(w, e) - look.anchor).round(), _tint(e, _lit[i] == 1, warms)])
 		if e.carrying:
 			_put(out, e.pos.y + 4.1, "log", e.pos + THIEF_CARRY, LOG_ANCHOR)
+	var me: Dictionary = Looks.character(w.character)
 	if p.dead:
-		_put(out, p.pos.y + 5.0, "keeper_dead", p.pos, BODY)
+		_put(out, p.pos.y + 5.0, me.sprite + "_dead", p.pos, BODY)
 	elif _keeper_shows(w):
 		var look := _keeper(w)
 		for g in DASH_GHOSTS if p.dash_t > 0.0 else 0:
@@ -697,11 +749,12 @@ func _standing(w) -> Array:
 			ghost.a *= 1.0 - float(g) / DASH_GHOSTS
 			_put(out, p.pos.y + 4.8, look[0], p.pos - p.dash_dir * DASH_GHOST_GAP * (g + 1), BODY, look[1], true, ghost)
 		_put(out, p.pos.y + 5.0, look[0], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
-		if w.mod("thorns", 0) > 0: # the thorn cloak: behind the keeper, except seen from behind
+		if w.mod("thorns", 0) > 0 and me.cloak: # the thorn cloak: behind the keeper, except seen from behind
 			_put(out, p.pos.y + (5.05 if look[2] == "up" else 4.95), "thorns_%s" % look[2], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
-		if p.carrying:
-			_put(out, p.pos.y + 5.1, "log", p.pos + CARRY, LOG_ANCHOR)
-		else:
+		if p.carrying: # held overhead, a stack one on another
+			for i in p.held:
+				_put(out, p.pos.y + 5.1 + i * 0.001, "log", p.pos + CARRY + STACK_STEP * i, LOG_ANCHOR)
+		elif me.weapon != "":
 			var behind: bool = sin(_blade(w)[1]) < BEHIND
 			out.append([p.pos.y + (4.9 if behind else 5.2), out.size(), null]) # the sword: paint() draws it at this depth
 	return out
@@ -728,31 +781,122 @@ func _telegraphs(c: CanvasItem, w) -> void:
 	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
 	for e in w.enemies:
 		if e.T.has("leap") and e.move in ["warn", "air"]:
-			var L: Dictionary = e.hop()
-			var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
-			var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
-			var at: Vector2 = e.move_to.round()
-			c.draw_circle(at, L.shock, Color(colour, MARK_FILL * k))
-			c.draw_arc(at, L.shock, 0.0, TAU, 32, Color(colour, 1.0 if blink else 0.6), 1.0)
-			c.draw_arc(at, L.shock * (1.0 - k), 0.0, TAU, 24, Color(colour, 0.8), 1.0) # closes in on the edge as it falls
+			_landing_mark(c, w, e)
 		elif e.T.has("lunge") and e.move == "warn":
 			_dashes(c, e.pos, e.move_to, Color(colour, 0.9 if blink else 0.5))
-		elif e.move == "split": # rings of smoke spread out from it toward where its decoys will stand
+		elif e.move == "split": # wisps of smoke spread out from it toward where its decoys will stand
 			var k: float = clampf(1.0 - e.split_t / e.T.split.warn, 0.0, 1.0)
 			var smoke: Color = Sprites.PALETTE[SPLIT_SMOKE]
 			for i in e.T.split.count:
 				var at: Vector2 = Config.TORCH.pos + (e.pos - Config.TORCH.pos).rotated(TAU * (i + 1) / (e.T.split.count + 1) * k)
-				c.draw_arc(at.round(), e.T.radius * (0.6 + 0.6 * k), 0.0, TAU, 20, Color(smoke, 0.5 + 0.4 * k), 1.0)
-			c.draw_arc(e.pos.round(), e.T.radius + 4.0 + 4.0 * k, 0.0, TAU, 24, Color(colour, 0.9 if blink else 0.5), 1.0)
+				_wisp(c, w, at, e.T.radius * (0.6 + 0.6 * k), Color(smoke, 0.5 + 0.4 * k), i)
+			_dashed_ring(c, e.pos.round(), e.T.radius + 4.0 + 4.0 * k, w.steps * Config.STEP * MARK_TURN, Color(MARK_RING, 0.9 if blink else 0.55))
 		elif e.T.has("charge") and e.move in ["warn", "charge"]:
-			var band := charge_band(e)
-			var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
-			c.draw_colored_polygon(band, Color(colour, LANE_FAINT))
-			if k > 0.0:
-				c.draw_colored_polygon(charge_band(e, k), Color(colour, LANE_FULL - LANE_FAINT))
-			band.append(band[0])
-			c.draw_polyline(band, Color(colour, LANE_EDGE if blink else LANE_EDGE * 0.5), 1.0)
+			_charge_mark(c, w, e, blink)
+		elif e.T.has("charge") and e.move == "rest":
+			var since: int = roundi((e.T.charge.rest - e.move_t) / Config.STEP) # a skid puff where it stopped
+			if since < Effects.POOF.size() * Effects.POOF_STEPS:
+				c.draw_texture(Sprites.texture(Effects.POOF[since / Effects.POOF_STEPS]), (e.pos + e.aim * 4.0 - Effects.POOF_ANCHOR).round(), Color(1.0, 0.92, 0.8, 0.8))
 
+
+## The radius the slime king's marked landing is drawn at: the shock of the leap (or hop) under way, where it hurts.
+static func mark_radius(e) -> float:
+	return e.hop().shock
+
+
+## The marked landing: the king's shadow growing to the shock as it falls, cracks running out through it, a dashed
+## ring turning at the shock (mark_radius) and dust trickling down inside it.
+func _landing_mark(c: CanvasItem, w, e) -> void:
+	var L: Dictionary = e.hop()
+	var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
+	var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
+	var at: Vector2 = e.move_to.round()
+	var r := mark_radius(e)
+	c.draw_circle(at, r * lerpf(MARK_SHADOW_FROM, 1.0, k), Color(MARK_SHADOW, MARK_SHADOW_MOST * (0.4 + 0.6 * k)))
+	var seed_ := _hash(int(at.x), int(at.y))
+	for i in MARK_CRACKS:
+		var a := TAU * (i + (seed_ % 7) / 7.0) / MARK_CRACKS
+		var from := at
+		for j in MARK_CRACK_KINKS:
+			var bend := ((_hash(seed_ + i, j) % 9) - 4) * 0.08
+			var to := at + Vector2.from_angle(a + bend) * r * k * 0.9 * (j + 1) / MARK_CRACK_KINKS
+			c.draw_line(from.round(), to.round(), Color(MARK_CRACK, 0.85), 1.0)
+			from = to
+	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
+	_dashed_ring(c, at, r, w.steps * Config.STEP * MARK_TURN, Color(MARK_RING, 0.95 if blink else 0.65))
+	for i in MARK_DUST: # dust shaken loose, falling a few pixels and starting again
+		var h := _hash(seed_ + 31 * i, w.steps / 12)
+		var spot := at + Vector2.from_angle(TAU * (h % 64) / 64.0) * r * (0.3 + 0.6 * (h % 10) / 10.0)
+		var fall := float((w.steps + i * 5) % 12) / 2.0
+		c.draw_rect(Rect2((spot + Vector2(0.0, fall - 6.0)).round(), Vector2.ONE), Color(Sprites.PALETTE[DUST[i % DUST.size()]], 0.8))
+
+
+## A ring of dashes at radius r round at, turned by turn radians.
+static func _dashed_ring(c: CanvasItem, at: Vector2, r: float, turn: float, colour: Color) -> void:
+	var step := TAU / MARK_DASHES
+	for i in MARK_DASHES:
+		var a0 := turn + i * step
+		c.draw_arc(at, r, a0, a0 + step * 0.55, 4, colour, 1.0)
+
+
+## A little turning ring of smoke pixels at at, radius r.
+static func _wisp(c: CanvasItem, w, at: Vector2, r: float, colour: Color, i: int) -> void:
+	var turn: float = w.steps * Config.STEP * (2.0 + i)
+	for j in SPLIT_WISP:
+		var p := at + Vector2.from_angle(turn + TAU * j / SPLIT_WISP) * r * (0.8 + 0.2 * (j % 2))
+		var size := 2.0 if j % 3 == 0 else 1.0
+		c.draw_rect(Rect2(p.round(), Vector2(size, size)), colour)
+
+
+## A charger's band: soft and see-through with its edge (where safe begins) the clearest part, filling toward its end
+## as the wind-up runs out; chevrons sliding along it toward the end; dust at its feet while it paws, and behind it
+## while it charges.
+func _charge_mark(c: CanvasItem, w, e, blink: bool) -> void:
+	var band := charge_band(e)
+	var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
+	c.draw_colored_polygon(band, Color(LANE, LANE_FAINT))
+	if k > 0.0:
+		c.draw_colored_polygon(charge_band(e, k), Color(LANE, LANE_FULL - LANE_FAINT))
+	band.append(band[0])
+	c.draw_polyline(band, Color(LANE, LANE_EDGE if blink else LANE_EDGE * 0.7), 1.0)
+	var side: Vector2 = e.aim.orthogonal()
+	for tip in chevrons(e):
+		var back: Vector2 = tip - e.aim * CHEVRON_SIZE
+		c.draw_line(tip.round(), (back + side * CHEVRON_SIZE).round(), Color(LANE, CHEVRON), 1.0)
+		c.draw_line(tip.round(), (back - side * CHEVRON_SIZE).round(), Color(LANE, CHEVRON), 1.0)
+	var seed_ := _hash(int(e.move_to.x), int(e.move_to.y))
+	if e.move == "warn":
+		for i in PAW_DUST:
+			var h := _hash(seed_ + i, w.steps / PAW_STEPS)
+			var rise := float((w.steps + i * 2) % (PAW_STEPS * 3))
+			var spot: Vector2 = e.pos - e.aim * (e.T.radius + 1.0 + h % 4) + side * ((h % 9) - 4.0) + Vector2(0.0, 3.0 - rise)
+			c.draw_rect(Rect2(spot.round(), Vector2.ONE), Color(Sprites.PALETTE[DUST[h % DUST.size()]], 0.85))
+	else:
+		for i in TRAIL_DUST:
+			var h := _hash(seed_ + i, w.steps / 2)
+			var back := TRAIL_LENGTH * (i + 0.5) / TRAIL_DUST
+			var spot: Vector2 = e.pos - e.aim * back + side * ((h % 7) - 3.0) + Vector2(0.0, 3.0 - (h % 3))
+			c.draw_rect(Rect2(spot.round(), Vector2.ONE * (2.0 if i < 3 else 1.0)), Color(Sprites.PALETTE[DUST[h % DUST.size()]], 0.8 * (1.0 - back / TRAIL_LENGTH)))
+
+
+## Where the chevrons on a charger's band are right now, by their tips: CHEVRON_GAP apart along its line from the
+## charger to where its band ends, sliding toward the end at CHEVRON_SPEED (from the first to the second as the
+## wind-up runs out; none under the charge itself), each well inside the band (its arms reach CHEVRON_SIZE to the sides).
+static func chevrons(e) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var length: float = e.pos.distance_to(e.charge_end())
+	if e.move != "warn": # under the charge itself the dust trail says enough
+		return out
+	var s: Array = CHEVRON_SPEED
+	var warn: float = e.T.charge.warn
+	var t: float = warn - e.move_t
+	var gone: float = s[0] * t + 0.5 * (s[1] - s[0]) * t * t / warn # how far they have slid since the band was laid
+	var first := fmod(gone, CHEVRON_GAP) + CHEVRON_SIZE
+	var d := first
+	while d <= length:
+		out.append(e.pos + e.aim * d)
+		d += CHEVRON_GAP
+	return out
 
 ## Where a charger's charge hurts, as a polygon: a band from it to Enemy.charge_end(), Enemy.lane_half() each side
 ## of its line, round at both ends (every point within lane_half of the line it runs). share: only the first part of
@@ -850,6 +994,12 @@ func _coming_at(c: CanvasItem, w, f: Vector2) -> void:
 	var band_at := spot - band_size / 2.0 - out * band_size / 2.0
 	var band := Rect2(band_at, band_size).intersection(Rect2(Vector2.ZERO, VIEW))
 	c.draw_rect(band, Color(colour, 0.85 if on else 0.4))
+	var along := out.orthogonal()
+	for i in COMING_SMOKE: # smoke curling in over the edge where it will break through
+		var h := _hash(int(f.x) + i * 13, w.steps / 6)
+		var drift := float((w.steps + i * 7) % 30) / 30.0
+		var p: Vector2 = spot - out * (2.0 + drift * 14.0) + along * (((h % 41) - 20.0) * COMING_BAND.x / 45.0)
+		c.draw_rect(Rect2(p.round(), Vector2.ONE * (2.0 if h % 3 == 0 else 1.0)), Color(Sprites.PALETTE[COMING_SMOKE_KEY if h % 2 == 0 else SPLIT_SMOKE], 0.8 * (1.0 - drift)))
 	var tip: Vector2 = (spot - out * COMING_IN).clamp(Vector2(COMING_IN, COMING_IN), VIEW - Vector2(COMING_IN, COMING_IN))
 	var back: Vector2 = tip - out * COMING_ARROW
 	var side: Vector2 = out.orthogonal() * COMING_ARROW * 0.7
@@ -897,13 +1047,14 @@ func _keeper(w) -> Array:
 		dir = "side"
 	elif p.face.y < 0.0:
 		dir = "up"
+	var sprite: String = Looks.character(w.character).sprite
 	if _swinging(w):
-		return ["keeper_%s_atk" % dir, dir == "side" and p.face.x < 0.0, dir]
+		return ["%s_%s_atk" % [sprite, dir], dir == "side" and p.face.x < 0.0, dir]
 	var walking: bool = p.vel.length() > 1.0 and p.hurt_t <= 0.0
 	var beat: int = (w.steps / WALK_STEPS) % 4 if walking else 0 # stand, step, stand, other step
 	var frame := "b" if beat % 2 == 1 else "a"
 	var flip: bool = p.face.x < 0.0 if dir == "side" else beat == 3
-	return ["keeper_%s%s_%s" % [dir, "_lift" if p.carrying else "", frame], flip, dir]
+	return ["%s_%s%s_%s" % [sprite, dir, "_lift" if p.carrying else "", frame], flip, dir]
 
 
 func _swinging(w) -> bool:
@@ -912,7 +1063,21 @@ func _swinging(w) -> bool:
 
 ## How far into the swing it is, 0 to 1, or -1 when the keeper is not swinging.
 func _swing_share(w) -> float:
-	return clampf(w.player.attack_t / Config.PLAYER.attack_time, 0.0, 1.0) if _swinging(w) else -1.0
+	return clampf(w.player.attack_t / w.stat("attack_time"), 0.0, 1.0) if _swinging(w) else -1.0
+
+
+## The share of the swing at which the blow stops landing: the trail is gone by then.
+static func _hold(w) -> float:
+	return w.stat("attack_hit_until") / w.stat("attack_time")
+
+
+## The weapon the keeper swings ("sword", "axe"), and the pixel of its sprite held in the fist.
+static func _weapon(w) -> String:
+	return Looks.character(w.character).weapon
+
+
+static func _grip(w) -> Vector2:
+	return Looks.WEAPONS[_weapon(w)].grip
 
 
 ## Where along a stage of the swing k is, 0 to 1.
@@ -923,7 +1088,7 @@ func _stage(k: float, from: float, to: float) -> float:
 ## How far the keeper leans into the blow: a pixel toward the facing while the swing strikes and holds.
 func _lean(w) -> Vector2:
 	var k := _swing_share(w)
-	if k < SWING_WIND or k >= SWING_HOLD:
+	if k < SWING_WIND or k >= _hold(w) or _weapon(w) == "":
 		return Vector2.ZERO
 	return (w.player.face * LUNGE).round()
 
@@ -962,11 +1127,11 @@ func _blade(w) -> Array:
 		a = lerpf(rest[1], arc[2], out)
 	elif k < SWING_STRIKE:
 		a = lerpf(arc[2], arc[1] - OVERSHOOT, smoothstep(0.0, 1.0, _stage(k, SWING_WIND, SWING_STRIKE)))
-	elif k < SWING_HOLD:
-		a = lerpf(arc[1] - OVERSHOOT, arc[1], ease(_stage(k, SWING_STRIKE, SWING_HOLD), 0.5))
+	elif k < _hold(w):
+		a = lerpf(arc[1] - OVERSHOOT, arc[1], ease(_stage(k, SWING_STRIKE, _hold(w)), 0.5))
 	else:
 		var rest := _rest(w, arc[1])
-		out = 1.0 - smoothstep(0.0, 1.0, _stage(k, SWING_HOLD, 1.0))
+		out = 1.0 - smoothstep(0.0, 1.0, _stage(k, _hold(w), 1.0))
 		a = lerpf(rest[1], arc[1], out)
 	var rest_hand: Vector2 = _rest(w, a)[0]
 	return [rest_hand.lerp(shoulder + Vector2.from_angle(a) * ARM, out), a, out]
@@ -978,14 +1143,15 @@ func _burning(w) -> bool:
 
 
 func _sword_texture(w) -> Texture2D:
-	return Sprites.texture(SWORD % ["_long" if w.mod("reach_bonus", 0.0) > 0.0 else "", "_fire" if _burning(w) else ""])
+	return Sprites.texture(SWORD % [_weapon(w), "_long" if w.mod("reach_bonus", 0.0) > 0.0 else "", "_fire" if _burning(w) else ""])
 
 
-## How much the sword sprite is stretched along its length, so that at full length its tip reaches as far past the
-## base sword's as world.reach() goes past the base reach, and it looks shorter at rest.
+## How much the weapon sprite is stretched along its length, so that at full length its tip reaches as far past the
+## base weapon's as world.reach() goes past the keeper's base reach, and it looks shorter at rest.
 func _stretch(w, sword: Texture2D, out: float) -> float:
-	var base := Sprites.texture("sword").get_width() - GRIP.x
-	var stretch: float = (w.reach() - Config.PLAYER.reach + base) / (sword.get_width() - GRIP.x)
+	var grip := _grip(w)
+	var base := Sprites.texture(_weapon(w)).get_width() - grip.x
+	var stretch: float = (w.reach() - w.stat("reach") + base) / (sword.get_width() - grip.x)
 	return stretch * lerpf(REST_LENGTH, 1.0, out)
 
 
@@ -993,7 +1159,7 @@ func _sword(c: CanvasItem, w) -> void:
 	var blade := _blade(w)
 	var sword := _sword_texture(w)
 	c.draw_set_transform(blade[0].round(), blade[1], Vector2(_stretch(w, sword, blade[2]), 1.0))
-	c.draw_texture(sword, -GRIP)
+	c.draw_texture(sword, -_grip(w))
 	c.draw_set_transform(Vector2.ZERO)
 
 
@@ -1006,15 +1172,15 @@ func _sword(c: CanvasItem, w) -> void:
 func slash_lines(w) -> Array:
 	var p = w.player
 	var k := _swing_share(w)
-	if p.dead or p.carrying or k < SWING_WIND or k >= SWING_HOLD:
+	if p.dead or p.carrying or _weapon(w) == "" or k < SWING_WIND or k >= _hold(w):
 		return []
 	var arc := _arc(w)
 	var a: float = clampf(_blade(w)[1], arc[1], arc[0])
-	var hold := _stage(k, SWING_STRIKE, SWING_HOLD)
+	var hold := _stage(k, SWING_STRIKE, _hold(w))
 	var lines: Array = (SLASH_FIRE if _burning(w) else SLASH).duplicate()
 	if w.mod("reach_bonus", 0.0) > 0.0:
 		lines.push_front(SLASH_GLEAM)
-	var width: float = WIDE_LINE if w.mod("arc_bonus", 0.0) < 0.0 else 1.0
+	var width: float = WIDE_LINE if w.mod("arc_bonus", 0.0) < 0.0 or Looks.character(w.character).heavy else 1.0
 	var out := []
 	for i in lines.size():
 		var tail: float = clampf(lerpf(a, arc[2], lines[i][0] * (1.0 - hold)), arc[1], arc[0])
@@ -1025,16 +1191,16 @@ func slash_lines(w) -> Array:
 
 func _slash(c: CanvasItem, w) -> void:
 	var p = w.player
-	if p.dead or p.carrying:
+	if p.dead or p.carrying or _weapon(w) == "":
 		return
 	var burning := _burning(w)
 	var blade := _blade(w)
 	if burning: # a flame licks the tip whenever the blade burns, swinging or not
 		var sword := _sword_texture(w)
-		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - GRIP.x - 1.0) * _stretch(w, sword, blade[2])
+		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - _grip(w).x - 1.0) * _stretch(w, sword, blade[2])
 		var lick := Sprites.texture("flame_s_%s" % ("a" if (w.steps / FLAME_STEPS_FAST) % 2 == 0 else "b"))
 		c.draw_texture(lick, (tip - Vector2(3.0, 5.0)).round())
-	var hold := _stage(_swing_share(w), SWING_STRIKE, SWING_HOLD)
+	var hold := _stage(_swing_share(w), SWING_STRIKE, _hold(w))
 	var fade := Color(1.0, 1.0, 1.0, 1.0 - hold * hold)
 	var at: Vector2 = p.pos.round()
 	var lines := slash_lines(w)

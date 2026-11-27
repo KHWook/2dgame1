@@ -1,6 +1,7 @@
 ## Short-lived pictures that answer what just happened in the world (world.events): pixels that fly off an enemy
 ## that is hit (and fire, from a blade that burns), a puff where one dies, sparks, a ring of embers and a brighter torch when it is fed, and hearts
-## rising off a keeper who ate a berry, and dust where the slime king lands.
+## rising off a keeper who ate a berry, and dust where the slime king lands with a ring of debris thrown out to the
+## shock's edge, and rings of smoke where a boss breaks out of the dark and where a decoy appears or breaks.
 ## View only (D4): it reads the world and never writes to it. It runs on simulation steps with its own seeded
 ## generator, so the same night always shows the same effects.
 extends RefCounted
@@ -39,10 +40,18 @@ const FLARE_TIME := 0.5 # seconds the fed torch burns brighter
 ## second; past these the oldest go first, so a big fight costs no more to show than a busy one.
 const MAX_BITS := 320
 const MAX_POOFS := 40
+const MAX_RINGS := 12
+## Rings thrown out from a spot: debris chunks out to a landing's shock (its "landed" event's shock: as far as it
+## hurt), or smoke puffs round a boss breaking in or a decoy. kind -> [steps it lasts, pieces round it, radius it
+## ends at (0: the event's shock)].
+const RINGS := { "debris": [18, 16, 0.0], "smoke": [16, 6, 14.0], "wisp": [16, 4, 8.0] }
+const DEBRIS := ["m", "M", "t", "T", "c"]
+const DEBRIS_HOP := 3.0 # pixels a chunk rises on its way out
 
 var rng # its own generator, so effects never draw from world.rng
 var bits: Array = [] # flying pixels: { pos, vel, keep, age, life, colour }
 var poofs: Array = [] # { pos, age in steps }
+var rings: Array = [] # { pos, age in steps, kind (RINGS), radius it ends at }
 var flare := 0.0 # 1 the moment the torch is fed, fading to 0: how much brighter it burns
 
 
@@ -70,20 +79,26 @@ func step(w) -> void:
 			"shot":
 				_burst(BURSTS.shot, ev.pos, Vector2.UP, _keys(FIRE))
 			"boss":
-				_burst(BURSTS.arrive, ev.pos, Vector2.UP, Looks.bit_colours(ev.enemy, 1))
-				poofs.append({ "pos": ev.pos, "age": 0 })
+				var at: Vector2 = ev.pos.clamp(Config.FIELD.position, Config.FIELD.end) # where it breaks in: on screen
+				_burst(BURSTS.arrive, at, Vector2.UP, Looks.bit_colours(ev.enemy, 1))
+				poofs.append({ "pos": at, "age": 0 })
+				_ring("smoke", at)
 			"decoy", "faded": # a decoy of a boss appears, or breaks into smoke
 				_burst(BURSTS.kill, ev.pos, Vector2.UP, Looks.bit_colours(ev.enemy, 1))
 				poofs.append({ "pos": ev.pos, "age": 0 })
+				_ring("wisp", ev.pos)
 			"landed":
 				_burst(BURSTS.landed, ev.pos, Vector2.UP, _keys(DUST) + Looks.bit_colours(ev.enemy, 1))
 				poofs.append({ "pos": ev.pos, "age": 0 })
+				_ring("debris", ev.pos, ev.get("shock", 0.0))
 			"healed":
 				_burst(BURSTS.heal, ev.pos + HEAD, Vector2.UP, _keys(HEAL))
 	if bits.size() > MAX_BITS:
 		bits = bits.slice(bits.size() - MAX_BITS)
 	if poofs.size() > MAX_POOFS:
 		poofs = poofs.slice(poofs.size() - MAX_POOFS)
+	if rings.size() > MAX_RINGS:
+		rings = rings.slice(rings.size() - MAX_RINGS)
 	var kept := 0
 	for b in bits:
 		b.pos += b.vel * Config.STEP
@@ -100,6 +115,13 @@ func step(w) -> void:
 			poofs[kept] = p
 			kept += 1
 	poofs.resize(kept)
+	kept = 0
+	for r in rings:
+		r.age += 1
+		if r.age < RINGS[r.kind][0]:
+			rings[kept] = r
+			kept += 1
+	rings.resize(kept)
 	flare = maxf(0.0, flare - Config.STEP / FLARE_TIME)
 
 
@@ -110,11 +132,42 @@ func _burning(w) -> bool:
 
 
 func paint(c: CanvasItem) -> void:
+	for r in rings:
+		_paint_ring(c, r)
 	for p in poofs:
 		c.draw_texture(Sprites.texture(POOF[p.age / POOF_STEPS]), (p.pos - POOF_ANCHOR).round())
 	for b in bits:
 		var size := 2.0 if b.age < b.life * BIG_UNTIL else 1.0
 		c.draw_rect(Rect2((b.pos - Vector2(size, size) / 2.0).round(), Vector2(size, size)), b.colour)
+
+
+func _ring(kind: String, at: Vector2, shock := 0.0) -> void:
+	var to: float = RINGS[kind][2] if RINGS[kind][2] > 0.0 else shock
+	rings.append({ "pos": at, "age": 0, "kind": kind, "radius": to })
+
+
+## How far out a ring's pieces are at its age: fast at first, ending at its radius (a landing's: the shock).
+static func ring_radius(r: Dictionary) -> float:
+	var k := clampf(float(r.age) / (RINGS[r.kind][0] - 1), 0.0, 1.0)
+	return r.radius * (1.0 - (1.0 - k) * (1.0 - k))
+
+
+func _paint_ring(c: CanvasItem, r: Dictionary) -> void:
+	var life: int = RINGS[r.kind][0]
+	var n: int = RINGS[r.kind][1]
+	var k := float(r.age) / life
+	var out := ring_radius(r)
+	for i in n:
+		var a := TAU * (i + 0.37 * (i % 3)) / n
+		var at: Vector2 = r.pos + Vector2.from_angle(a) * out
+		if r.kind == "debris":
+			var size := 2.0 if k < 0.5 and i % 2 == 0 else 1.0
+			var colour: Color = Sprites.PALETTE[DEBRIS[i % DEBRIS.size()]]
+			at.y -= sin(k * PI) * DEBRIS_HOP
+			c.draw_rect(Rect2((at - Vector2(size, size) / 2.0).round(), Vector2(size, size)), Color(colour, 1.0 - k * k))
+		else:
+			var frame: int = mini(POOF.size() - 1, r.age * POOF.size() / life)
+			c.draw_texture(Sprites.texture(POOF[frame]), (at - POOF_ANCHOR).round(), Color(0.62, 0.58, 0.82, (0.8 if r.kind == "smoke" else 0.6) * (1.0 - k)))
 
 
 ## The colours of PALETTE keys.

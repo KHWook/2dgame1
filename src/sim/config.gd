@@ -6,13 +6,48 @@ const STEP := 1.0 / 60.0 # the fixed simulation step, in seconds (D5: project.go
 const VIEW := Vector2(480.0, 270.0) # the screen, in game pixels; project.godot's viewport must match (R1 checks)
 const FIELD := Rect2(8.0, 8.0, 464.0, 254.0) # where the player can walk: the view less the treetops at its edges
 
-## A swing's blow lands from attack_hit_at to attack_hit_until seconds into it (while the painter shows its trail),
-## on every enemy that is in it then (World.in_swing), each at most once per swing.
+## The keeper, as the knight plays it; a character (CHARACTERS) changes some of these. A swing's blow lands from
+## attack_hit_at to attack_hit_until seconds into it (while the painter shows its trail), on every enemy that is in it
+## then (World.in_swing), each at most once per swing. attack: "swing" (a blow round the keeper) or "shoot" (an ember
+## fired at attack_hit_at, see bolt). damage: what a blow does; push: how hard it knocks back (share of ENEMY.knock).
+## carry: how many logs it can hold at once; carry_speed is its speed with one, carry_slow less for each more.
+## log_bonus: fuel each log it brings adds besides TORCH.log_fuel.
 const PLAYER := {
 	"start": Vector2(240.0, 165.0), "speed": 80.0, "carry_speed": 58.0, "radius": 6.0, "hp": 5,
 	"invuln": 1.2, "hurt_time": 0.25, "hurt_knock": 140.0,
 	"attack_time": 0.28, "attack_hit_at": 0.1, "attack_hit_until": 0.18, "reach": 22.0, "arc": 0.3, "aim_slack": 10.0, "grab": 9.0,
 	"dash_speed": 250.0, "dash_time": 0.14, # the dash upgrade: how fast and how long; you cannot be hurt during it
+	"attack": "swing", "damage": 1, "push": 1.0, "carry": 1, "carry_slow": 0.0, "log_bonus": 0.0,
+}
+
+## Who keeps the torch: chosen at the start of a run, all three from the first. stats: what it changes in PLAYER (the
+## knight changes nothing, so it plays exactly as the keeper always has). name, text, trait and bars are for the
+## choosing screen (src/ui.gd): bars are 1 to 5 of 5 pips, after one for hp that is worked out from stats.
+## bolt (attack "shoot"): the ember it fires toward World.aim(). It flies speed pixels a second for range pixels,
+## hits what its radius touches (World.in_bolt), does damage, lit_bonus more to an enemy in the torch's light, pushes
+## push of a blow's knockback and passes through pierce enemies before it stops (lit_pierce more in the light); spread: radians between the embers
+## of a fan (the spin upgrade as the mage has it). Upgrade rows can read differently per character (UPGRADES' as).
+const CHARACTERS := {
+	"knight": {
+		"name": "기사", "text": "칼을 든 횃불 지기. 무엇이든 고르게 해낸다", "trait": "약점 없음",
+		"bars": [["힘", 2], ["거리", 2], ["장작", 2]],
+		"stats": {},
+	},
+	"woodcutter": {
+		"name": "나무꾼", "text": "느리지만 넓고 센 도끼. 장작을 셋까지 들고, 하나에 연료 +5",
+		"trait": "약점: 느린 휘두르기",
+		"bars": [["힘", 4], ["거리", 2], ["장작", 5]],
+		"stats": { "attack_time": 0.38, "attack_hit_at": 0.13, "attack_hit_until": 0.2, "reach": 21.0, "arc": 0.0,
+			"damage": 2, "push": 1.2, "carry": 3, "carry_speed": 70.0, "carry_slow": 6.0, "log_bonus": 5.0 },
+	},
+	"mage": {
+		"name": "불씨 술사", "text": "겨눈 쪽으로 불씨를 쏜다. 빛 안의 적에게 피해 +1, 하나를 꿰뚫는다",
+		"trait": "약점: 체력 3",
+		"bars": [["힘", 2], ["거리", 5], ["장작", 1]],
+		"stats": { "hp": 3, "attack": "shoot", "attack_time": 0.68, "attack_hit_at": 0.06, "attack_hit_until": 0.06,
+			"carry_speed": 50.0,
+			"bolt": { "speed": 200.0, "range": 100.0, "radius": 3.0, "damage": 1, "lit_bonus": 1, "push": 0.5, "pierce": 0, "lit_pierce": 1, "spread": 0.3 } },
+	},
 }
 
 ## How many directions the touch stick steers in (InputFrame.stick). The keys give eight; the stick's 64 are fine
@@ -167,7 +202,8 @@ const ENEMY_TYPES := {
 ## Torch upgrades. At each offer the torch puts on the table upgrades you do not have yet, or the next level of one
 ## you have. A row is its first level; levels holds what changes at the second level, the third, and so on (merged
 ## over the row, so a level names only what it changes). Effects are read by the rules through World.mod(); add a
-## row here and handle its key there.
+## row here and handle its key there. as (optional): how the upgrade reads for a character, merged over the row (a
+## key set to null is taken out; levels are merged one by one), for the characters whose attack is not the sword's.
 const UPGRADES := {
 	"slow_burn": { "name": "느린 불꽃", "text": "연료가 25% 천천히 탄다", "burn_mult": 0.75,
 		"levels": [{ "text": "연료가 40% 천천히 탄다", "burn_mult": 0.6 }] },
@@ -181,9 +217,13 @@ const UPGRADES := {
 		"levels": [{ "text": "빛 안의 적이 55% 느려진다", "glow_slow": 0.45 }] },
 	"woodpile": { "name": "장작더미", "text": "장작이 더 자주, 더 많이 나온다", "wood_mult": 0.65, "wood_extra": 2,
 		"levels": [{ "text": "장작이 훨씬 자주, 더 많이 나온다", "wood_mult": 0.5, "wood_extra": 3 }] },
-	"quick_hands": { "name": "날랜 손", "text": "장작을 들어도 느려지지 않는다", "carry_full": true },
+	"quick_hands": { "name": "날랜 손", "text": "장작을 들어도 느려지지 않는다", "carry_full": true,
+		"as": { "woodcutter": { "text": "장작을 여럿 들어도 느려지지 않는다" } } },
 	"long_blade": { "name": "긴 칼날", "text": "베기 거리 +8", "reach_bonus": 8.0,
-		"levels": [{ "text": "베기 거리 +14", "reach_bonus": 14.0 }] },
+		"levels": [{ "text": "베기 거리 +14", "reach_bonus": 14.0 }],
+		"as": { "woodcutter": { "name": "긴 도끼자루" },
+			"mage": { "name": "먼 불씨", "text": "불씨가 날아가는 거리 +30", "reach_bonus": null, "range_bonus": 30.0,
+				"levels": [{ "text": "불씨가 날아가는 거리 +50", "reach_bonus": null, "range_bonus": 50.0 }] } } },
 	"bright": { "name": "밝은 불", "text": "빛 반경 +30%, 빛 안에서 15% 빨리 걷는다", "light_mult": 1.3, "lit_speed_mult": 1.15,
 		"levels": [{ "text": "빛 반경 +50%, 빛 안에서 25% 빨리 걷는다", "light_mult": 1.5, "lit_speed_mult": 1.25 }] },
 	"sturdy": { "name": "튼튼한 몸", "text": "최대 체력 +1, 체력 1 회복", "hp_bonus": 1,
@@ -192,19 +232,30 @@ const UPGRADES := {
 		"thorn_every": 1.0, "thorn_reach": 6.0,
 		"levels": [{ "text": "나를 때린 적도 피해 2, 바짝 붙은 적은 0.7초마다 찔린다", "thorns": 2, "thorn_every": 0.7 }] },
 	"wide_swing": { "name": "넓은 베기", "text": "베기 범위가 넓어진다", "arc_bonus": -0.5,
-		"levels": [{ "text": "베기 범위가 더 넓어진다", "arc_bonus": -0.8 }] },
+		"levels": [{ "text": "베기 범위가 더 넓어진다", "arc_bonus": -0.8 }],
+		"as": { "woodcutter": { "name": "넓은 휘두르기" },
+			"mage": { "name": "큰 불씨", "text": "불씨가 커져 맞히는 반경 +2", "arc_bonus": null, "bolt_bonus": 2.0,
+				"levels": [{ "text": "불씨가 더 커져 맞히는 반경 +3.5", "arc_bonus": null, "bolt_bonus": 3.5 }] } } },
 	"fire_blade": { "name": "불붙은 칼", "text": "빛 안에서 베면 피해 +1", "lit_damage": 1,
-		"levels": [{ "text": "빛 안에서 베면 피해 +2", "lit_damage": 2 }] },
+		"levels": [{ "text": "빛 안에서 베면 피해 +2", "lit_damage": 2 }],
+		"as": { "woodcutter": { "name": "불붙은 도끼", "text": "빛 안에서 찍으면 피해 +1", "levels": [{ "text": "빛 안에서 찍으면 피해 +2" }] },
+			"mage": { "name": "타오르는 불씨", "text": "빛 안의 적을 맞히면 피해 +1 더", "levels": [{ "text": "빛 안의 적을 맞히면 피해 +2 더" }] } } },
 	"dash": { "name": "돌진", "text": "Shift로 짧게 돌진, 그동안 무적 (1.2초마다)", "dash_every": 1.2,
 		"levels": [{ "text": "돌진을 0.7초마다 쓸 수 있다", "dash_every": 0.7 }] },
 	"spin": { "name": "회전 베기", "text": "세 번째 베기마다 한 바퀴를 벤다", "spin_every": 3,
-		"levels": [{ "text": "두 번째 베기마다 한 바퀴를 벤다", "spin_every": 2 }] },
+		"levels": [{ "text": "두 번째 베기마다 한 바퀴를 벤다", "spin_every": 2 }],
+		"as": { "mage": { "name": "세 갈래 불씨", "text": "세 번째 쏠 때마다 불씨 셋을 부채꼴로 쏜다", "spin_every": null, "spread_every": 3,
+			"levels": [{ "text": "두 번째 쏠 때마다 불씨 셋을 쏜다", "spin_every": null, "spread_every": 2 }] } } },
 	"spark": { "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
 		"levels": [{ "text": "횃불이 1.6초마다 불씨를 쏜다", "spark_every": 1.6 },
 			{ "text": "횃불이 1.2초마다 불씨를 쏜다", "spark_every": 1.2 }] },
 	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
 		"vamp_kills": 8, "vamp_grow": 1.25, "vamp_from": 4,
-		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다", "vamp_kills": 5 }] },
+		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다", "vamp_kills": 5 }],
+		"as": { "woodcutter": { "name": "흡혈 도끼", "text": "도끼로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
+				"levels": [{ "text": "도끼로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다" }] },
+			"mage": { "name": "흡혈 불씨", "text": "불씨로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
+				"levels": [{ "text": "불씨로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다" }] } } },
 	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
 		"levels": [{ "text": "연료 최대치 +60, 새벽에 그만큼 더 채워진다", "fuel_bonus": 60.0 }] },
 }

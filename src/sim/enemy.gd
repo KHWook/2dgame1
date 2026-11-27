@@ -5,7 +5,7 @@
 ## at the player and shakes the ground where it lands, and every other time hops at them three times in a row; the
 ## shade lord circles in the dark, now and then rushes the torch, and now and then splits off decoys of itself. The
 ## world tells the screen "warn" { pos, at, enemy } when one is about to strike (at: where it will; for a split, where
-## it stands), "landed" { pos, enemy } when the slime king comes down, "decoy" { pos, enemy } where a decoy appears and
+## it stands), "landed" { pos, enemy, shock } when the slime king comes down (shock: how far round it it hurt), "decoy" { pos, enemy } where a decoy appears and
 ## "faded" { pos, enemy } where one breaks or fades.
 ## A charger (the boar) has a pattern too: it stops and paws the ground with its line drawn, charges straight along
 ## it, and stands dazed where the charge ends. It tells "warn" as well, at: the end of its line.
@@ -176,7 +176,7 @@ func _leap(world) -> void:
 			pos = move_from.lerp(move_to, clampf(1.0 - move_t / hop().air, 0.0, 1.0))
 			if move_t <= 0.0:
 				pos = move_to
-				world.events.append({ "kind": "landed", "pos": pos, "enemy": kind })
+				world.events.append({ "kind": "landed", "pos": pos, "enemy": kind, "shock": hop().shock })
 				if pos.distance_to(p.pos) < hop().shock + Config.PLAYER.radius:
 					p.hurt(pos)
 				if hops_left > 1 and not p.dead:
@@ -368,7 +368,8 @@ func _goal(world) -> Vector2:
 	return world.player.pos
 
 
-## A thief takes a log it reaches, or the one the player is carrying, and is gone once it is off the field with it.
+## A thief takes a log it reaches, or one of those the player is carrying (one only: a woodcutter's stack loses its
+## top log), and is gone once it is off the field with it.
 func _thieve(world) -> void:
 	if carrying:
 		gone = not Config.FIELD.grow(E.edge).has_point(pos)
@@ -380,7 +381,7 @@ func _thieve(world) -> void:
 			return
 	var p = world.player
 	if p.carrying and not p.dead and touches(p):
-		p.carrying = false
+		p.lose_log()
 		carrying = true
 
 
@@ -391,9 +392,9 @@ func touches(p) -> bool:
 	return pos.distance_to(p.pos) < T.radius + Config.PLAYER.radius
 
 
-func hit(dmg: int, from_pos: Vector2) -> void:
+func hit(dmg: int, from_pos: Vector2, push := 1.0) -> void:
 	hp -= dmg
 	flash = E.flash
-	knock = (pos - from_pos).normalized() * E.knock * T.get("heavy", 1.0)
+	knock = (pos - from_pos).normalized() * E.knock * T.get("heavy", 1.0) * push
 	if hp <= 0:
 		dead = true

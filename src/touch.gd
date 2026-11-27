@@ -49,6 +49,7 @@ const DEMO_WORDS := [["끌어서 이동", Vector2(74.0, 224.0)], ["누르면 베
 var on := false # the controls are shown and listen
 var mode := "off" # set by main.gd every frame: "play", "pick", "ended", "paused", or "off" (the start screen)
 var dash_shown := false # set by main.gd: the dash upgrade is held
+var attack_icon := "sword" # set by main.gd: the picture on the attack button, the keeper's own (Looks.CHARACTERS button)
 var stick := -1 # the touch index steering, -1 when none
 var stick_from := Vector2.ZERO # the ring's middle
 var stick_at := Vector2.ZERO # the thumb
@@ -244,7 +245,7 @@ func _draw() -> void:
 		_sprite("pad_ring", DEMO_STICK, true)
 		_sprite("pad_knob", DEMO_STICK + DEMO_PUSH, true)
 		_sprite("button", ATTACK, true)
-		_sprite("sword", ATTACK + Vector2(1.0, 0.0), true, ICON_SCALE)
+		_sprite(attack_icon, ATTACK + Vector2(1.0, 0.0), true, ICON_SCALE)
 		_sprite("button_mid", DASH, false)
 		_sprite("icon_dash", DASH, false, ICON_SCALE)
 		return
@@ -258,7 +259,7 @@ func _draw() -> void:
 		return
 	var attacking := buttons.values().has("attack")
 	_sprite("button", ATTACK, attacking)
-	_sprite("sword", ATTACK + Vector2(1.0, 0.0), attacking, ICON_SCALE)
+	_sprite(attack_icon, ATTACK + Vector2(1.0, 0.0), attacking, ICON_SCALE)
 	if dash_shown:
 		var dashing := buttons.values().has("dash")
 		_sprite("button_mid", DASH, dashing)

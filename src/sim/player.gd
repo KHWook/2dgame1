@@ -1,27 +1,38 @@
-## The player, seen from above: walks in 8 directions with the keys (any of Config.STICK_DIRECTIONS with the touch stick), swings in the facing direction, carries one log. With the
-## dash upgrade it can dash; with the spin upgrade every few swings go all the way round.
+## The player, seen from above: walks in 8 directions with the keys (any of Config.STICK_DIRECTIONS with the touch
+## stick), attacks in the facing direction (a swing, or an ember it shoots: its character's attack), carries logs (as
+## many as its character can). With the dash upgrade it can dash; with the spin upgrade every few swings go all the
+## way round (or, for a shooter, every few shots are a fan). Its numbers are Config.PLAYER with its character's
+## stats over them (World.stats), handed in when it is made.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
-const P := Config.PLAYER
 
-var pos: Vector2 = P.start
+var P: Dictionary # its numbers: Config.PLAYER with its character's stats merged over
+var pos: Vector2
 var vel := Vector2.ZERO
 var face := Vector2.DOWN
-var hp: int = P.hp
+var hp: int
 var invuln := 0.0
-var invuln_for: float = P.invuln # how long a hit keeps it from the next one tonight (World.keeper_invuln())
+var invuln_for: float # how long a hit keeps it from the next one tonight (World.keeper_invuln())
 var hurt_t := 0.0
 var dead := false
 var attack_t := -1.0 # time into the swing, or -1 when not swinging
 var struck: Array = [] # the enemies this swing has hit: each is hit once per swing
-var carrying := false
+var carrying := false # holding at least one log
+var held := 0 # how many logs it holds, at most P.carry
 var swings := 0 # swings started so far, for the spin upgrade
 var spin := false # this swing goes all the way round
 var dash_t := 0.0 # time left in a dash, or 0
 var dash_wait := 0.0 # time until the next dash is ready
 var dash_dir := Vector2.DOWN
 var dropped = null # where the log you just put down lies, until you step off it; null otherwise
+
+
+func _init(stats: Dictionary = Config.PLAYER) -> void:
+	P = stats
+	pos = P.start
+	hp = P.hp
+	invuln_for = P.invuln
 
 
 func step(world, inp) -> void:
@@ -42,7 +53,7 @@ func step(world, inp) -> void:
 			dir = Vector2.from_angle(TAU * inp.stick / Config.STICK_DIRECTIONS)
 		var slow: bool = carrying and not world.mod("carry_full", false)
 		var lit: float = world.mod("lit_speed_mult", 1.0) if world.in_light(pos) else 1.0 # the bright fire upgrade
-		vel = dir * (P.carry_speed if slow else P.speed) * lit
+		vel = dir * (carry_speed() if slow else P.speed) * lit
 		if dir != Vector2.ZERO and attack_t < 0.0:
 			face = dir
 		var every: float = world.mod("dash_every", 0.0)
@@ -52,10 +63,12 @@ func step(world, inp) -> void:
 			dash_wait = every
 			vel = dash_dir * P.dash_speed
 		if inp.is_pressed("attack"):
-			if carrying:
+			if carrying: # every log held goes down where it stands
+				for i in held:
+					world.drop_log(pos)
+				held = 0
 				carrying = false
 				dropped = pos
-				world.drop_log(pos)
 			elif attack_t < 0.0:
 				attack_t = 0.0
 				struck = []
@@ -64,13 +77,40 @@ func step(world, inp) -> void:
 				var spin_every: int = world.mod("spin_every", 0)
 				spin = spin_every > 0 and swings % spin_every == 0
 	if attack_t >= 0.0:
+		var was := attack_t
 		attack_t += Config.STEP
-		if attack_t >= P.attack_hit_at and attack_t <= P.attack_hit_until:
+		if P.attack == "shoot":
+			if was < P.attack_hit_at and attack_t >= P.attack_hit_at:
+				world.shoot(self)
+		elif attack_t >= P.attack_hit_at and attack_t <= P.attack_hit_until:
 			world.melee(self)
 		if attack_t >= P.attack_time:
 			attack_t = -1.0
 			spin = false
 	pos = (pos + vel * Config.STEP).clamp(Config.FIELD.position, Config.FIELD.end)
+
+
+## How fast it walks carrying what it holds: carry_speed with one log, carry_slow less for each more.
+func carry_speed() -> float:
+	return P.carry_speed - P.carry_slow * maxi(0, held - 1)
+
+
+## Takes one more log into its arms. False when they are full.
+func take_log() -> bool:
+	if held >= P.carry:
+		return false
+	held += 1
+	carrying = true
+	return true
+
+
+## Gives up one log (to a thief). False when it holds none.
+func lose_log() -> bool:
+	if held <= 0:
+		return false
+	held -= 1
+	carrying = held > 0
+	return true
 
 
 ## Take a hit from something at from_pos. Returns false while invulnerable, dashing or dead. It knocks you back and

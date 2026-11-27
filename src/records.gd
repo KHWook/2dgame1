@@ -2,29 +2,58 @@
 ## It reads files and is handed the date, so it lives outside src/sim/ (S1, D2): the simulation only keeps the score.
 ## main.gd calls step() after every world step; a run is written once, on the step its ending begins.
 ## Beside them, in a file of its own, whether the start screen's guide has been read (src/guide.gd): once it has, its
-## start button shows on every page and the first night's coaching (src/coach.gd) is not shown again.
+## start button shows on every page and the first night's coaching (src/coach.gd) is not shown again; and, in another,
+## who kept the torch last (src/chooser.gd opens on that card).
 extends RefCounted
+
+const Config := preload("res://src/sim/config.gd")
 
 const KEEP := 10 # runs kept on disk
 const SHOWN := 5 # runs listed under an ending
-const VERSION := 1 # bump when a run's fields change; a file of another version starts a fresh list
+const VERSION := 2 # bump when a run's fields change; a file of another version starts a fresh list
+const READS := [1, 2] # the versions read: a version 1 run is from before characters, so its keeper was the knight
 const FILE := "user://records.json"
 const ENDINGS := ["out", "dead"] # the world's phases that end a run
 const GUIDE_FILE := "user://guide.json"
 const GUIDE_VERSION := 1 # bump when the guide changes enough to be worth showing again: a file of another version is unread
+const CHARACTER_FILE := "user://character.json"
 
 var path: String
 var guide_path: String
-var runs: Array = [] # best first: { "score", "night", "seed", "picks", "date" }
+var character_path: String
+var runs: Array = [] # best first: { "score", "night", "seed", "picks", "date", "char" }
 var place := 0 # where the run that just ended landed, from 1; 0 if it missed the list or none has ended
 var latest = null # that run, so the list can mark it
 var _over := false # whether the world was already in an ending on the last step
 
 
-func _init(file: String = FILE, guide_file: String = GUIDE_FILE) -> void:
+func _init(file: String = FILE, guide_file: String = GUIDE_FILE, character_file: String = CHARACTER_FILE) -> void:
 	path = file
 	guide_path = guide_file
+	character_path = character_file
 	runs = read(path)
+
+
+## Who kept the torch last time ("knight" when nothing, or nothing sound, is on disk).
+func last_character() -> String:
+	if not FileAccess.file_exists(character_path):
+		return "knight"
+	var json := JSON.new()
+	if json.parse(FileAccess.get_file_as_string(character_path)) != OK or typeof(json.data) != TYPE_DICTIONARY:
+		return "knight"
+	return character_id(json.data.get("char"))
+
+
+## Remembers who keeps the torch now.
+func remember_character(id: String) -> void:
+	var f := FileAccess.open(character_path, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify({ "char": id }))
+
+
+## A character id from a file: itself if it is one of Config.CHARACTERS, else the knight.
+static func character_id(value) -> String:
+	return value if typeof(value) == TYPE_STRING and Config.CHARACTERS.has(value) else "knight"
 
 
 ## Whether the guide has been read before. A missing, broken or other-version file is not read, never an error.
@@ -50,7 +79,7 @@ func read_guide() -> void:
 func step(w, seed_value: int, date: String) -> void:
 	var over: bool = ENDINGS.has(w.phase)
 	if over and not _over:
-		add({ "score": w.score, "night": w.night, "seed": seed_value, "picks": w.picks.duplicate(), "date": date })
+		add({ "score": w.score, "night": w.night, "seed": seed_value, "picks": w.picks.duplicate(), "date": date, "char": w.character })
 	_over = over
 
 
@@ -90,8 +119,9 @@ static func read(file: String) -> Array:
 	var json := JSON.new() # parse() reports a broken file by its return value; parse_string() also prints an error
 	if json.parse(FileAccess.get_file_as_string(file)) != OK:
 		return []
-	var data = json.data
-	if typeof(data) != TYPE_DICTIONARY or data.get("version") != float(VERSION) or typeof(data.get("runs")) != TYPE_ARRAY:
+	var data = json.data # a mismatched type compared with == or != is a script error, so the type is checked first
+	if typeof(data) != TYPE_DICTIONARY or typeof(data.get("version")) != TYPE_FLOAT or not READS.has(int(data.version)) \
+			or float(int(data.version)) != data.version or typeof(data.get("runs")) != TYPE_ARRAY:
 		return []
 	var out := []
 	for r in data.runs:
@@ -100,6 +130,7 @@ static func read(file: String) -> Array:
 		out.append({
 			"score": int(r.score), "night": int(r.night), "seed": int(r.get("seed", 0)),
 			"picks": r.get("picks", []) if typeof(r.get("picks")) == TYPE_ARRAY else [], "date": str(r.get("date", "")),
+			"char": character_id(r.get("char", "knight")),
 		})
 	out.sort_custom(_better)
 	out.resize(mini(out.size(), KEEP))

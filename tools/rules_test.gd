@@ -13,6 +13,7 @@ const Coach := preload("res://src/coach.gd")
 const Sprites := preload("res://src/art/sprites.gd")
 const Looks := preload("res://src/art/looks.gd")
 const Bot := preload("res://src/bot.gd")
+const Effects := preload("res://src/art/effects.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -51,13 +52,19 @@ static func run() -> Array:
 	out.append_array(_tier_stats())
 	out.append_array(_tier_nights())
 	out.append_array(_tier_looks())
+	out.append_array(_characters())
+	out.append_array(_woodcutter())
+	out.append_array(_stack())
+	out.append_array(_mage())
+	out.append_array(_bolt_edges())
+	out.append_array(_character_upgrades())
 	return out
 
 
 ## A night already under way with these upgrades taken, the player standing at at from the torch, facing right, and
 ## nothing else on the field.
-static func _night(at: Vector2, upgrades: Array = []):
-	var w = World.new(1)
+static func _night(at: Vector2, upgrades: Array = [], who := "knight"):
+	var w = World.new(1, who)
 	w.picks = upgrades.duplicate()
 	w.offer = []
 	w.phase = "night"
@@ -157,11 +164,13 @@ static func _swing_area() -> Array:
 	# The painter's trail, step by step through swings of every kind: each line within what in_swing strikes.
 	var painter = Painter.new(1)
 	var drawn := 0
-	for ups in [[], ["long_blade", "long_blade"], ["wide_swing", "wide_swing"], ["spin"]]:
-		w = _night(DARK, ups)
+	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing", "wide_swing"], "knight"], [["spin"], "knight"],
+			[[], "woodcutter"], [["long_blade", "wide_swing", "wide_swing"], "woodcutter"], [["spin", "spin"], "woodcutter"]]:
+		var ups: Array = run[0]
+		w = _night(DARK, ups, run[1])
 		for turn in 3: # the spin upgrade goes round on the third swing
 			w.player.face = Vector2.from_angle(0.7 * turn + 0.2)
-			for i in roundi(Config.PLAYER.attack_time / Config.STEP) + 2:
+			for i in roundi(w.stat("attack_time") / Config.STEP) + 2:
 				_play(w, 1, "attack" if i == 0 else "")
 				for line in painter.slash_lines(w):
 					drawn += 1
@@ -170,7 +179,7 @@ static func _swing_area() -> Array:
 						if not w.in_swing(at, 1.0):
 							out.append("the trail is drawn where the swing does not hit (%s, %s at %s)" % [ups, at - w.player.pos, w.player.attack_t])
 							break
-				if not painter.slash_lines(w).is_empty() and w.player.attack_t > Config.PLAYER.attack_hit_until:
+				if not painter.slash_lines(w).is_empty() and w.player.attack_t > w.stat("attack_hit_until"):
 					out.append("the trail still shows once the blow has stopped landing (%s)" % [ups])
 	_expect(out, "the painter drew a trail in the swings", drawn > 0, true)
 	return out
@@ -227,7 +236,7 @@ static func _thief() -> Array:
 	_play(w, SWING, "attack")
 	_expect(out, "a thief killed with a log drops it", [w.enemies.size(), w.logs.size()], [0, 1])
 	w = _night(DARK)
-	w.player.carrying = true
+	w.player.take_log()
 	thief = _add(w, "thief", Vector2(8.0, 0.0))
 	_play(w, 1)
 	_expect(out, "a thief snatches the log the player carries", [w.player.carrying, thief.carrying], [false, true])
@@ -403,7 +412,7 @@ static func _new_upgrades() -> Array:
 	# big torch
 	w = _night(DARK, ["big_torch"])
 	w.fuel = Config.TORCH.max_fuel
-	w.player.carrying = true
+	w.player.take_log()
 	w.player.pos = Config.TORCH.pos
 	_play(w, 1)
 	_expect(out, "a big torch takes fuel past the usual full tank", w.fuel > Config.TORCH.max_fuel, true)
@@ -991,6 +1000,7 @@ static func _charger() -> Array:
 	_play(w, 1)
 	_expect(out, "the boar does not charge from beyond the field", boar.move, "")
 	out.append_array(_charge_band())
+	out.append_array(_fx_sizes())
 	return out
 
 
@@ -1039,7 +1049,7 @@ static func _damage_once(w, e) -> void:
 static func _logs() -> Array:
 	var out := []
 	var w = _night(DARK)
-	w.player.carrying = true
+	w.player.take_log()
 	_play(w, 1, "attack")
 	_expect(out, "the attack key puts a carried log down", [w.player.carrying, w.logs.size()], [false, 1])
 	_play(w, SWING)
@@ -1428,4 +1438,355 @@ static func _tier_looks() -> Array:
 			lines[line] = true
 	_expect(out, "an orange slime is told as one", Looks.hint(Looks.thing("slime", 2)).begins_with("주황 슬라임: "), true)
 	_expect(out, "a tier's bits are in its colours", Looks.bit_colours("slime", 3) != Looks.bit_colours("slime", 1), true)
+	return out
+
+
+
+## The characters (Config.CHARACTERS): the knight is the keeper as it always was (Config.PLAYER untouched, every
+## upgrade as its row reads); each character's numbers are PLAYER with its stats over them; every one has a name, a
+## description, a weakness line and bars; a run starts again with another keeper by choose(), on the same seed.
+static func _characters() -> Array:
+	var out := []
+	var w = World.new(1)
+	_expect(out, "a world starts with the knight", w.character, "knight")
+	_expect(out, "the knight's numbers are Config.PLAYER's", w.stats, Config.PLAYER)
+	for id in Config.UPGRADES:
+		var row: Dictionary = Config.UPGRADES[id].duplicate()
+		row.erase("as")
+		_expect(out, "the knight's %s reads as its row" % id, World.upgrade_row(id, "knight"), row)
+	for id in Config.CHARACTERS:
+		var c: Dictionary = Config.CHARACTERS[id]
+		for key in ["name", "text", "trait", "bars", "stats"]:
+			_expect(out, "character %s has %s" % [id, key], c.has(key), true)
+		for key in c.stats:
+			_expect(out, "character %s's stat %s is one PLAYER has" % [id, key], Config.PLAYER.has(key) or key == "bolt", true)
+		var cw = World.new(1, id)
+		_expect(out, "%s's max hp is its hp" % id, cw.max_hp(), c.stats.get("hp", Config.PLAYER.hp))
+		_expect(out, "%s starts with full hearts" % id, cw.player.hp, cw.max_hp())
+	var a = World.new(5)
+	a.choose("mage")
+	var b = World.new(5, "mage")
+	_expect(out, "choose() starts the run again as a world made with that keeper", [a.character, a.offer, a.player.hp, a.rng.state()], [b.character, b.offer, b.player.hp, b.rng.state()])
+	_expect(out, "the knight's offer at dusk does not change when the world is made for it", World.new(5, "knight").offer, World.new(5).offer)
+	return out
+
+
+## The woodcutter's axe: slower than the sword (its blow lands later and the swing lasts longer), wider (what the
+## sword's arc misses, the axe's does not), harder (2 a blow: a slime falls at once) and it knocks back further.
+static func _woodcutter() -> Array:
+	var out := []
+	var C: Dictionary = World.character_stats("woodcutter")
+	_expect(out, "the axe swings slower than the sword", C.attack_time > Config.PLAYER.attack_time and C.attack_hit_at > Config.PLAYER.attack_hit_at, true)
+	_expect(out, "the axe sweeps wider than the sword", C.arc < Config.PLAYER.arc, true)
+	var body: float = asin(Config.ENEMY_TYPES.big_slime.radius / 20.0) # in_swing allows for the body's size
+	var wide := (acos(Config.PLAYER.arc) + acos(C.arc)) / 2.0 + body # between the sword's edge and the axe's
+	for who in ["knight", "woodcutter"]:
+		var w = _night(DARK, [], who)
+		var side = _add(w, "big_slime", Vector2.from_angle(wide) * 20.0)
+		side.T = side.T.duplicate()
+		side.T.speed = 0.0
+		w.player.attack_t = 0.0
+		w.player.struck = []
+		_play(w, roundi(w.stat("attack_time") / Config.STEP))
+		_expect(out, "a big slime %.0f degrees off the facing is struck by the %s" % [rad_to_deg(wide), who], side.hp < side.full_hp, who == "woodcutter")
+	var w = _night(DARK, [], "woodcutter")
+	var slime = _add(w, "slime", NEAR)
+	var big = _add(w, "big_slime", Vector2(0.0, -2.0) + NEAR.rotated(-0.5))
+	w.player.attack_t = 0.0
+	w.player.struck = []
+	_play(w, roundi(C.attack_hit_at / Config.STEP) - 1)
+	_expect(out, "the axe's blow has not landed before attack_hit_at", slime.hp, Config.ENEMY_TYPES.slime.hp)
+	var axe_knock := 0.0
+	for i in 3:
+		_play(w, 1)
+		if axe_knock == 0.0 and big.hp < big.full_hp:
+			axe_knock = big.knock.length() # in the step the blow lands
+	_expect(out, "the axe does 2 a blow: a slime falls at once", slime.dead, true)
+	_expect(out, "the axe does 2 to a big slime", big.hp, Config.ENEMY_TYPES.big_slime.hp - C.damage)
+	var k = _night(DARK)
+	var kbig = _add(k, "big_slime", NEAR)
+	k.player.attack_t = 0.0
+	k.player.struck = []
+	var sword_knock := 0.0
+	for i in roundi(Config.PLAYER.attack_hit_until / Config.STEP):
+		_play(k, 1)
+		if sword_knock == 0.0 and kbig.hp < kbig.full_hp:
+			sword_knock = kbig.knock.length()
+	_expect(out, "the sword does 1", kbig.hp, Config.ENEMY_TYPES.big_slime.hp - 1)
+	_expect(out, "the axe knocks back push times as far as the sword", snappedf(axe_knock / maxf(sword_knock, 0.001), 0.01), C.push)
+	_play(w, roundi(C.attack_time / Config.STEP))
+	_expect(out, "the axe's swing is over after its attack_time", w.player.attack_t, -1.0)
+	return out
+
+
+## The woodcutter carries up to Config.CHARACTERS' carry logs (the knight one): he picks up one a step while there is
+## room, never more; he walks slower with each (carry_speed, carry_slow less a log more); at the torch every log goes
+## in, each worth its fuel (and his log_bonus), its score and its "fed" event; a thief takes one log of the stack; the
+## attack key puts them all down.
+static func _stack() -> Array:
+	var out := []
+	var C: Dictionary = World.character_stats("woodcutter")
+	var w = _night(Vector2(0.0, 80.0), [], "woodcutter")
+	for i in C.carry + 1:
+		w.logs.append(w.player.pos)
+	for i in C.carry + 2:
+		_play(w, 1)
+	_expect(out, "the woodcutter picks up logs until his arms are full, and no more", [w.player.held, w.logs.size()], [C.carry, 1])
+	var k = _night(Vector2(0.0, 80.0))
+	k.logs = [k.player.pos, k.player.pos]
+	_play(k, 3)
+	_expect(out, "the knight carries one log", [k.player.held, k.logs.size()], [1, 1])
+	var speeds := []
+	for n in [1, 2, 3]:
+		var s = _night(Vector2(0.0, 80.0), [], "woodcutter")
+		for i in n:
+			s.player.take_log()
+		_play(s, 1, "", "right")
+		speeds.append(snappedf(s.player.vel.x, 0.01))
+	_expect(out, "the woodcutter walks slower with each log", speeds, [C.carry_speed, C.carry_speed - C.carry_slow, C.carry_speed - 2.0 * C.carry_slow])
+	_expect(out, "with his full stack he is no faster than the knight with one", speeds[2] <= Config.PLAYER.carry_speed, true)
+	var q = _night(Vector2(0.0, 80.0), ["quick_hands"], "woodcutter")
+	for i in 3:
+		q.player.take_log()
+	_play(q, 1, "", "right")
+	_expect(out, "quick hands: a full stack does not slow him", q.player.vel.x, C.speed)
+	# At the torch: all of them go in.
+	w = _night(Vector2(0.0, 30.0), [], "woodcutter")
+	w.fuel = 10.0
+	for i in 3:
+		w.player.take_log()
+	w.player.pos = Config.TORCH.pos + Vector2(0.0, Config.TORCH.reach)
+	var score: int = w.score
+	var told := _play(w, 1)
+	_expect(out, "feeding the torch puts every log in", [w.player.held, w.player.carrying], [0, false])
+	_expect(out, "each log is worth its fuel and the woodcutter's bonus", w.fuel, minf(w.max_fuel(), 10.0 + 3.0 * (Config.TORCH.log_fuel + C.log_bonus) - w.burn() * Config.STEP))
+	_expect(out, "each log fed scores and is told", [w.score - score, told.count("fed")], [3 * Config.SCORE.log, 3])
+	# A thief takes one.
+	w = _night(Vector2(0.0, 80.0), [], "woodcutter")
+	for i in 3:
+		w.player.take_log()
+	w.player.invuln = NEVER
+	var thief = _add(w, "thief", Vector2(3.0, 0.0))
+	_play(w, 1)
+	_expect(out, "a thief takes one log of the woodcutter's stack", [w.player.held, thief.carrying], [2, true])
+	# The attack key puts them all down.
+	_play(w, 1, "attack")
+	_expect(out, "the attack key puts every log down, and swings no axe", [w.player.held, w.player.carrying, w.logs.size(), w.player.attack_t], [0, false, 2, -1.0])
+	return out
+
+
+## The ember mage: 3 hearts; the attack shoots an ember along World.aim() at attack_hit_at (once a shot); it flies
+## bolt.speed and burns the first enemy it touches, bolt.damage, lit_bonus more to one in the torch's light; a shade
+## in the dark lets it through; the ember is drawn (Painter.bolt_discs) where it is and as big as what it hits; the
+## spin upgrade as the mage has it fans three embers out every few shots; the bot as the mage shoots and backs off.
+static func _mage() -> Array:
+	var out := []
+	var B: Dictionary = World.character_stats("mage").bolt
+	var w = _night(DARK, [], "mage")
+	_expect(out, "the mage has 3 hearts", [w.max_hp(), w.player.hp], [3, 3])
+	var slime = _add(w, "big_slime", Vector2(40.0, 0.0))
+	slime.T = slime.T.duplicate()
+	slime.T.speed = 0.0
+	_play(w, 1, "attack")
+	_expect(out, "no ember before attack_hit_at", w.bolts.size(), 0)
+	_play(w, roundi(w.stat("attack_hit_at") / Config.STEP))
+	_expect(out, "one ember at attack_hit_at", w.bolts.size(), 1)
+	var painter = Painter.new(1)
+	var discs: Array = Painter.bolt_discs(w)
+	_expect(out, "the ember is drawn where it is, as big as it hits", [discs[0][0], discs[0][1]], [w.bolts[0].pos, w.bolt_radius()])
+	_expect(out, "the ember flies the aimed way at bolt.speed", snappedf(w.bolts[0].dir.x, 0.001), 1.0)
+	_play(w, 30)
+	_expect(out, "the ember burns a big slime in the dark for bolt.damage", slime.hp, Config.ENEMY_TYPES.big_slime.hp - B.damage)
+	_expect(out, "the ember stops at the enemy it burns", w.bolts.size(), 0)
+	# In the light: lit_bonus more.
+	w = _night(Vector2(-40.0, 0.0), [], "mage")
+	var lit = _add(w, "big_slime", Vector2(40.0, 0.0))
+	lit.T = lit.T.duplicate()
+	lit.T.speed = 0.0
+	_play(w, 40, "attack")
+	_expect(out, "the ember burns an enemy in the torch's light for damage + lit_bonus", lit.hp, Config.ENEMY_TYPES.big_slime.hp - B.damage - B.lit_bonus)
+	w = _night(Vector2(-40.0, 0.0), ["fire_blade"], "mage")
+	lit = _add(w, "big_slime", Vector2(40.0, 0.0))
+	lit.T = lit.T.duplicate()
+	lit.T.speed = 0.0
+	_play(w, 40, "attack")
+	_expect(out, "the fire upgrade as the mage has it: 1 more in the light", lit.hp, Config.ENEMY_TYPES.big_slime.hp - B.damage - B.lit_bonus - 1)
+	# A shade in the dark lets it through (the ember is spent on it all the same).
+	w = _night(DARK, [], "mage")
+	var shade = _add(w, "shade", Vector2(40.0, 0.0))
+	shade.T = shade.T.duplicate()
+	shade.T.speed = 0.0
+	var told := _play(w, 40, "attack")
+	_expect(out, "an ember through a shade in the dark: passed, no hp lost", [shade.hp, told.has("passed")], [Config.ENEMY_TYPES.shade.hp, true])
+	# It stops at the first enemy unless it pierces.
+	w = _night(DARK, [], "mage")
+	var first = _add(w, "big_slime", Vector2(30.0, 0.0))
+	var second = _add(w, "big_slime", Vector2(60.0, 0.0))
+	for e in [first, second]:
+		e.T = e.T.duplicate()
+		e.T.speed = 0.0
+	_play(w, 40, "attack")
+	_expect(out, "in the dark the ember (pierce %d) burns the first enemy in line and not the one behind" % B.pierce, [first.hp < first.full_hp, second.hp], [true, second.full_hp])
+	w = _night(Vector2(-50.0, 0.0), [], "mage") # in the light: it goes through lit_pierce more
+	var line := []
+	for i in B.lit_pierce + 2:
+		var e = _add(w, "big_slime", Vector2(25.0 + 22.0 * i, 0.0))
+		e.T = e.T.duplicate()
+		e.T.speed = 0.0
+		line.append(e)
+	_play(w, 40, "attack")
+	var burnt := line.map(func(e): return e.hp < e.full_hp)
+	var want := []
+	for i in line.size():
+		want.append(i <= B.pierce + B.lit_pierce)
+	_expect(out, "in the light the ember goes through lit_pierce (%d) more and stops at the next" % B.lit_pierce, burnt, want)
+	# The fan: the spin upgrade as the mage has it.
+	w = _night(DARK, ["spin"], "mage")
+	var shots := []
+	for i in 3:
+		_play(w, 1, "attack")
+		_play(w, roundi(w.stat("attack_hit_at") / Config.STEP) + 1)
+		shots.append(w.bolts.size())
+		w.bolts = []
+		_play(w, roundi(w.stat("attack_time") / Config.STEP))
+	_expect(out, "three embers in a fan on the third shot with the mage's spin", shots, [1, 1, 3])
+	# It aims as far as the ember flies: an enemy well past a sword's reach turns the shot.
+	w = _night(DARK, [], "mage")
+	_add(w, "slime", Vector2(0.0, 60.0))
+	w.player.face = Vector2.RIGHT
+	_play(w, 1, "attack")
+	_expect(out, "the mage's shot turns to an enemy 60 pixels off, within the ember's range", w.player.face.y > 0.99, true)
+	# Bot: shoots a slime coming close, and backs off.
+	var bot = Bot.new(1)
+	w = _night(Vector2(0.0, 60.0), [], "mage")
+	_add(w, "slime", Vector2(30.0, 0.0))
+	var f = bot.frame(w)
+	_expect(out, "the bot as the mage shoots what comes close", f.pressed.has("attack"), true)
+	_expect(out, "the bot as the mage backs away from it", f.held.has("left") and not f.held.has("right"), true)
+	# With the torch low and wood about, it keeps hauling: shoots on its way, and never drops its log to fight
+	# something that is not right on it.
+	w = _night(Vector2(0.0, 60.0), [], "mage")
+	w.fuel = 0.3 * w.max_fuel()
+	w.logs = [w.player.pos + Vector2(-60.0, 0.0)]
+	_add(w, "slime", Vector2(30.0, 0.0))
+	f = bot.frame(w)
+	_expect(out, "a hungry torch: the bot as the mage shoots on its way to the wood", [f.pressed.has("attack"), f.held.has("left")], [true, true])
+	w.player.take_log()
+	w.logs = []
+	w.enemies[0].pos = w.player.pos + Vector2(Bot.SHOOT_DROP + 2.0, 0.0)
+	f = bot.frame(w)
+	_expect(out, "the bot as the mage does not drop its log for an enemy %.0f pixels off" % (Bot.SHOOT_DROP + 2.0), f.pressed.has("attack"), false)
+	return out
+
+
+## What looks hit by an ember is hit (World.in_bolt): a body whose edge it passes within its radius of, along its
+## whole flight, up to bolt range plus the two radii; not one half a pixel further out, nor past the range.
+static func _bolt_edges() -> Array:
+	var out := []
+	var B: Dictionary = World.character_stats("mage").bolt
+	var r: float = Config.ENEMY_TYPES.big_slime.radius
+	for case in [[Vector2(50.0, r + B.radius - 0.5), true], [Vector2(50.0, r + B.radius + 0.5), false],
+			[Vector2(B.range + r + B.radius - 0.5, 0.0), true], [Vector2(B.range + r + B.radius + 0.5, 0.0), false]]:
+		var w = _night(Vector2(-150.0, -60.0), [], "mage")
+		var e = _add(w, "big_slime", case[0])
+		e.T = e.T.duplicate()
+		e.T.speed = 0.0
+		w.player.face = Vector2.RIGHT
+		w.player.attack_t = w.stat("attack_hit_at") - Config.STEP * 0.5 # fires on the next step, facing right
+		_play(w, roundi(B.range / B.speed / Config.STEP) + 5)
+		_expect(out, "an ember past a big slime at %s: hit" % case[0], e.hp < e.full_hp, case[1])
+	_expect(out, "in_bolt: a body touching the stretch flown", World.in_bolt(Vector2.ZERO, Vector2(10.0, 0.0), 3.0, Vector2(5.0, 7.9), 5.0), true)
+	_expect(out, "in_bolt: a body just clear of it", World.in_bolt(Vector2.ZERO, Vector2(10.0, 0.0), 3.0, Vector2(5.0, 8.1), 5.0), false)
+	return out
+
+
+## Upgrades read for the character that takes them (UPGRADES' as): the mage's long blade sends the ember further and
+## leaves the reach alone, its wide swing makes the ember bigger and leaves the arc alone, its spin is a fan; the
+## woodcutter's are named for the axe; every character's every level has a name and a text, and the mage's sword
+## upgrades say nothing of a sword.
+static func _character_upgrades() -> Array:
+	var out := []
+	var B: Dictionary = World.character_stats("mage").bolt
+	var w = _night(DARK, ["long_blade"], "mage")
+	_expect(out, "the mage's long blade: the ember flies 30 further, the reach is as it was", [w.bolt_range(), w.reach()], [B.range + 30.0, Config.PLAYER.reach])
+	_expect(out, "the mage aims as far as the ember flies", w.attack_range(), w.bolt_range())
+	w.picks.append("long_blade")
+	_expect(out, "the mage's long blade at level 2: 50 further", w.bolt_range(), B.range + 50.0)
+	w = _night(DARK, ["wide_swing", "wide_swing"], "mage")
+	_expect(out, "the mage's wide swing at level 2: the ember is 3.5 bigger, the arc as it was", [w.bolt_radius(), w.arc()], [B.radius + 3.5, Config.PLAYER.arc])
+	w = _night(DARK, ["spin"], "mage")
+	_expect(out, "the mage's spin: no swing goes round", [w.mod("spin_every", 0), w.mod("spread_every", 0)], [0, 3])
+	w = _night(DARK, ["long_blade", "vampire", "vampire"], "woodcutter")
+	_expect(out, "the woodcutter's upgrades work as the knight's", [w.reach(), w.vamp_need()], [Config.CHARACTERS.woodcutter.stats.reach + 8.0, 5])
+	for who in Config.CHARACTERS:
+		for id in Config.UPGRADES:
+			for n in range(1, World.max_level(id) + 1):
+				var u := World.upgrade(id, n, who)
+				if not (u.get("name", "") != "" and u.get("text", "") != ""):
+					out.append("%s's %s at level %d has no name or text" % [who, id, n])
+				if who == "mage" and Looks.side(id) == "keeper" and ("칼" in u.name + u.text or "베" in u.name + u.text):
+					out.append("the mage's %s at level %d still speaks of a sword: %s / %s" % [id, n, u.name, u.text])
+				if who == "woodcutter" and "칼" in u.name + u.text:
+					out.append("the woodcutter's %s at level %d still speaks of a sword: %s / %s" % [id, n, u.name, u.text])
+	_expect(out, "the knight's card texts are the rows'", World.upgrade("vampire", 2, "knight").text, Config.UPGRADES.vampire.levels[0].text)
+	return out
+
+
+
+## The dressed-up warnings keep the sizes the rules hurt at: the slime king's marked landing is drawn at the shock of
+## the leap or hop under way (Painter.mark_radius), the debris its landing throws out ends at that shock (the "landed"
+## event carries it), and the chevrons on a boar's band slide along its line, from the boar to where the charge ends,
+## inside the band, toward its end and faster as the wind-up runs out.
+static func _fx_sizes() -> Array:
+	var out := []
+	var L: Dictionary = Config.ENEMY_TYPES.slime_king.leap
+	var w = _night(DARK)
+	var king = _add(w, "slime_king", Vector2(-40.0, 0.0))
+	_expect(out, "a leap's mark is drawn at its shock", Painter.mark_radius(king), L.shock)
+	king.hops_left = 2
+	_expect(out, "a hop's mark is drawn at the hop's shock", Painter.mark_radius(king), L.hops.shock)
+	king.hops_left = 0
+	king.move = "air"
+	king.move_t = Config.STEP * 0.5
+	king.move_to = king.pos + Vector2(10.0, 0.0)
+	king.move_from = king.pos
+	w.player.invuln = NEVER
+	_play(w, 1)
+	var landed: Array = w.events.filter(func(ev): return ev.kind == "landed")
+	_expect(out, "a landing tells its shock", landed.map(func(ev): return ev.get("shock")), [L.shock])
+	var fx = Effects.new(1)
+	fx.step(w)
+	_expect(out, "a landing throws one ring of debris", fx.rings.size(), 1)
+	if fx.rings.size() == 1:
+		var r: Dictionary = fx.rings[0]
+		var radii := []
+		for i in Effects.RINGS.debris[0]:
+			radii.append(Effects.ring_radius(r))
+			r.age += 1
+		_expect(out, "the debris ends at the shock", snappedf(radii[-1], 0.001), L.shock)
+		_expect(out, "the debris never goes past the shock", radii.all(func(x): return x <= L.shock + 0.001), true)
+	var C: Dictionary = Config.ENEMY_TYPES.boar.charge
+	w = _night(Vector2(-100.0, 30.0))
+	w.fuel = 1.0e6
+	var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+	boar.move_t = 0.0
+	_play(w, 1)
+	var first := []
+	var slid := []
+	for at in [2, 3, int(C.warn / Config.STEP) - 3, int(C.warn / Config.STEP) - 2]:
+		while roundi((C.warn - boar.move_t) / Config.STEP) < at:
+			_play(w, 1)
+		var tips: PackedVector2Array = Painter.chevrons(boar)
+		var length: float = boar.pos.distance_to(boar.charge_end())
+		_expect(out, "there are chevrons on the band", tips.size() > 0, true)
+		for t in tips:
+			var along: float = (t - boar.pos).dot(boar.aim)
+			if absf((t - boar.pos).dot(boar.aim.orthogonal())) > 0.01 or along < Painter.CHEVRON_SIZE - 0.01 or along > length + 0.01:
+				out.append("a chevron's tip is off the band's line: %s" % (t - boar.pos))
+				break
+		first.append(((tips[0] - boar.pos).dot(boar.aim)) if tips.size() > 0 else 0.0)
+	_expect(out, "a chevron's arms stay inside the band", Painter.CHEVRON_SIZE < boar.lane_half(), true)
+	var early: float = fposmod(first[1] - first[0], Painter.CHEVRON_GAP)
+	var late: float = fposmod(first[3] - first[2], Painter.CHEVRON_GAP)
+	_expect(out, "the chevrons slide toward the end, faster as the wind-up runs out", early > 0.0 and late > early, true)
 	return out

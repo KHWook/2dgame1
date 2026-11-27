@@ -13,6 +13,7 @@ const World := preload("res://src/sim/world.gd")
 const InputFrame := preload("res://src/sim/input_frame.gd")
 const Guide := preload("res://src/guide.gd")
 const Ui := preload("res://src/ui.gd")
+const Chooser := preload("res://src/chooser.gd")
 
 const AT := Vector2(100.0, 180.0) # where the left thumb lands
 
@@ -25,6 +26,7 @@ static func run() -> Array:
 	out.append_array(_modes())
 	out.append_array(_help())
 	out.append_array(_guide())
+	out.append_array(_chooser())
 	out.append_array(_scaling())
 	return out
 
@@ -371,6 +373,75 @@ static func _guide() -> Array:
 				out.append("the guide's %s covers the control drawn at %s" % [b, spot[0]])
 	if Guide.RIGHT.intersects(Guide.LEFT.grow(Guide.PAD * 2.0)):
 		out.append("the guide's two buttons are too close to tell apart")
+	return out
+
+
+## The choosing screen: deaf for Chooser.WAIT seconds after it opens (a tap, a press begun before, or a key does
+## nothing); then a tap let go on the card it landed on takes that character, a press slid onto another card takes
+## none, the number keys take theirs, ← → move the focus (no further than the ends) and Enter or Space takes it; it
+## opens on the last pick. Its cards are on the screen, apart, as big as a thumb, and the bot's world never sees it.
+static func _chooser() -> Array:
+	var out := []
+	var ids: Array = Chooser.ids()
+	var c = Chooser.new()
+	c.show("mage")
+	if c.focus != ids.find("mage"):
+		out.append("the choosing screen does not open on the last pick")
+	var mid: Vector2 = Chooser.rect(0).get_center()
+	c.press(mid)
+	c.frame(Chooser.WAIT * 0.9)
+	if c.release(mid) != "" or c.key(KEY_1) != "" or c.key(KEY_ENTER) != "" or not c.open:
+		out.append("the choosing screen answers a tap or a key in its first %.1f s" % Chooser.WAIT)
+	c.press(mid) # pressed while deaf, let go once it listens
+	c.frame(Chooser.WAIT * 0.2)
+	if c.release(mid) != "" or not c.open:
+		out.append("a press begun before the choosing screen listens takes a card when let go")
+	for i in ids.size():
+		c.show("knight")
+		c.frame(Chooser.WAIT)
+		var at: Vector2 = Chooser.rect(i).get_center() + Vector2(0.0, 40.0)
+		c.press(at)
+		if c.release(at) != ids[i] or c.open:
+			out.append("a tap on card %d does not take %s" % [i + 1, ids[i]])
+	c.show("knight")
+	c.frame(Chooser.WAIT)
+	c.press(Chooser.rect(0).get_center())
+	if c.release(Chooser.rect(1).get_center()) != "" or not c.open:
+		out.append("a press slid from one card onto another takes a card")
+	c.press(Vector2(Chooser.rect(0).position.x - Chooser.PAD - 2.0, 120.0))
+	if c.release(Vector2(Chooser.rect(0).position.x - Chooser.PAD - 2.0, 120.0)) != "" or not c.open:
+		out.append("a tap beside the cards takes one")
+	var edge := Vector2(Chooser.rect(2).end.x + Chooser.PAD - 1.0, 100.0)
+	c.press(edge)
+	if c.release(edge) != ids[2]:
+		out.append("a tap just past a card's drawn edge does not take it")
+	for i in ids.size():
+		c.show("knight")
+		c.frame(Chooser.WAIT)
+		if c.key([KEY_1, KEY_2, KEY_3][i]) != ids[i]:
+			out.append("key %d does not take %s" % [i + 1, ids[i]])
+	c.show("knight")
+	c.frame(Chooser.WAIT)
+	var walked := [c.key(KEY_RIGHT), c.focus, c.key(KEY_RIGHT), c.key(KEY_RIGHT), c.focus, c.key(KEY_LEFT), c.focus]
+	if walked != ["", 1, "", "", ids.size() - 1, "", ids.size() - 2]:
+		out.append("the arrow keys do not move the focus card by card, stopping at the ends: %s" % [walked])
+	if c.key(KEY_X) != "" or not c.open:
+		out.append("a key other than the numbers, the arrows, Enter or Space takes a card")
+	for keycode in [KEY_ENTER, KEY_SPACE]:
+		c.show("woodcutter")
+		c.frame(Chooser.WAIT)
+		if c.key(keycode) != "woodcutter":
+			out.append("key %d does not take the card in focus" % keycode)
+	for i in ids.size():
+		var r: Rect2 = Chooser.rect(i)
+		if not Rect2(Vector2.ZERO, Touch.VIEW).encloses(r.grow(Chooser.PAD)):
+			out.append("card %d is (partly) off the screen: %s" % [i + 1, r])
+		if r.size.x < 40.0 or r.size.y < 40.0:
+			out.append("card %d is smaller than a thumb: %s" % [i + 1, r.size])
+		if i > 0 and r.grow(Chooser.PAD).intersects(Chooser.rect(i - 1).grow(Chooser.PAD)):
+			out.append("cards %d and %d are too close to tell apart" % [i, i + 1])
+	if Chooser.TOP + Chooser.CARD.y + 18.0 > Touch.VIEW.y:
+		out.append("the words under the cards are off the screen")
 	return out
 
 

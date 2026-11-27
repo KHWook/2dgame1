@@ -9,7 +9,8 @@
 ## never read it. Kinds: "hit" and "kill" { pos, dir (away from the blow), enemy (its kind), tier }; "passed", the same
 ## for a blow that went through an enemy the dark protects; "banished", the same for an enemy the dawn clears
 ## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
-## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "boss" { enemy, pos }
+## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "cast" { pos } for an
+## ember the keeper fired (a character whose attack is "shoot"); "boss" { enemy, pos }
 ## for a boss that came out of the dark; "coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
 ## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), "landed" { pos, enemy } for the slime
 ## king coming down from a leap or a hop, "decoy" { pos, enemy } where the shade lord's decoy appears and "faded"
@@ -24,6 +25,8 @@ const T := Config.TORCH
 const N := Config.NIGHT
 
 var seed_value: int
+var character := "knight" # who keeps the torch this run (Config.CHARACTERS); choose() changes it
+var stats: Dictionary # Config.PLAYER with the character's stats over it: the player's numbers
 var rng
 var phase := "pick"
 var night := 1 # which night this is, from 1
@@ -47,6 +50,7 @@ var next_ember := 0.0
 var next_spark := 0.0
 var next_thorn := 0.0
 var sparks: Array = [] # embers the torch fired: { pos, vel, life }
+var bolts: Array = [] # embers the keeper fired: { pos, dir, left (pixels it still flies), radius, pierce, hit (enemies it went through) }
 var bosses_due: Array = [] # tonight's bosses still to come, first first: { kind, at (night time), from }; from is
 						 # where it comes from once its warning is given (Config.BOSS.warn before at), null until then
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
@@ -58,9 +62,29 @@ var _light := 0.0 # light_radius() at _light_fuel
 var _light_fuel := NAN
 
 
-func _init(seed_value_: int = 1) -> void:
+func _init(seed_value_: int = 1, character_: String = "knight") -> void:
 	seed_value = seed_value_
+	character = character_
 	reset()
+
+
+## Start the run again with another keeper (Config.CHARACTERS): the same seed, so the same night, but the offers
+## are drawn again for it. Only before the run's first step, or from an ending.
+func choose(id: String) -> void:
+	character = id
+	reset()
+
+
+## Config.PLAYER with a character's stats merged over it.
+static func character_stats(id: String) -> Dictionary:
+	var out: Dictionary = Config.PLAYER.duplicate()
+	out.merge(Config.CHARACTERS[id].get("stats", {}), true)
+	return out
+
+
+## One of the keeper's numbers this run (stats).
+func stat(key: String):
+	return stats[key]
 
 
 func reset() -> void:
@@ -85,9 +109,11 @@ func reset() -> void:
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
+	bolts = []
 	blade_kills = 0
 	bosses_due = _plan_bosses()
-	player = Player.new()
+	stats = character_stats(character)
+	player = Player.new(stats)
 	_offer()
 
 
@@ -153,7 +179,7 @@ func _remod() -> void:
 		var n := level(id)
 		if n == 0:
 			continue
-		var u := upgrade(id, n)
+		var u := upgrade(id, n, character)
 		for key in u:
 			if not _mods.has(key):
 				_mods[key] = []
@@ -165,13 +191,42 @@ func level(id: String) -> int:
 	return picks.count(id)
 
 
-## An upgrade's row at a level from 1: the row with its levels merged over it up to that one.
-static func upgrade(id: String, at_level: int) -> Dictionary:
-	var u: Dictionary = Config.UPGRADES[id].duplicate()
+## An upgrade's row at a level from 1, as it reads for a character: the row (with the character's as merged over it)
+## with its levels merged over it up to that one.
+static func upgrade(id: String, at_level: int, who: String = "knight") -> Dictionary:
+	var u := upgrade_row(id, who)
 	var levels: Array = u.get("levels", [])
 	for i in mini(at_level - 1, levels.size()):
-		u.merge(levels[i], true)
+		_merge(u, levels[i])
 	return u
+
+
+## An upgrade's row as a character has it: its as for that character merged over it (null takes a key out; levels
+## are merged one by one), without the as itself.
+static func upgrade_row(id: String, who: String = "knight") -> Dictionary:
+	var u: Dictionary = Config.UPGRADES[id].duplicate()
+	var over: Dictionary = u.get("as", {}).get(who, {})
+	u.erase("as")
+	for key in over:
+		if key == "levels":
+			var levels: Array = u.get("levels", []).duplicate()
+			for i in over.levels.size():
+				var l: Dictionary = levels[i].duplicate()
+				_merge(l, over.levels[i])
+				levels[i] = l
+			u.levels = levels
+		else:
+			_merge(u, { key: over[key] })
+	return u
+
+
+## Merges from over into, a key set to null taking it out of into.
+static func _merge(into: Dictionary, from: Dictionary) -> void:
+	for key in from:
+		if from[key] == null:
+			into.erase(key)
+		else:
+			into[key] = from[key]
 
 
 static func max_level(id: String) -> int:
@@ -197,7 +252,7 @@ func in_light(p: Vector2) -> bool:
 
 
 func max_hp() -> int:
-	return Config.PLAYER.hp + mod("hp_bonus", 0) + hardened_hp()
+	return stats.hp + mod("hp_bonus", 0) + hardened_hp()
 
 
 ## The hearts the keeper has gained by tonight (Config.HARDEN): hp_first on night from and one every hp_every nights after.
@@ -211,16 +266,30 @@ func hardened_hp() -> int:
 ## How long a hit keeps the keeper from the next tonight (Config.HARDEN): longer night by night from from.
 func keeper_invuln() -> float:
 	var H: Dictionary = Config.HARDEN
-	return minf(H.invuln_most, Config.PLAYER.invuln + H.invuln_grow * maxi(0, night - H.from + 1))
+	return minf(H.invuln_most, stats.invuln + H.invuln_grow * maxi(0, night - H.from + 1))
 
 
 ## How far the swing reaches, and how wide it is: arc() is the cosine of the angle each side of the facing it sweeps.
 func reach() -> float:
-	return Config.PLAYER.reach + mod("reach_bonus", 0.0)
+	return stats.reach + mod("reach_bonus", 0.0)
 
 
 func arc() -> float:
-	return Config.PLAYER.arc + mod("arc_bonus", 0.0)
+	return stats.arc + mod("arc_bonus", 0.0)
+
+
+## How far the keeper's ember flies (a shooter: Config.CHARACTERS' bolt), and how big it is.
+func bolt_range() -> float:
+	return stats.bolt.range + mod("range_bonus", 0.0)
+
+
+func bolt_radius() -> float:
+	return stats.bolt.radius + mod("bolt_bonus", 0.0)
+
+
+## How far an attack reaches, for aiming: the swing's reach, or how far the ember flies.
+func attack_range() -> float:
+	return bolt_range() if stats.attack == "shoot" else reach()
 
 
 ## The arc of the swing under way: all the way round for a spin.
@@ -240,7 +309,7 @@ func swing_half() -> float:
 func in_swing(at: Vector2, r: float) -> bool:
 	var to: Vector2 = at - player.pos
 	var d := to.length()
-	if d < r + Config.PLAYER.radius:
+	if d < r + stats.radius:
 		return true
 	if d >= reach() + r:
 		return false
@@ -280,6 +349,7 @@ func step(inp) -> void:
 	_prickle()
 	_torch()
 	_sparks()
+	_bolts()
 	_sweep()
 	_spawns()
 	_end_or_offer()
@@ -351,6 +421,7 @@ func _dawn() -> void:
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
+	bolts = []
 	bosses_due = _plan_bosses()
 	player.invuln_for = keeper_invuln()
 	var heal: int = max_hp() if night >= Config.HARDEN.from else Config.DAWN.heal
@@ -363,20 +434,23 @@ func _haul() -> void:
 	var p = player
 	if p.dead:
 		return
-	if p.dropped != null and p.pos.distance_to(p.dropped) >= Config.PLAYER.grab:
+	if p.dropped != null and p.pos.distance_to(p.dropped) >= stats.grab:
 		p.dropped = null
-	if not p.carrying:
+	if p.carrying and p.pos.distance_to(T.pos) < T.reach + stats.radius:
+		for i in p.held: # every log held goes on the fire, each counted
+			fuel = minf(max_fuel(), fuel + T.log_fuel + mod("log_bonus", 0.0) + stats.log_bonus)
+			score += Config.SCORE.log
+			events.append({ "kind": "fed", "pos": T.pos })
+		p.held = 0
+		p.carrying = false
+	elif p.held < stats.carry:
 		for i in logs.size():
 			# You pick a log up by walking onto it, so the one you just put down stays down until you step off it.
-			if logs[i] != p.dropped and p.pos.distance_to(logs[i]) < Config.PLAYER.grab:
+			# One a step, until the arms are full.
+			if logs[i] != p.dropped and p.pos.distance_to(logs[i]) < stats.grab:
 				logs.remove_at(i)
-				p.carrying = true
+				p.take_log()
 				break
-	elif p.pos.distance_to(T.pos) < T.reach + Config.PLAYER.radius:
-		p.carrying = false
-		fuel = minf(max_fuel(), fuel + T.log_fuel + mod("log_bonus", 0.0))
-		score += Config.SCORE.log
-		events.append({ "kind": "fed", "pos": T.pos })
 
 
 func drop_log(at: Vector2) -> void:
@@ -389,7 +463,7 @@ func _forage() -> void:
 	if p.dead or p.hp >= max_hp():
 		return
 	for i in berries.size():
-		if p.pos.distance_to(berries[i]) < Config.PLAYER.grab:
+		if p.pos.distance_to(berries[i]) < stats.grab:
 			berries.remove_at(i)
 			p.hp = mini(max_hp(), p.hp + Config.BERRY.heal)
 			events.append({ "kind": "healed", "pos": p.pos })
@@ -434,7 +508,7 @@ func _prickle() -> void:
 	if every <= 0.0 or time < next_thorn or player.dead:
 		return
 	next_thorn = time + every
-	var reach: float = Config.PLAYER.radius + mod("thorn_reach", 0.0)
+	var reach: float = stats.radius + mod("thorn_reach", 0.0)
 	for e in enemies:
 		if not e.dead and e.pos.distance_to(player.pos) < e.T.radius + reach:
 			_damage(e, 1, player.pos)
@@ -456,7 +530,7 @@ func _sparks() -> void:
 ## A swing turns toward the nearest enemy within aim range, so backing off and swinging works. Otherwise it keeps face.
 func aim(from: Vector2, face: Vector2) -> Vector2:
 	var best = null
-	var aim_range: float = reach() + Config.PLAYER.aim_slack
+	var aim_range: float = attack_range() + stats.aim_slack
 	for e in enemies:
 		var d: float = from.distance_to(e.pos) - e.T.radius
 		if d < aim_range and (best == null or d < from.distance_to(best.pos) - best.T.radius):
@@ -467,17 +541,61 @@ func aim(from: Vector2, face: Vector2) -> Vector2:
 ## The player's swing lands, on every step from PLAYER.attack_hit_at to attack_hit_until: hit everything in it
 ## (in_swing) that this swing has not hit yet.
 func melee(p) -> void:
-	var dmg: int = 1 + (mod("lit_damage", 0) if in_light(p.pos) else 0)
+	var dmg: int = stats.damage + (mod("lit_damage", 0) if in_light(p.pos) else 0)
 	for e in enemies:
 		if not e.dead and not p.struck.has(e) and in_swing(e.pos, e.T.radius):
 			p.struck.append(e)
-			_damage(e, dmg, p.pos, true)
+			_damage(e, dmg, p.pos, true, stats.push)
+
+
+## A shooter's attack lets go (at PLAYER.attack_hit_at into it): one ember along the facing (World.aim turned it), or
+## with the spin upgrade as a shooter has it, every few shots a fan of three, Config.CHARACTERS' bolt.spread apart.
+func shoot(p) -> void:
+	var every: int = mod("spread_every", 0)
+	var fan: Array = [0.0]
+	if every > 0 and p.swings % every == 0:
+		fan = [-stats.bolt.spread, 0.0, stats.bolt.spread]
+	for turn in fan:
+		bolts.append({ "pos": p.pos, "dir": p.face.rotated(turn), "left": bolt_range(), "radius": bolt_radius(),
+			"pierce": stats.bolt.pierce, "hit": [] })
+	events.append({ "kind": "cast", "pos": p.pos })
+
+
+## Whether an ember that flies from a to b this step touches a body of radius r at at: the body comes within the
+## ember's radius of the stretch it flew. The painter draws the ember as a disc of that radius (src/art/painter.gd),
+## so whatever it is seen to touch, it hits.
+static func in_bolt(a: Vector2, b: Vector2, radius: float, at: Vector2, r: float) -> bool:
+	return Geometry2D.get_closest_point_to_segment(at, a, b).distance_to(at) < radius + r
+
+
+## The keeper's embers fly straight for their range and burn what they touch: more in the light (bolt.lit_bonus,
+## and the fire blade as a shooter has it); one goes through pierce enemies (lit_pierce more where the one it burns
+## stands in the light), and stops at the next.
+func _bolts() -> void:
+	if bolts.is_empty():
+		return
+	var B: Dictionary = stats.bolt
+	for b in bolts:
+		var go: float = minf(B.speed * Config.STEP, b.left)
+		var from: Vector2 = b.pos
+		b.pos = from + b.dir * go
+		b.left -= go
+		for e in enemies:
+			if e.dead or b.hit.has(e) or not in_bolt(from, b.pos, b.radius, e.pos, e.T.radius):
+				continue
+			b.hit.append(e)
+			var lit: bool = in_light(e.pos)
+			_damage(e, B.damage + ((B.lit_bonus + mod("lit_damage", 0)) if lit else 0), e.pos - b.dir, true, B.push)
+			if b.hit.size() > b.pierce + (B.lit_pierce if lit else 0):
+				b.left = 0.0
+				break
+	bolts = bolts.filter(func(b): return b.left > 0.0)
 
 
 ## A blow of n lands on e, struck from from (by the sword when blade). The dark protects some enemies; a thief drops
 ## its log when it dies; a big slime breaks into smaller ones, which join the fight at the end of the step; with the
 ## vampire upgrade enough sword kills heal you (vamp_need(); kills made at full health wait for the next hurt).
-func _damage(e, n: int, from: Vector2, blade := false) -> void:
+func _damage(e, n: int, from: Vector2, blade := false, push := 1.0) -> void:
 	if e.dead:
 		return
 	var dir: Vector2 = (e.pos - from).normalized()
@@ -487,7 +605,7 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 	if e.decoy: # only smoke: it breaks, and is worth nothing
 		e.fade(self)
 		return
-	e.hit(n, from)
+	e.hit(n, from, push)
 	events.append({ "kind": "kill" if e.dead else "hit", "pos": e.pos, "dir": dir, "enemy": e.kind, "tier": e.tier })
 	if not e.dead:
 		return

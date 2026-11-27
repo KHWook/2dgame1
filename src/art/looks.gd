@@ -68,6 +68,26 @@ const TORCH_SIDE := ["slow_burn", "big_logs", "ember_ring", "warm_glow", "woodpi
 const SIDES := ["torch", "keeper"]
 const SIDE_NAMES := { "torch": "횃불의 힘", "keeper": "기사의 힘" }
 
+## How each character (Config.CHARACTERS) looks. sprite: the prefix of its pictures, each drawn as <sprite>_<down,
+## up, side>_<a,b> walking, _lift_<a,b> with logs overhead, _atk while it attacks, and <sprite>_dead (CHARACTER_FRAMES).
+## weapon: what it swings (WEAPONS), "" for none. cloak: the thorn cloak upgrade shows on it (its thorns_* fit
+## the body). heavy: its swing's trail is drawn thick. button: the sprite on the touch attack button (src/touch.gd).
+const CHARACTERS := {
+	"knight": { "sprite": "keeper", "weapon": "sword", "cloak": true, "heavy": false, "button": "sword" },
+	"woodcutter": { "sprite": "woodcutter", "weapon": "axe", "cloak": true, "heavy": true, "button": "axe" },
+	"mage": { "sprite": "mage", "weapon": "", "cloak": true, "heavy": false, "button": "icon_wide_swing_mage" },
+}
+const CHARACTER_FRAMES := ["%s_down_a", "%s_down_b", "%s_up_a", "%s_up_b", "%s_side_a", "%s_side_b",
+	"%s_down_lift_a", "%s_down_lift_b", "%s_up_lift_a", "%s_up_lift_b", "%s_side_lift_a", "%s_side_lift_b",
+	"%s_down_atk", "%s_up_atk", "%s_side_atk", "%s_dead"]
+## A weapon is drawn as its sprite and the variants the swing's upgrades show: <weapon>, _fire, _long, _long_fire.
+## grip: the pixel of its sprite held in the fist.
+const WEAPONS := {
+	"sword": { "grip": Vector2(1.5, 2.5) },
+	"axe": { "grip": Vector2(1.5, 3.5) },
+}
+const WEAPON_FRAMES := ["%s", "%s_fire", "%s_long", "%s_long_fire"]
+
 static var _looks := {} # kind -> its finished look, made the first time it is asked for
 static var _bits := {} # "kind~tier" -> bit_colours(), made once
 
@@ -101,6 +121,21 @@ static func bit_colours(kind: String, tier: int) -> Array:
 		var colours: Dictionary = Sprites.tier_colours(Sprites.tiered(FRAMES[0] % kind, tier))
 		_bits[key] = enemy(kind).bits.map(func(b): return Color(colours[b]) if colours.has(b) else Sprites.PALETTE[b])
 	return _bits[key]
+
+
+static func character(id: String) -> Dictionary:
+	return CHARACTERS[id]
+
+
+## The icon an upgrade shows for a character: icon_<id>_<character> where one is drawn (the mage's embers), else icon_<id>.
+static func icon(upgrade: String, who: String = "knight") -> String:
+	var own := "%s_%s" % [ICON % upgrade, who]
+	return own if Sprites.SPRITES.has(own) else ICON % upgrade
+
+
+## The name the HUD gives a side for a character: the torch's, or the character's own ("나무꾼의 힘").
+static func side_name(side_id: String, who: String = "knight") -> String:
+	return SIDE_NAMES[side_id] if side_id == "torch" else "%s의 힘" % Config.CHARACTERS[who].name
 
 
 static func side(upgrade: String) -> String:
@@ -145,10 +180,39 @@ static func problems() -> Array:
 			wanted.append(enemy(DECOYS[kind]).glow)
 	for id in Config.UPGRADES:
 		wanted.append(ICON % id)
+	out.append_array(character_problems(Config.CHARACTERS.keys(), CHARACTERS))
+	for id in CHARACTERS:
+		if CHARACTERS[id].has("sprite"):
+			for f in CHARACTER_FRAMES:
+				wanted.append(f % CHARACTERS[id].sprite)
+			wanted.append(CHARACTERS[id].get("button", "sword"))
+			var weapon: String = CHARACTERS[id].get("weapon", "")
+			if weapon != "":
+				for f in WEAPON_FRAMES:
+					wanted.append(f % weapon)
 	for id in TORCH_SIDE:
 		if not Config.UPGRADES.has(id):
 			out.append("TORCH_SIDE names '%s', which is not an upgrade. Fix: remove it from TORCH_SIDE in src/art/looks.gd." % id)
 	return out + Sprites.missing(wanted)
+
+
+## What is wrong with the characters' looks: every character in the rules (ids) has one, with a sprite and a weapon
+## that WEAPONS knows (or none), and no look is for a character the rules do not have.
+static func character_problems(ids: Array, looks: Dictionary) -> Array:
+	var out := []
+	for id in ids:
+		if not looks.has(id):
+			out.append("Character '%s' has no look. Fix: add it to CHARACTERS in src/art/looks.gd (and draw its frames in src/art/sprites.gd)." % id)
+			continue
+		for key in ["sprite", "weapon", "cloak", "heavy", "button"]:
+			if not looks[id].has(key):
+				out.append("Character '%s' has no %s in its look. Fix: add it to CHARACTERS in src/art/looks.gd." % [id, key])
+		if looks[id].get("weapon", "") != "" and not WEAPONS.has(looks[id].weapon):
+			out.append("Character '%s' swings '%s', which WEAPONS does not know. Fix: add it (and its grip) to WEAPONS in src/art/looks.gd." % [id, looks[id].weapon])
+	for id in looks:
+		if not ids.has(id):
+			out.append("CHARACTERS in src/art/looks.gd has '%s', which is not a character. Fix: remove it, or add it to Config.CHARACTERS." % id)
+	return out
 
 
 ## What is wrong with how one enemy kind shows outside the light, given the grids of its frames: the night is nearly
@@ -202,4 +266,11 @@ static func selftest() -> Array:
 		fails.append("[A2] missed a boss with tiers")
 	if not tier_problems("x", false, maps, names, maps.size()).is_empty():
 		fails.append("[A2] flagged a regular kind with every tier coloured and named")
+	var look := { "sprite": "x", "weapon": "", "cloak": false, "heavy": false, "button": "x" }
+	if character_problems(["a", "b"], { "a": look }).is_empty():
+		fails.append("[A2] missed a character with no look")
+	if character_problems(["a"], { "a": { "sprite": "x", "weapon": "spoon", "cloak": false, "heavy": false, "button": "x" } }).is_empty():
+		fails.append("[A2] missed a character swinging a weapon nobody drew")
+	if not character_problems(["a"], { "a": look }).is_empty():
+		fails.append("[A2] flagged a character with a full look")
 	return fails
