@@ -218,12 +218,13 @@ func _next_seed() -> int:
 
 
 ## A run's seed, 1 to SEED_MOST, from two clocks in microseconds: the system's, which tells one launch from another,
-## and the time since the game began, which tells apart two starts inside one tick of the system's (it moves in coarse
-## steps on some machines and in browsers). The engine's own random numbers are kept out of src/ (D1), so the seed
+## and the time since the game began, which tells apart two starts inside one tick of the system's (on Windows it
+## moves a whole millisecond at a time). The engine's own random numbers are kept out of src/ (D1), so the seed
 ## comes from the clocks, here where D2 allows them. Pure: the same two numbers give the same seed. All 63 bits of
 ## each are stirred in, 31 at a time, so a start one microsecond later gets a seed that has nothing to do with the
 ## one before, and starts close together do not get seeds close together (tools/rules_test.gd's _seeds). The sign
-## is left out: a clock is never negative, and a negative number cannot be shifted.
+## bit is left out first, so what is shifted is never negative: a clock never is, and a number that is not negative
+## shifts the same way everywhere.
 static func fresh_seed(clock_usec: int, ticks_usec: int) -> int:
 	var h := 0
 	for n in [clock_usec, ticks_usec]:
