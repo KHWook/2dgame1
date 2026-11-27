@@ -62,7 +62,9 @@ func step(world, inp) -> void:
 			dash_t = P.dash_time
 			dash_wait = every
 			vel = dash_dir * P.dash_speed
-		if inp.is_pressed("attack"):
+		# swift's last level attacks by itself: ready, holding nothing, an enemy in reach (Config auto_attack)
+		var auto: bool = attack_t < 0.0 and not carrying and world.mod("auto_attack", false) and world.foe_in_reach(pos)
+		if inp.is_pressed("attack") or auto:
 			if carrying: # every log held goes down where it stands
 				for i in held:
 					world.drop_log(pos)
@@ -79,12 +81,13 @@ func step(world, inp) -> void:
 	if attack_t >= 0.0:
 		var was := attack_t
 		attack_t += Config.STEP
+		var hit_at: float = world.stat("attack_hit_at") # its attack's times as the upgrades have them (swift)
 		if P.attack == "shoot":
-			if was < P.attack_hit_at and attack_t >= P.attack_hit_at:
+			if was < hit_at and attack_t >= hit_at:
 				world.shoot(self)
-		elif attack_t >= P.attack_hit_at and attack_t <= P.attack_hit_until:
+		elif attack_t >= hit_at and attack_t <= world.stat("attack_hit_until"):
 			world.melee(self)
-		if attack_t >= P.attack_time:
+		if attack_t >= world.stat("attack_time"):
 			attack_t = -1.0
 			spin = false
 	pos = (pos + vel * Config.STEP).clamp(Config.FIELD.position, Config.FIELD.end)

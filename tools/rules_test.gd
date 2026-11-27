@@ -15,6 +15,7 @@ const Looks := preload("res://src/art/looks.gd")
 const Bot := preload("res://src/bot.gd")
 const Effects := preload("res://src/art/effects.gd")
 const Juice := preload("res://src/art/juice.gd")
+const SimRng := preload("res://src/sim/rng.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -61,6 +62,8 @@ static func run() -> Array:
 	out.append_array(_bolt_edges())
 	out.append_array(_character_upgrades())
 	out.append_array(_keeper_words())
+	out.append_array(_swift())
+	out.append_array(_auto_attack())
 	return out
 
 
@@ -169,7 +172,8 @@ static func _swing_area() -> Array:
 	var drawn := 0
 	var smeared := 0
 	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing", "wide_swing"], "knight"], [["spin"], "knight"],
-			[[], "woodcutter"], [["long_blade", "wide_swing", "wide_swing"], "woodcutter"], [["spin", "spin"], "woodcutter"]]:
+			[[], "woodcutter"], [["long_blade", "wide_swing", "wide_swing"], "woodcutter"], [["spin", "spin"], "woodcutter"],
+			[["swift", "swift", "swift"], "knight"], [["swift", "swift", "swift", "wide_swing"], "woodcutter"]]:
 		var ups: Array = run[0]
 		w = _night(DARK, ups, run[1])
 		for turn in 3: # the spin upgrade goes round on the third swing
@@ -1891,7 +1895,8 @@ static func _new_marks(fx) -> Array:
 static func _attack_fx() -> Array:
 	var out := []
 	var painter = Painter.new(1)
-	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing"], "knight"], [[], "woodcutter"], [["long_blade", "wide_swing"], "woodcutter"]]:
+	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing"], "knight"], [[], "woodcutter"], [["long_blade", "wide_swing"], "woodcutter"],
+			[["swift", "swift", "swift"], "knight"], [["swift", "swift", "swift"], "woodcutter"]]:
 		var w = _night(DARK, run[0], run[1])
 		var half: float = w.swing_half()
 		var far := 0.0
@@ -1909,7 +1914,7 @@ static func _attack_fx() -> Array:
 			_play(w, 1)
 		_expect(out, "the smear's outer edge is the reach (%s)" % [run], snappedf(far, 0.01), snappedf(w.reach(), 0.01))
 		_expect(out, "the smear sweeps the whole arc and no further (%s)" % [run], [snappedf(low, 0.01), snappedf(high, 0.01)], [snappedf(-half, 0.01), snappedf(half, 0.01)])
-	for run in [[[], 3], [["wide_swing", "wide_swing"], 3], [["spin"], 3]]: # the big ember; the fan on its third shot
+	for run in [[[], 3], [["wide_swing", "wide_swing"], 3], [["spin"], 3], [["swift", "swift", "swift", "spin"], 3]]: # the big ember; the fan on its third shot
 		var w = _night(DARK, run[0], "mage")
 		w.player.swings = 2
 		_play(w, 1, "attack")
@@ -1921,7 +1926,7 @@ static func _attack_fx() -> Array:
 		_expect(out, "every ember's disc is drawn as big as it hits, flicker or not (%s)" % [run[0]], radii.keys(), [snappedf(w.bolt_radius(), 0.001)])
 	var cores: Array = Painter.BOLT_CORES.map(func(n): return Sprites.texture(n).get_width() / 2.0)
 	_expect(out, "an ember's flickering middle and core stay inside its disc", Painter.BOLT_INNER.max() < 1.0 and cores.max() <= World.character_stats("mage").bolt.radius, true)
-	for ups in [[], ["long_blade"]]:
+	for ups in [[], ["long_blade"], ["swift", "swift", "swift"]]:
 		var w = _night(DARK, ups, "mage")
 		var from: Vector2 = w.player.pos
 		var fx = Effects.new(1)
@@ -1955,8 +1960,9 @@ static func _attack_fx() -> Array:
 	for who in Effects.STRIKES:
 		looks[Effects.STRIKES[who].frames] = who
 	_expect(out, "each keeper's blow has its own mark", looks.size(), Config.CHARACTERS.size())
-	for who in ["knight", "woodcutter"]:
-		var w = _night(DARK, [], who)
+	for run in [[[], "knight"], [[], "woodcutter"], [["swift", "swift", "swift"], "knight"], [["swift", "swift", "swift"], "woodcutter"]]:
+		var who: String = run[1]
+		var w = _night(DARK, run[0], who)
 		var slime = _add(w, "big_slime", NEAR)
 		var fx = Effects.new(1)
 		var juice = Juice.new(1)
@@ -1968,8 +1974,8 @@ static func _attack_fx() -> Array:
 			juice.step(w)
 			shook = shook or juice.shake_left > 0
 			marks.append_array(_new_marks(fx))
-		_expect(out, "the %s's blow jolts the field (only the axe's)" % who, shook, who == "woodcutter")
-		_expect(out, "the %s's blow plays its own mark once" % who, marks.map(func(f): return f.frames), [Effects.STRIKES[who].frames])
+		_expect(out, "the %s's blow jolts the field (only the axe's) %s" % [who, run[0]], shook, who == "woodcutter")
+		_expect(out, "the %s's blow plays its own mark once %s" % [who, run[0]], marks.map(func(f): return f.frames), [Effects.STRIKES[who].frames])
 		var many = Effects.new(1)
 		for i in Effects.MAX_FLASHES * 2:
 			many._strike(Effects.STRIKES[who], Vector2.ZERO, Vector2.RIGHT)
@@ -2021,4 +2027,209 @@ static func _keeper_words() -> Array:
 			if knight in m.get_string():
 				found.append("%s: %s" % [path.get_file(), m.get_string()])
 	_expect(out, "the knight's name is written out only in its own row (a line about the keeper says {who})", found, ["config.gd: \"%s\"" % knight])
+	return out
+
+
+## Swift (attack_mult) shortens the time between attacks for every keeper alike, its blow or its ember coming at the
+## same share of the shorter attack; the bot keeps time with it. The torch offers it only from its from_night (10):
+## never on the nights before, and on those nights the offers are drawn exactly as if it were not a row (so the
+## runs up to night 9 are what they were), also when begin_at draws the nights before a late start.
+static func _swift() -> Array:
+	var out := []
+	var from: int = Config.UPGRADES.swift.from_night
+	_expect(out, "swift comes from night 10", from, 10)
+	_expect(out, "swift is the last row, so the rows before it keep their order", Config.UPGRADES.keys()[-1], "swift")
+	_expect(out, "swift is offered from its night only", [World.offered_on("swift", from - 1), World.offered_on("swift", from), World.offered_on("swift", from + 5), World.offered_on("spin", 1)], [false, true, true, true])
+	var before := 0
+	var after := 0
+	var same := true
+	for seed_value in range(1, 41):
+		var w = World.new(seed_value)
+		for n in [1, from - 1, from]:
+			w.night = n
+			var rng = SimRng.new(seed_value + 1000)
+			w.rng = SimRng.new(seed_value + 1000)
+			w._offer()
+			var pool: Array = Config.UPGRADES.keys().filter(func(id): return id != "swift" and w.level(id) < World.max_level(id))
+			var want := []
+			while want.size() < Config.NIGHT.offer_size and not pool.is_empty():
+				want.append(pool.pop_at(rng.index(pool.size())))
+			if n < from:
+				before += w.offer.count("swift")
+				same = same and w.offer == want and w.rng.state() == rng.state()
+			else:
+				after += w.offer.count("swift")
+	_expect(out, "swift is never offered before night %d" % from, before, 0)
+	_expect(out, "before night %d the offers are drawn as if swift were not there" % from, same, true)
+	_expect(out, "swift is offered on night %d (some of 40 draws)" % from, after > 0, true)
+	var late_seen := 0
+	for seed_value in range(1, 21):
+		for slot in [1, 2, 3]:
+			var w = World.new(seed_value)
+			w.begin_at(from, slot)
+			if w.picks.has("swift"):
+				out.append("begin_at took swift before night %d (seed %d, slot %d)" % [from, seed_value, slot])
+			late_seen += w.offer.count("swift")
+			_expect(out, "begin_at ends on the night it starts", w.night, from)
+	_expect(out, "begin_at's first offer, at the dusk of night %d, can hold swift" % from, late_seen > 0, true)
+	# Each level shortens the attack for every keeper, and every time of it alike.
+	for who in Config.CHARACTERS:
+		var base := World.character_stats(who)
+		var last := INF
+		for n in range(0, World.max_level("swift") + 1):
+			var ups := []
+			for i in n:
+				ups.append("swift")
+			var w = _night(DARK, ups, who)
+			var k: float = World.upgrade("swift", n, who).attack_mult if n > 0 else 1.0
+			_expect(out, "%s with swift %d: every time of its attack is %.2f of its own" % [who, n, k],
+				Config.ATTACK_TIMES.map(func(key): return snappedf(w.stat(key), 0.0001)), Config.ATTACK_TIMES.map(func(key): return snappedf(base[key] * k, 0.0001)))
+			_play(w, 1, "attack")
+			var steps := 1
+			while w.player.attack_t >= 0.0 and steps < 200:
+				_play(w, 1)
+				steps += 1
+			_expect(out, "%s with swift %d: the attack is over after its shortened time" % [who, n], steps, ceili(base.attack_time * k / Config.STEP - 0.0001))
+			if not steps < last:
+				out.append("%s: swift %d does not shorten the attack (%d steps, %s before)" % [who, n, steps, last])
+			last = steps
+	# The blow comes sooner: with swift at its last level an axe lands before the plain axe's attack_hit_at, and over
+	# two seconds of holding the key a mage casts more embers.
+	var cut := {}
+	for ups in [[], ["swift", "swift", "swift"]]:
+		var w = _night(DARK, ups, "woodcutter")
+		var slime = _planted(w, "big_slime", NEAR)
+		_play(w, 1, "attack")
+		var at := 1
+		while slime.hp == slime.full_hp and at < 60:
+			_play(w, 1)
+			at += 1
+		cut[ups.size()] = at
+	_expect(out, "the woodcutter's blow lands sooner with swift", cut[3] < cut[0], true)
+	_expect(out, "the woodcutter's blow lands at the same share of its swing", cut[3], ceili(World.character_stats("woodcutter").attack_hit_at * World.upgrade("swift", 3, "woodcutter").attack_mult / Config.STEP - 0.0001))
+	var cast := {}
+	for ups in [[], ["swift", "swift", "swift"]]:
+		var w = _night(DARK, ups, "mage")
+		var told := []
+		for i in 120:
+			told.append_array(_play(w, 1, "attack"))
+		cast[ups.size()] = told.count("cast")
+	_expect(out, "the mage casts more embers with swift, about as many more as its attack is shorter (2 seconds)", [cast[3] > cast[0], absf(cast[3] * World.upgrade("swift", 3, "mage").attack_mult - cast[0]) <= 1.0], [true, true])
+	# The bot keeps time with it: its beat is as much shorter as the swing (at the levels it still presses for itself).
+	var swung := {}
+	for ups in [[], ["swift"], ["swift", "swift"]]:
+		var w = _night(DARK, ups)
+		w.player.invuln = NEVER
+		var king = _planted(w, "slime_king", Vector2(30.0, 0.0))
+		king.hp = 1000
+		var bot = Bot.new(1)
+		var starts := 0
+		for i in 240:
+			var was: float = w.player.attack_t
+			w.step(bot.frame(w))
+			if was < 0.0 and w.player.attack_t >= 0.0:
+				starts += 1
+		swung[ups.size()] = starts
+	_expect(out, "the bot swings more often with swift, more at each level", swung[0] < swung[1] and swung[1] < swung[2], true)
+	return out
+
+
+## Swift's last level attacks by itself (auto_attack): with an enemy in reach (World.attack_range()) and nothing in
+## its arms, each keeper attacks as soon as its attack is ready, turned to the nearest enemy as a pressed attack is;
+## not at the lower levels, not at the air, never while it carries logs (the key would put them down, it does not),
+## and pressing the key as well never attacks faster. It is the same game every time it is played.
+static func _auto_attack() -> Array:
+	var out := []
+	var top: int = World.max_level("swift")
+	for who in Config.CHARACTERS:
+		_expect(out, "only swift's last level attacks by itself (%s)" % who, range(1, top + 1).map(func(n): return World.upgrade("swift", n, who).get("auto_attack", false)), range(1, top + 1).map(func(n): return n == top))
+		_expect(out, "swift's card says so at its last level (%s)" % who, range(1, top + 1).map(func(n): return "최대: " in World.upgrade("swift", n, who).text), range(1, top + 1).map(func(n): return n == top))
+	for who in Config.CHARACTERS:
+		var near := Vector2(14.0, 0.0) if who != "mage" else Vector2(60.0, 0.0) # in its reach: a blow's, or an ember's
+		for n in [top - 1, top]:
+			var w = _night(DARK, _times("swift", n), who)
+			w.player.invuln = NEVER # touching it would stun the keeper, who cannot attack then
+			var dummy = _planted(w, "big_slime", near)
+			var told := []
+			var starts := 0
+			for i in 120:
+				var was: float = w.player.attack_t
+				told.append_array(_play(w, 1))
+				_hold_still(dummy, w.player.pos + near)
+				starts += 1 if was < 0.0 and w.player.attack_t >= 0.0 else 0
+			var cycle := ceili(World.character_stats(who).attack_time * World.upgrade("swift", n, who).attack_mult / Config.STEP - 0.0001)
+			_expect(out, "%s with swift %d and an enemy in reach, no key pressed: attacks %s" % [who, n, "on every ready step" if n == top else "never"], starts, ceili(120.0 / cycle) if n == top else 0)
+			if n == top:
+				_expect(out, "%s's own attacks land by themselves (%s)" % [who, "cast" if who == "mage" else "hit"], told.has("cast" if who == "mage" else "hit"), true)
+				# Pressing the key every step as well: no more attacks than the cooldown lets.
+				var k = _night(DARK, _times("swift", n), who)
+				k.player.invuln = NEVER
+				var target = _planted(k, "big_slime", near)
+				var pressed := 0
+				for i in 120:
+					var was: float = k.player.attack_t
+					_play(k, 1, "attack")
+					_hold_still(target, k.player.pos + near)
+					pressed += 1 if was < 0.0 and k.player.attack_t >= 0.0 else 0
+				_expect(out, "%s at swift's top, pressing too, attacks no faster than its cooldown" % who, pressed, starts)
+		# Nothing in reach: no swing at the air.
+		var idle = _night(DARK, _times("swift", top), who)
+		_planted(idle, "slime", Vector2(idle.attack_range() + Config.ENEMY_TYPES.slime.radius + 20.0, 0.0) if who != "mage" else Vector2(0.0, -(idle.attack_range() + 30.0)))
+		var swung := false
+		for i in 60:
+			_play(idle, 1)
+			swung = swung or idle.player.attack_t >= 0.0
+		_expect(out, "%s at swift's top with nothing in reach does not attack" % who, swung, false)
+		# Carrying: it never puts its logs down, nor attacks.
+		var c = _night(DARK, _times("swift", top), who)
+		for i in c.stats.carry:
+			c.player.take_log()
+		c.player.invuln = NEVER
+		_planted(c, "big_slime", near)
+		var held: int = c.player.held
+		var attacked := false
+		for i in 60:
+			_play(c, 1)
+			attacked = attacked or c.player.attack_t >= 0.0
+		_expect(out, "%s at swift's top carrying logs keeps them and does not attack" % who, [c.player.held, c.logs.size(), attacked], [held, 0, false])
+	# It turns to the nearest in reach: one in reach behind it, one nearer in reach above it.
+	for who in ["knight", "woodcutter"]:
+		var w = _night(DARK, _times("swift", top), who)
+		w.player.face = Vector2.RIGHT
+		_planted(w, "slime", Vector2(-18.0, 0.0))
+		_planted(w, "slime", Vector2(0.0, -14.0))
+		_play(w, 1)
+		_expect(out, "%s at swift's top turns to the nearest enemy in reach" % who, [w.player.attack_t >= 0.0, w.player.face.is_equal_approx(Vector2.UP)], [true, true])
+	var m = _night(DARK, _times("swift", top), "mage")
+	m.player.face = Vector2.RIGHT
+	_planted(m, "slime", Vector2(-70.0, 0.0))
+	_planted(m, "slime", Vector2(0.0, 50.0))
+	_play(m, 1)
+	_expect(out, "the mage at swift's top shoots toward the nearest enemy within the ember's range", m.player.face.is_equal_approx(Vector2.DOWN), true)
+	# The same game every time: two late runs with swift at its top, the bot playing, step for step.
+	var ends := []
+	for i in 2:
+		var w = World.new(5, "woodcutter")
+		w.begin_at(10, 1)
+		w.picks.append_array(_times("swift", top - w.level("swift")))
+		var bot = Bot.new(1)
+		for s in 60 * 90:
+			w.step(bot.frame(w))
+		ends.append([w.night, w.time, w.score, w.player.pos, w.player.hp, w.enemies.size(), w.rng.state(), w.player.swings])
+	_expect(out, "two runs with swift's auto attack end alike", ends[0], ends[1])
+	return out
+
+
+## Puts an enemy back where it stood, unhurt and unpushed: a target that stays in reach however often it is struck.
+static func _hold_still(e, at: Vector2) -> void:
+	e.pos = at
+	e.hp = e.full_hp
+	e.knock = Vector2.ZERO
+
+
+## id, n times over: an upgrade at level n.
+static func _times(id: String, n: int) -> Array:
+	var out := []
+	for i in n:
+		out.append(id)
 	return out
