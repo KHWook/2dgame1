@@ -3423,7 +3423,7 @@ static func _own_rows() -> Array:
 		_expect(out, "guard at level %d: the hit throws back the enemies within its reach, away from the knight, and does them its damage" % n,
 			[near.knock.y > 0.0, mid.knock.y < 0.0, far.knock != Vector2.ZERO, told.count("wave"), hitter.hp, near.hp, mid.hp, far.hp],
 			[n >= 1, n >= 2, false, mini(n, 1), hitter.full_hp - dmg, near.full_hp - dmg, mid.full_hp - (dmg if n >= 2 else 0), far.full_hp])
-		if n > 0:
+		if told.has("wave"):
 			var wave: Dictionary = w.events.filter(func(ev): return ev.kind == "wave")[0]
 			_expect(out, "guard at level %d tells the screen where and how far" % n, [wave.pos, wave.radius, Effects.RINGS.has(wave.ring)], [w.player.pos, G.guard_reach, true])
 	for n in [0, 1, 2]:
@@ -3589,7 +3589,7 @@ static func _combined_rows() -> Array:
 		var told := _play(w, 1)
 		_expect(out, "a log on the fire %s: the slime on the torch and the one at the edge of feed_reach are thrown back from the torch, the one beyond is not, none is hurt" % ["with blast" if with else "without"],
 			[on.at_torch, told.count("fed"), told.count("wave"), on.knock.x > 0.0, edge.knock.y > 0.0, beyond.knock != Vector2.ZERO, on.hp], [true, 1, 1 if with else 0, with, with, false, on.full_hp])
-		if with:
+		if told.has("wave"):
 			var wave: Dictionary = w.events.filter(func(ev): return ev.kind == "wave")[0]
 			_expect(out, "blast tells the screen where and how far", [wave.pos, wave.radius, Effects.RINGS.has(wave.ring)], [Config.TORCH.pos, L.feed_reach, true])
 		_play(w, 30)
