@@ -716,9 +716,9 @@ static func _patterns() -> Array:
 		w.step(InputFrame.new())
 		for ev in w.events:
 			told.append(ev.kind)
-			if ev.kind == "coming":
+			if ev.kind == "boss_coming":
 				coming_at = ev.pos
-	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("coming"), told.has("boss"), w.bosses_coming().map(func(b): return b.from) == [coming_at] and coming_at != null], [true, false, true])
+	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("boss_coming"), told.has("boss"), w.bosses_coming().map(func(b): return b.from) == [coming_at] and coming_at != null], [true, false, true])
 	told = _play(w, int(Config.BOSS.warn / Config.STEP) - 2)
 	_expect(out, "the boss does not come during its warning", told.has("boss"), false)
 	told = _play(w, 3)
@@ -762,12 +762,12 @@ static func _boss_nights() -> Array:
 	for i in int((Config.BOSS.warn + Config.BOSS.apart + 2.0) / Config.STEP):
 		w.step(InputFrame.new())
 		for ev in w.events:
-			if ev.kind in ["coming", "boss"]:
+			if ev.kind in ["boss_coming", "boss"]:
 				seen.append([ev.kind, ev.enemy, snappedf(w.time, 0.1), ev.pos])
 	var a: Array = w.boss_kinds() + ["", ""] # (the count is checked above: past it, this scene fails, not errors)
 	_expect(out, "two bosses are each warned BOSS.warn ahead and come BOSS.apart apart, in turn", seen.map(func(x): return [x[0], x[1], x[2]]),
-		[["coming", a[0], snappedf(at - Config.BOSS.warn, 0.1)], ["boss", a[0], snappedf(at, 0.1)],
-		["coming", a[1], snappedf(at + Config.BOSS.apart - Config.BOSS.warn, 0.1)], ["boss", a[1], snappedf(at + Config.BOSS.apart, 0.1)]])
+		[["boss_coming", a[0], snappedf(at - Config.BOSS.warn, 0.1)], ["boss", a[0], snappedf(at, 0.1)],
+		["boss_coming", a[1], snappedf(at + Config.BOSS.apart - Config.BOSS.warn, 0.1)], ["boss", a[1], snappedf(at + Config.BOSS.apart, 0.1)]])
 	if seen.size() == 4:
 		_expect(out, "each boss comes where its own warning pointed", [seen[1][3] == seen[0][3], seen[3][3] == seen[2][3]], [true, true])
 	var list: Array = Painter.bosses(w)
@@ -1479,7 +1479,7 @@ static func _surges() -> Array:
 	_expect(out, "packs were seen, of more than one kind, and on a late night of more than one tier", [packs_seen >= 40, kinds_seen.size() > 1, tiers_seen.size() > 1], [true, true, true])
 	_expect(out, "the line for a pack on its way", Config.SURGE.kinds.map(func(k): return Ui.coming_line(Ui.PACK % Looks.kind_name(k), Ui.PACK_COMING)),
 		["슬라임 떼가 몰려온다!", "박쥐 떼가 몰려온다!", "그림자 떼가 몰려온다!", "도둑 비버 떼가 몰려온다!", "멧돼지 떼가 몰려온다!"])
-	_expect(out, "the line for a boss on its way reads as before", Config.BOSS.kinds.map(func(k): return Ui.coming_line(Config.ENEMY_TYPES[k].name, Ui.COMING)),
+	_expect(out, "the line for a boss on its way reads as before", Config.BOSS.kinds.map(func(k): return Ui.coming_line(Config.ENEMY_TYPES[k].name, Ui.BOSS_COMING)),
 		["슬라임 왕이 다가온다!", "그림자 군주가 다가온다!"])
 	return out
 

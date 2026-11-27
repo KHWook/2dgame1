@@ -92,7 +92,7 @@ func step(w) -> void:
 				_sound("landed")
 				stop = maxi(stop, STOP.landed)
 				_shake("landed")
-			"coming", "pack_coming":
+			"boss_coming", "pack_coming":
 				_sound("coming")
 	if CRUSH.has(w.character) and crushed >= CRUSH[w.character].kills and since_crush >= CRUSH[w.character].apart:
 		_shake("crush")

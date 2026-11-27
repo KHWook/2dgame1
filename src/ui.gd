@@ -52,7 +52,7 @@ const LEVEL := " Lv.%d" # after a name from level 2: Roman numerals read as bars
 const DAWN_SOON_SECONDS := 10.0
 const BOSS_NAME_WIDTH := 70.0 # room for a boss's name left of its bar
 const BOSS_NAME_GAP := 4.0
-const COMING := "다가온다!"
+const BOSS_COMING := "다가온다!"
 const PACK := "%s 떼"
 const PACK_COMING := "몰려온다!"
 const OMEN_WORD := "오늘 밤"
@@ -213,7 +213,7 @@ var gain_label: Label
 var clock_word: Label
 var clock: Label
 var fuel_time: Label
-var boss_name: Label
+var coming_label: Label
 var omen_label: Label
 var boss_names: Array = [] # the name of each boss on the field, left of its bar (Painter.boss_bar)
 
@@ -288,8 +288,8 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	clock_word.text = "새벽까지"
 	clock = _label(self, BIG, CREAM)
 	fuel_time = _label(self, SMALL, CREAM)
-	boss_name = _label(self, SMALL, RED, HORIZONTAL_ALIGNMENT_CENTER)
-	boss_name.size = Vector2(Painter.BOSS_BAR.size.x, 12.0)
+	coming_label = _label(self, SMALL, RED, HORIZONTAL_ALIGNMENT_CENTER)
+	coming_label.size = Vector2(Painter.BOSS_BAR.size.x, 12.0)
 	for i in Config.BOSS.counts.map(func(r): return r.count).max():
 		var l := _label(self, SMALL, RED, HORIZONTAL_ALIGNMENT_RIGHT)
 		var bar: Rect2 = Painter.boss_bar(i)
@@ -473,7 +473,8 @@ func frame(w, delta: float) -> void:
 	painter.scrim = move_toward(painter.scrim, target, delta * 3.0)
 
 
-## The night, the score (popping as it rises), the clock until dawn, how long the torch lasts, the boss's name.
+## The night, the score (popping as it rises), the clock until dawn, how long the torch lasts, each boss's name, and
+## the line for what is on its way.
 func _top(w, delta: float) -> void:
 	var night: bool = w.phase == "night"
 	night_label.text = "%d번째 밤" % w.night
@@ -548,13 +549,13 @@ func _top(w, delta: float) -> void:
 			boss_names[i].text = here[i].T.name
 	var coming: Array = w.bosses_coming()
 	var packs: Array = w.surges_coming()
-	boss_name.visible = night and not (coming.is_empty() and packs.is_empty())
-	if boss_name.visible:
-		boss_name.text = coming_line(Config.ENEMY_TYPES[coming[0].kind].name, COMING) if not coming.is_empty() else coming_line(PACK % Looks.kind_name(packs[0].kind), PACK_COMING)
-		boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.boss_bar(here.size()).position.y - 5.0)
+	coming_label.visible = night and not (coming.is_empty() and packs.is_empty())
+	if coming_label.visible:
+		coming_label.text = coming_line(Config.ENEMY_TYPES[coming[0].kind].name, BOSS_COMING) if not coming.is_empty() else coming_line(PACK % Looks.kind_name(packs[0].kind), PACK_COMING)
+		coming_label.position = Vector2(Painter.BOSS_BAR.position.x, Painter.boss_bar(here.size()).position.y - 5.0)
 
 
-## The line for what is on its way: who, the particle that who takes, and what it does (COMING, PACK_COMING).
+## The line for what is on its way: who, the particle that who takes, and what it does (BOSS_COMING, PACK_COMING).
 static func coming_line(who: String, does: String) -> String:
 	return "%s%s %s" % [who, Looks.particle(who, "가"), does]
 
@@ -968,7 +969,8 @@ func _hints(w) -> void:
 			hint_age = 0.0
 
 
-## The hint along the bottom (over the boss's name when one is here), rising in, faded when something is behind it.
+## The hint along the bottom (over the line for what is on its way when there is one), rising in, faded when
+## something is behind it.
 func _hint_frame(w, delta: float) -> void:
 	hint_box.visible = hint_steps > 0 and w.phase == "night"
 	if not hint_box.visible:
@@ -976,8 +978,8 @@ func _hint_frame(w, delta: float) -> void:
 	hint_age += delta
 	hint_box.reset_size()
 	var bottom := Painter.VIEW.y - HINT_BOTTOM
-	if boss_name.visible:
-		bottom = boss_name.position.y - 2.0
+	if coming_label.visible:
+		bottom = coming_label.position.y - 2.0
 	elif boss_names[0].visible:
 		bottom = minf(bottom, Painter.boss_bar(Painter.bosses(w).size() - 1).position.y - 4.0)
 	var k := minf(hint_age / FADE, 1.0)

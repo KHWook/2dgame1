@@ -11,7 +11,7 @@
 ## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
 ## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "cast" { pos } for an
 ## ember the keeper fired (a character whose attack is "shoot"); "boss" { enemy, pos }
-## for a boss that came out of the dark; "coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
+## for a boss that came out of the dark; "boss_coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
 ## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), "landed" { pos, enemy } for the slime
 ## king coming down from a leap or a hop, "decoy" { pos, enemy } where the shade lord's decoy appears and "faded"
 ## { pos, enemy } where one breaks or fades (src/sim/enemy.gd); "pack_coming" { enemy, pos, count } Config.SURGE.warn
@@ -737,7 +737,7 @@ func _spawns() -> void:
 	for b in bosses_due:
 		if b.from == null and time >= b.at - Config.BOSS.warn:
 			b.from = _edge_point()
-			events.append({ "kind": "coming", "enemy": b.kind, "pos": b.from })
+			events.append({ "kind": "boss_coming", "enemy": b.kind, "pos": b.from })
 	while not bosses_due.is_empty() and bosses_due[0].from != null and time >= bosses_due[0].at:
 		var b: Dictionary = bosses_due.pop_front()
 		var boss = _boss(b.kind, b.from)
