@@ -3,17 +3,17 @@
 ## ./verify --update-golden (and add a docs/DECISIONS.md entry).
 extends RefCounted
 
-## Seed 237 with slot 1 (the knight) passes six dawns and is still standing on the seventh night when the run stops.
-## Its nights from the second have the omens still, harvest, still, dark_moon, wind and fog, and nine packs come,
-## each warned of first: slimes, bats, thieves and shades. Both bosses come, each told ahead: the slime king on the
-## third night, the shade lord (with its decoys) on the sixth. It takes momentum (the knight's own) as its first
-## card, so most of the run is walked and swung in a kill's haste; the warm glow and the ember ring, and with both
-## held scorch (a combined upgrade) at the third dusk, so the ring kills from then on; the spin twice and the dash
-## (both rare cards); the bright fire, the wide swing twice, the woodpile and the dry logs, and with those two the
-## blast (combined) at the seventh midnight, which throws the enemies back from the torch twice before the run
-## stops. The keeper's four slots are full from the fourth night; the torch's end at five of six. It never rerolls
-## (the bot does not). What a run does not meet (the guard, the other characters' rows, the other combined
-## upgrades, fillers), the rules scenes hold.
-const SEED := 237
+## Seed 264 with slot 1 (the knight) passes six dawns and is still standing on the seventh night when the run stops.
+## Its nights from the second have the omens harvest, fog, harvest, dark_moon, still and dark_moon, and nine packs
+## come, each warned of first. Both bosses come, each told ahead: the slime king on the third night, the shade lord
+## (with its decoys) on the sixth. It takes the woodpile, the fire blade twice and the spark, then the guard (the
+## knight's own) at the third dusk, which throws back what stands round it seven times; the big torch, the ember
+## ring and the warm glow; with the spark and the fire blade held the beacon (a combined upgrade) at the fifth
+## dusk, which fires 21 sparks of its own from then on, and with the ring and the glow scorch (combined) at the
+## fifth midnight, whose slow burn finishes an enemy once; the thorns twice, the quick hands and the spark again.
+## The keeper's four slots are full from the sixth night; the torch's end at five of six. It never rerolls (the bot
+## does not). What a run does not meet (momentum, the rare cards, the other characters' rows, the other combined
+## upgrades, a full torch side, fillers), the rules scenes hold.
+const SEED := 264
 const STEPS := 60 * 400
 const PICK_SLOT := 1
