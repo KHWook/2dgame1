@@ -50,6 +50,10 @@ static func run() -> Array:
 	out.append_array(_logs())
 	out.append_array(_nights())
 	out.append_array(_company())
+	out.append_array(_omens())
+	out.append_array(_omen_rolls())
+	out.append_array(_surges())
+	out.append_array(_surge_totals())
 	out.append_array(_setup())
 	out.append_array(_coaching())
 	out.append_array(_crowds())
@@ -1219,6 +1223,308 @@ static func _company() -> Array:
 	return out
 
 
+## The keys an omen may set, and for each the number on the world it bends: what _omen_measure() reads.
+const OMEN_KEYS := ["light_mult", "burn_mult", "wood_mult", "berry_mult", "gap_mult", "log_mult", "kinds"]
+## What each omen's text says, written out from the Korean: per key, 1 when it says more of that number, -1 when less
+## (light_mult: the light's radius; burn_mult: fuel a second; wood_mult, berry_mult, gap_mult: seconds between logs,
+## berries, enemies; log_mult: fuel a log gives); under kinds, 1 for a kind it says more of come.
+const OMEN_SAYS := {
+	"fog": { "light_mult": -1, "kinds": { "bat": 1 } },
+	"wind": { "burn_mult": 1, "wood_mult": -1 },
+	"still": { "gap_mult": 1, "berry_mult": 1 },
+	"harvest": { "log_mult": 1, "kinds": { "thief": 1 } },
+	"dew": { "log_mult": -1, "berry_mult": -1 },
+	"dark_moon": { "light_mult": -1, "kinds": { "shade": 1 } },
+}
+const OMEN_NIGHT := 5 # a night whose row has every kind an omen names, and no company
+const OMEN_SPAWNS := 3000
+
+
+## A night under way as _night() makes it, on night n under omen id ("" for none).
+static func _omen_night(id: String, upgrades: Array = [], who := "knight", n := OMEN_NIGHT):
+	var w = _night(DARK, upgrades, who)
+	w.night = n
+	w.omen = id
+	return w
+
+
+## The number on the world that an omen's key bends, read off the rules as they run.
+static func _omen_measure(w, key: String) -> float:
+	match key:
+		"light_mult":
+			w.fuel = 60.0
+			return w.light_radius()
+		"burn_mult":
+			return w.burn_rate()
+		"wood_mult":
+			w.next_wood = 0.0
+			_play(w, 1)
+			return w.next_wood - w.time
+		"berry_mult":
+			w.next_berry = 0.0
+			_play(w, 1)
+			return w.next_berry - w.time
+		"gap_mult":
+			w.next_spawn = 0.0
+			_play(w, 1)
+			return w.next_spawn - w.time
+		"log_mult":
+			w.fuel = 10.0
+			w.player.take_log()
+			w.player.pos = Config.TORCH.pos + Vector2(0.0, Config.TORCH.reach)
+			var burnt: float = w.burn_rate() * Config.STEP
+			_play(w, 1)
+			return w.fuel - 10.0 + burnt
+	return NAN
+
+
+## How many of each kind lead out of the dark over OMEN_SPAWNS spawns of the night w is in, as shares of them.
+static func _lead_shares(w) -> Dictionary:
+	var came := {}
+	for i in OMEN_SPAWNS:
+		w.enemies = []
+		w.time = 1.0
+		w.fuel = w.max_fuel()
+		w.next_spawn = 0.0
+		_play(w, 1)
+		came[w.enemies[0].kind] = came.get(w.enemies[0].kind, 0.0) + 1.0 / OMEN_SPAWNS
+	return came
+
+
+## Config.OMENS: tonight's omen bends the numbers its row names, by what the row says, and nothing else; with
+## upgrades that bend the same number the two multiply. Each does what its text says (OMEN_SAYS): the light is
+## narrower, the fire burns faster, logs or berries or enemies come sooner or later, a log gives more or less, more
+## of a kind come. Measured on the world as its rules run, against the same night without an omen.
+static func _omens() -> Array:
+	var out := []
+	var builds := [[[], "knight"], [["bright", "slow_burn", "woodpile", "big_logs"], "woodcutter"]]
+	var plain: Dictionary = _lead_shares(_omen_night(""))
+	for id in Config.OMENS:
+		var row: Dictionary = Config.OMENS[id]
+		var says: Dictionary = OMEN_SAYS.get(id, {})
+		for key in OMEN_KEYS:
+			if key == "kinds":
+				continue
+			for b in builds:
+				var with: float = _omen_measure(_omen_night(id, b[0], b[1]), key)
+				var without: float = _omen_measure(_omen_night("", b[0], b[1]), key)
+				_expect(out, "omen %s: %s is multiplied by what its row says, for a %s with %d upgrades" % [id, key, b[1], b[0].size()],
+					snappedf(with / without, 0.0001), snappedf(row.get(key, 1.0), 0.0001))
+			if says.has(key) or row.has(key):
+				_expect(out, "omen %s: its text and its row agree which way %s goes" % [id, key], signf(row.get(key, 1.0) - 1.0), float(says.get(key, 0)))
+		var bent: Dictionary = _lead_shares(_omen_night(id)) if row.has("kinds") else plain
+		var shares: Dictionary = Config.NIGHTS[OMEN_NIGHT - 1].who
+		var total := 0.0
+		for kind in shares:
+			total += shares[kind] * row.get("kinds", {}).get(kind, 1.0)
+		for kind in shares:
+			var want: float = shares[kind] * row.get("kinds", {}).get(kind, 1.0) / total
+			if absf(bent.get(kind, 0.0) - want) > 0.03:
+				out.append("omen %s: over %d spawns %s is %.3f of those that come, want %.3f" % [id, OMEN_SPAWNS, kind, bent.get(kind, 0.0), want])
+		for kind in says.get("kinds", {}):
+			_expect(out, "omen %s: more %s come than on a night without it" % [id, kind], bent.get(kind, 0.0) > plain.get(kind, 0.0) + 0.05, true)
+		_expect(out, "omen %s: its text and its row name the same kinds" % id, says.get("kinds", {}).keys(), row.get("kinds", {}).keys())
+		var night = _omen_night(id)
+		night._plan_night()
+		_expect(out, "omen %s: the night's first berry waits as its later ones do" % id, snappedf(night.next_berry, 0.0001), snappedf(Config.BERRY.first * row.get("berry_mult", 1.0), 0.0001))
+	var w = _omen_night("", ["bright"])
+	w.fuel = 60.0
+	var lit: float = w.light_radius()
+	w.omen = "fog"
+	_expect(out, "the light narrows the moment the omen changes, the fuel being the same", snappedf(w.light_radius() / lit, 0.0001), snappedf(Config.OMENS.fog.light_mult, 0.0001))
+	w.omen = ""
+	_expect(out, "and widens again when it is gone", w.light_radius(), lit)
+	return out
+
+
+## Brings w to its next dusk as a kept night does: the dawn's own step, with nothing on the field.
+static func _to_dusk(w) -> void:
+	if w.phase == "pick":
+		w._take(w.offer[0])
+	w.enemies = []
+	w.next_spawn = NEVER
+	w.surges_due = []
+	w.bosses_due = []
+	w.player.hp = w.max_hp()
+	w.fuel = w.max_fuel()
+	w.picks_done = Config.NIGHT.picks_at.size()
+	w.time = Config.NIGHT.length - Config.STEP * 0.5
+	_play(w, 1)
+
+
+## The omen is drawn at each dusk from Config.OMEN.from: none before it, and nothing drawn from the rng there (the
+## first dusk leaves the rng where the offer alone leaves it); from then on every night has one, never last night's,
+## never one before its own from or that names a kind the night's row lacks, and over many seeds every omen turns up.
+static func _omen_rolls() -> Array:
+	var out := []
+	var seen := {}
+	var from: int = Config.OMEN.from
+	for seed_value in range(1, 41):
+		var w = World.new(seed_value)
+		var r = SimRng.new(seed_value)
+		var pool: Array = Config.UPGRADES.keys().filter(func(id): return World.offered_on(id, 1))
+		for i in Config.NIGHT.offer_size:
+			pool.pop_at(r.index(pool.size()))
+		_expect(out, "seed %d: the first dusk draws the offer from the rng and nothing else" % seed_value, w.rng.state(), r.state())
+		var last := ""
+		for night in range(1, 15):
+			_expect(out, "seed %d: this is night %d" % [seed_value, night], w.night, night)
+			var problem := ""
+			if night < from and (w.omen != "" or not w.surges_due.is_empty() or w.surge_slow != 1.0):
+				problem = "has an omen or a surge before OMEN.from"
+			elif night >= from and not Config.OMENS.has(w.omen):
+				problem = "has no omen"
+			elif night >= from and w.omen == last:
+				problem = "has last night's omen again"
+			elif night >= from and not Config.OMENS[w.omen].get("kinds", {}).keys().all(func(k): return w._night_row().who.has(k)):
+				problem = "has an omen about a kind its row lacks"
+			elif night >= from and night < Config.OMENS[w.omen].get("from", 0):
+				problem = "has an omen before that omen's own from"
+			if problem != "":
+				out.append("seed %d: night %d %s (%s after %s)" % [seed_value, night, problem, w.omen, last])
+			seen[w.omen] = seen.get(w.omen, 0) + 1
+			last = w.omen
+			_to_dusk(w)
+	for id in Config.OMENS:
+		_expect(out, "omen %s turns up over 40 seeds of 14 nights" % id, seen.get(id, 0) >= 20, true)
+	var w = World.new(3)
+	_expect(out, "the first night's enemies come as its row says, further apart for nothing", [w.spawn_gap(), w.who()], [Config.NIGHTS[0].spawn[0], Config.NIGHTS[0].who])
+	return out
+
+
+## A world at the dusk of night n as a run of that seed reaches it, every night before it kept.
+static func _dusk_at(seed_value: int, n: int):
+	var w = World.new(seed_value)
+	while w.night < n:
+		_to_dusk(w)
+	return w
+
+
+## Config.SURGE: from the night from, packs come besides the trickle: as many as packs says, each of one kind that
+## may come in packs and that tonight brings, one in each part of the night. Each is warned of warn seconds before,
+## from an edge, and comes there: all of one kind and one tier, in a row along that edge, ENEMY.with_gap apart, out
+## of sight. The screen's line names the pack.
+static func _surges() -> Array:
+	var out := []
+	var S: Dictionary = Config.SURGE
+	var L: float = Config.NIGHT.length
+	var kinds_seen := {}
+	var tiers_seen := {}
+	var packs_seen := 0
+	for seed_value in range(1, 9):
+		for night in [1, 2, 3, 5, 8, 12]:
+			var w = _dusk_at(seed_value, night)
+			var want := 0
+			for r in S.packs:
+				if night >= maxi(r.from, S.from):
+					want = r.count
+			var planned: Array = w.surges_due.duplicate(true)
+			_expect(out, "seed %d: night %d plans as many packs as SURGE.packs says" % [seed_value, night], planned.size(), want)
+			if planned.size() != want:
+				continue
+			var part: float = L * (S.at[1] - S.at[0]) / maxi(1, want)
+			for i in planned.size():
+				var s: Dictionary = planned[i]
+				kinds_seen[s.kind] = true
+				_expect(out, "seed %d night %d: pack %d is of a kind that comes in packs and that tonight brings, of two or more, not yet placed" % [seed_value, night, i],
+					[S.kinds.has(s.kind), w.who().has(s.kind), s.size >= 2, s.from], [true, true, true, null])
+				_expect(out, "seed %d night %d: pack %d comes in its own part of the night" % [seed_value, night, i],
+					s.at >= L * S.at[0] + part * i and s.at < L * S.at[0] + part * (i + 1), true)
+			if want > 0:
+				_expect(out, "seed %d night %d: the trickle comes further apart for its packs" % [seed_value, night], w.surge_slow > 1.05, true)
+			w._take(w.offer[0])
+			w.bosses_due = []
+			w.next_spawn = NEVER
+			w.next_wood = NEVER
+			w.next_berry = NEVER
+			var told := [] # [kind of event, enemy, night time, pos, count, who came, where surges_coming() pointed]
+			while w.time < L - 2.0 * Config.STEP:
+				if w.phase == "pick":
+					w._take(w.offer[0])
+				w.player.hp = w.max_hp()
+				w.fuel = w.max_fuel()
+				w.enemies = []
+				w.step(InputFrame.new())
+				for ev in w.events:
+					if ev.kind in ["pack_coming", "pack"]:
+						told.append([ev.kind, ev.enemy, w.time, ev.pos, ev.count, w.enemies.duplicate(), w.surges_coming().map(func(c): return c.from)])
+			_expect(out, "seed %d night %d: each pack is warned of, then comes" % [seed_value, night], told.map(func(t): return t[0]).count("pack_coming") == want and told.map(func(t): return t[0]).count("pack") == want, true)
+			for i in planned.size():
+				var s: Dictionary = planned[i]
+				var warned: Array = told.filter(func(t): return t[0] == "pack_coming" and absf(t[2] - (s.at - S.warn)) < 2.0 * Config.STEP)
+				var came: Array = told.filter(func(t): return t[0] == "pack" and absf(t[2] - s.at) < 2.0 * Config.STEP)
+				if warned.size() != 1 or came.size() != 1:
+					out.append("seed %d night %d: pack %d (due at %.2f) is warned of SURGE.warn before and comes on time: got %s" % [seed_value, night, i, s.at, told.map(func(t): return [t[0], snappedf(t[2], 0.01)])])
+					continue
+				packs_seen += 1
+				var edge: Vector2 = warned[0][3]
+				var pack: Array = came[0][5]
+				_expect(out, "seed %d night %d: pack %d's warning points where surges_coming() does, beyond the field" % [seed_value, night, i], [warned[0][6].has(edge), Config.FIELD.has_point(edge)], [true, false])
+				_expect(out, "seed %d night %d: pack %d comes from the edge its warning pointed at, as many and of the kind it said" % [seed_value, night, i],
+					[came[0][3], came[0][4], came[0][1], warned[0][4], warned[0][1]], [edge, s.size, s.kind, s.size, s.kind])
+				_expect(out, "seed %d night %d: pack %d is all of its kind, as many as planned" % [seed_value, night, i], pack.map(func(e): return e.kind), _times(s.kind, s.size))
+				_expect(out, "seed %d night %d: pack %d is of one tier" % [seed_value, night, i], pack.all(func(e): return e.tier == pack[0].tier), true)
+				if pack.is_empty():
+					continue
+				tiers_seen[pack[0].tier] = true
+				var along: Vector2 = w._along_edge(edge)
+				var places: Array = pack.map(func(e): return snappedf((e.pos - edge).dot(along) / Config.ENEMY.with_gap, 0.001))
+				places.sort()
+				var row := []
+				for k in pack.size():
+					row.append(float(k - (pack.size() - 1) / 2)) # the odd one out stands on the side the first goes to
+				_expect(out, "seed %d night %d: pack %d stands in a row along its edge, with_gap apart, the warned spot in its middle" % [seed_value, night, i], places, row)
+				_expect(out, "seed %d night %d: pack %d is on its edge's line, out of the field" % [seed_value, night, i],
+					[pack.all(func(e): return absf((e.pos - edge).dot(along.orthogonal())) < 0.001), pack.any(func(e): return Config.FIELD.has_point(e.pos))], [true, false])
+	_expect(out, "packs were seen, of more than one kind, and on a late night of more than one tier", [packs_seen >= 40, kinds_seen.size() > 1, tiers_seen.size() > 1], [true, true, true])
+	_expect(out, "the line for a pack on its way", Config.SURGE.kinds.map(func(k): return Ui.coming_line(Ui.PACK % Looks.kind_name(k), Ui.PACK_COMING)),
+		["슬라임 떼가 몰려온다!", "박쥐 떼가 몰려온다!", "그림자 떼가 몰려온다!", "도둑 비버 떼가 몰려온다!", "멧돼지 떼가 몰려온다!"])
+	_expect(out, "the line for a boss on its way reads as before", Config.BOSS.kinds.map(func(k): return Ui.coming_line(Config.ENEMY_TYPES[k].name, Ui.COMING)),
+		["슬라임 왕이 다가온다!", "그림자 군주가 다가온다!"])
+	return out
+
+
+## How many enemies come out of the dark over the whole of the night w is at the dusk of, none of them fought, no boss.
+static func _arrivals(w) -> int:
+	var n := 0
+	w.bosses_due = []
+	w.next_wood = NEVER
+	w.next_berry = NEVER
+	while w.time < Config.NIGHT.length - 2.0 * Config.STEP:
+		if w.phase == "pick":
+			w._take(w.offer[0])
+		w.player.hp = w.max_hp()
+		w.fuel = w.max_fuel()
+		w.enemies = []
+		w.step(InputFrame.new())
+		n += w.enemies.size()
+	return n
+
+
+## A night with surges brings about as many enemies as the same night without them, within a tenth: the packs are a
+## share of the night, and the trickle comes further apart to make up for most of them (SURGE.makes_up). Counted over
+## whole nights of several seeds, omens and all.
+static func _surge_totals() -> Array:
+	var out := []
+	for night in [2, 3, 5, 7, 9, 12]:
+		var with := 0
+		var without := 0
+		var packed := 0
+		for seed_value in range(1, 9):
+			var a = _dusk_at(seed_value, night)
+			for s in a.surges_due:
+				packed += s.size
+			with += _arrivals(a)
+			var b = _dusk_at(seed_value, night)
+			b.surges_due = []
+			b.surge_slow = 1.0
+			without += _arrivals(b)
+		if absf(with - without) > 0.1 * without:
+			out.append("night %d: over 8 seeds %d enemies come with surges and %d without: more than a tenth apart" % [night, with, without])
+		_expect(out, "night %d: its packs are a real share of it, at most SURGE.share and a little" % night, [packed > 0.1 * without, packed <= (Config.SURGE.share + 0.05) * without], [true, true])
+	return out
+
+
 ## Not rules, but what the rules lean on: the tables agree with each other and with the project's settings.
 static func _setup() -> Array:
 	var out := []
@@ -1237,6 +1543,27 @@ static func _setup() -> Array:
 		_expect(out, "every enemy kind comes on some night or as a boss (%s)" % kind, named.has(kind), true)
 		if Config.ENEMY_TYPES[kind].has("summon"):
 			_expect(out, "a boss summons a real enemy kind (%s)" % kind, Config.ENEMY_TYPES.has(Config.ENEMY_TYPES[kind].summon.kind), true)
+	var early := 0
+	for id in Config.OMENS:
+		var row: Dictionary = Config.OMENS[id]
+		_expect(out, "omen %s has a name and a text" % id, [row.get("name", "") != "", row.get("text", "") != ""], [true, true])
+		_expect(out, "omen %s is said in the test's OMEN_SAYS" % id, OMEN_SAYS.has(id), true)
+		var effects: Array = row.keys().filter(func(k): return not k in ["name", "text", "from"])
+		_expect(out, "omen %s does something" % id, effects.is_empty(), false)
+		for key in effects:
+			_expect(out, "omen %s sets only keys the rules read (%s)" % [id, key], OMEN_KEYS.has(key), true)
+		var first: int = maxi(Config.OMEN.from, row.get("from", 0))
+		for kind in row.get("kinds", {}):
+			_expect(out, "omen %s names a kind that comes on some night, not a boss (%s)" % [id, kind], [named.has(kind), Config.ENEMY_TYPES.get(kind, {}).get("boss", false)], [true, false])
+			_expect(out, "omen %s comes no earlier than the %s it names" % [id, kind], Config.NIGHTS[mini(first, Config.NIGHTS.size()) - 1].who.has(kind), true)
+		if first == Config.OMEN.from:
+			early += 1
+	_expect(out, "at least two omens may come from the first omen night, so every night has one to draw that last night did not have", early >= 2, true)
+	for id in Config.UPGRADES:
+		for n in World.max_level(id):
+			_expect(out, "no upgrade sets kinds, which the omen sets and mod() does not multiply (%s)" % id, World.upgrade(id, n + 1).has("kinds"), false)
+	for kind in Config.SURGE.kinds:
+		_expect(out, "SURGE names a kind that comes on some night, not a boss (%s)" % kind, [named.has(kind), Config.ENEMY_TYPES.get(kind, {}).get("boss", false)], [true, false])
 	var viewport := Vector2(ProjectSettings.get_setting("display/window/size/viewport_width"), ProjectSettings.get_setting("display/window/size/viewport_height"))
 	_expect(out, "project.godot's viewport is Config.VIEW", viewport, Config.VIEW)
 	_expect(out, "the web page's title (project.godot config/name.web) is the first screen's title", ProjectSettings.get_setting("application/config/name.web"), Ui.INTRO_TITLE)
