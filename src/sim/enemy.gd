@@ -231,6 +231,29 @@ func _daze() -> void:
 	move_t = T.charge.rest
 
 
+## How far from a charger's line its charge hurts: its body and the keeper's touch (touches()) all along the run.
+## The painter's band is this wide each side of the line, so outside the band is out of reach.
+func lane_half() -> float:
+	return T.radius + Config.PLAYER.radius
+
+
+## Where the charge lined up (or under way) ends: at move_to, charge.dist along its line, or sooner where the line
+## leaves the field (step() stops it at the trees).
+func charge_end() -> Vector2:
+	var end: Vector2 = move_to
+	if Config.FIELD.has_point(end):
+		return end
+	var f: Rect2 = Config.FIELD
+	var t := 1.0
+	for axis in 2:
+		var d: float = end[axis] - pos[axis]
+		if d > 0.0:
+			t = minf(t, (f.end[axis] - pos[axis]) / d)
+		elif d < 0.0:
+			t = minf(t, (f.position[axis] - pos[axis]) / d)
+	return pos.lerp(end, clampf(t, 0.0, 1.0))
+
+
 ## Where it is heading. A boss that circles the light aims a little ahead of itself on a ring outside it, unless it is
 ## rushing the torch. A thief goes for the nearest log, shadows the player when there is none, and once it has
 ## one runs straight away from the torch.

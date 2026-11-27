@@ -694,6 +694,44 @@ static func _charger() -> Array:
 	boar.move_t = 0.0
 	_play(w, 1)
 	_expect(out, "the boar does not charge from beyond the field", boar.move, "")
+	out.append_array(_charge_band())
+	return out
+
+
+## The red band the painter lays under a lined-up boar is where the charge hurts: a keeper standing just inside its
+## edge (Enemy.lane_half() from the line, less a pixel) is hit, one just outside it is not; the painter's band holds
+## the first point and not the second; and the band ends where the charge does, at the field's edge too.
+static func _charge_band() -> Array:
+	var out := []
+	var C: Dictionary = Config.ENEMY_TYPES.boar.charge
+	var warn_steps := int(round(C.warn / Config.STEP))
+	var run_steps := int(round(C.dist / C.speed / Config.STEP))
+	for inside in [true, false]:
+		var w = _night(DARK + Vector2(-20.0, 30.0))
+		w.fuel = 1.0e6
+		var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+		boar.move_t = 0.0
+		_play(w, 1)
+		var half: float = boar.lane_half()
+		var spot: Vector2 = boar.pos + boar.aim * 60.0 + boar.aim.orthogonal() * (half + (-1.0 if inside else 1.0))
+		w.player.pos = spot
+		var drawn: bool = Geometry2D.is_point_in_polygon(spot, Painter.charge_band(boar))
+		_expect(out, "the painter's band holds a point a pixel %s its edge" % ("inside" if inside else "outside"), drawn, inside)
+		var end: Vector2 = boar.charge_end()
+		_play(w, warn_steps + run_steps + 2)
+		_expect(out, "the band ends where the charge does (%s)" % ("hit" if inside else "missed"), [boar.move, boar.pos.distance_to(end) < C.speed * Config.STEP * 1.5], ["rest", true])
+		_expect(out, "the charge hurts a keeper a pixel %s the band's edge" % ("inside" if inside else "outside"), w.player.hp, Config.PLAYER.hp - (1 if inside else 0))
+	_expect(out, "the band is as wide as the charge hurts: the boar's body and the keeper's", Enemy.new("boar", Vector2.ZERO).lane_half(), Config.ENEMY_TYPES.boar.radius + Config.PLAYER.radius)
+	# at the field's edge the band ends where the boar stops
+	var w = _night(Vector2(0.0, 0.0))
+	w.player.pos = Vector2(Config.FIELD.end.x - 20.0, Config.TORCH.pos.y + 7.0)
+	var boar = _add(w, "boar", Vector2(-60.0, -7.0))
+	boar.move_t = 0.0
+	_play(w, 1)
+	var end: Vector2 = boar.charge_end()
+	w.player.pos = Vector2(Config.FIELD.end.x - 20.0, Config.FIELD.position.y + 2.0) # out of the way
+	_play(w, warn_steps + run_steps + 2)
+	_expect(out, "the band ends where a charge into the trees stops", [boar.move, boar.pos.distance_to(end) < C.speed * Config.STEP * 1.5, end.x <= Config.FIELD.end.x + 0.01], ["rest", true, true])
 	return out
 
 

@@ -110,7 +110,7 @@ static func _lane(w, at: Vector2):
 
 
 static func _lane_width(e) -> float:
-	return e.T.radius + Config.PLAYER.radius + 2.0
+	return e.lane_half() + 2.0
 
 
 static func _nearest(from: Vector2, enemies: Array):

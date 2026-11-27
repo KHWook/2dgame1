@@ -174,9 +174,14 @@ const MARK_FILL := 0.35 # how solid the ring's inside is the moment it lands
 const MARK_BLINK_STEPS := 4
 const LEAP_HEIGHT := 26.0 # pixels the king rises at the top of its leap
 const RUSH_DASH := 4.0 # pixels per dash of the rush line, and per gap
-## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) with
-## its line drawn to where the charge would end, an arrowhead there; dazed after, stars turn over its head.
-const CHARGE_HEAD := 5.0 # pixels from the arrowhead's tip to its back
+## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) on a
+## red band laid from itself to where the charge ends, as wide as the charge hurts (charge_band: Enemy.lane_half()
+## each side of its line, round at the ends): outside the band is safe. The band fills from the boar toward its end
+## as the wind-up runs out, and stays, solid, under the charge. Dazed after, stars turn over its head.
+const LANE_FAINT := 0.12 # how solid the band is the moment it is drawn
+const LANE_FULL := 0.45 # how solid the filled part is (and the whole band while it charges)
+const LANE_EDGE := 0.75 # its outline, blinking
+const LANE_ROUND := 8 # points on each round end
 const PAW_STEPS := 3 # simulation steps per shuffle while it paws
 const DAZED_AT := Vector2(-3.0, -13.0) # the stars' top-left, from the charger's position
 const DAZED_STEPS := 8 # simulation steps per turn of the stars
@@ -724,12 +729,30 @@ func _telegraphs(c: CanvasItem, w) -> void:
 			c.draw_arc(at, L.shock * (1.0 - k), 0.0, TAU, 24, Color(colour, 0.8), 1.0) # closes in on the edge as it falls
 		elif e.T.has("lunge") and e.move == "warn":
 			_dashes(c, e.pos, e.move_to, Color(colour, 0.9 if blink else 0.5))
-		elif e.T.has("charge") and e.move == "warn":
-			var end: Vector2 = e.move_to.clamp(Config.FIELD.position, Config.FIELD.end) # it stops at the trees
-			_dashes(c, e.pos + e.aim * e.T.radius, end, Color(colour, 0.9 if blink else 0.5))
-			var side: Vector2 = e.aim.orthogonal() * CHARGE_HEAD * 0.7
-			var back: Vector2 = end - e.aim * CHARGE_HEAD
-			c.draw_colored_polygon(PackedVector2Array([end.round(), (back + side).round(), (back - side).round()]), Color(colour, 1.0 if blink else 0.6))
+		elif e.T.has("charge") and e.move in ["warn", "charge"]:
+			var band := charge_band(e)
+			var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
+			c.draw_colored_polygon(band, Color(colour, LANE_FAINT))
+			if k > 0.0:
+				c.draw_colored_polygon(charge_band(e, k), Color(colour, LANE_FULL - LANE_FAINT))
+			band.append(band[0])
+			c.draw_polyline(band, Color(colour, LANE_EDGE if blink else LANE_EDGE * 0.5), 1.0)
+
+
+## Where a charger's charge hurts, as a polygon: a band from it to Enemy.charge_end(), Enemy.lane_half() each side
+## of its line, round at both ends (every point within lane_half of the line it runs). share: only the first part of
+## it, from the charger, for the fill that grows as the wind-up runs out.
+static func charge_band(e, share := 1.0) -> PackedVector2Array:
+	var r: float = e.lane_half()
+	var a: Vector2 = e.pos
+	var b: Vector2 = a.lerp(e.charge_end(), share)
+	var along: Vector2 = e.aim
+	var out := PackedVector2Array()
+	for i in LANE_ROUND + 1: # round the far end, from one side to the other
+		out.append(b + along.rotated(-PI / 2.0 + PI * i / LANE_ROUND) * r)
+	for i in LANE_ROUND + 1: # and back round the charger
+		out.append(a + along.rotated(PI / 2.0 + PI * i / LANE_ROUND) * r)
+	return out
 
 
 ## A dashed line from a to b.
