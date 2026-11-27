@@ -68,10 +68,11 @@ func _init(seed_value_: int = 1, character_: String = "knight") -> void:
 	reset()
 
 
-## Start the run again with another keeper (Config.CHARACTERS): the same seed, so the same night, but the offers
-## are drawn again for it. Only before the run's first step, or from an ending.
-func choose(id: String) -> void:
+## Start the run again with a keeper (Config.CHARACTERS) and a seed: the night that seed gives, the offers drawn for
+## that keeper. It keeps this seed when it restarts by itself. Only before the run's first step, or from an ending.
+func choose(id: String, seed_value_: int) -> void:
 	character = id
+	seed_value = seed_value_
 	reset()
 
 

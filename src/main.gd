@@ -2,6 +2,7 @@
 ## world on Godot's fixed physics tick (D5), and shows the world by reading it (D4): src/art/painter.gd paints it.
 ## Words go in Control nodes such as Label, never into the world (C1): src/ui.gd holds them all.
 ## Touches become the same actions as keys in src/touch.gd, which main.gd merges in here.
+## It also says which seed each run is played on: a new one for every run a person starts (fresh_seed).
 extends Node2D
 
 const World := preload("res://src/sim/world.gd")
@@ -33,6 +34,8 @@ const TORCH_ENERGY := 1.25 # the night is nearly black, so what you see by is al
 const DAY_ENERGY := 0.3 # the torch still glows a little once the sun is up
 const FLARE_ENERGY := 0.5 # how much brighter the torch burns for a moment when it is fed
 const BOT_LOOKS := 90 # steps a demo bot leaves an offer on screen before it picks, so a person watching can read it
+const SEED_MOST := 999999 # a run's seed is 1 to this: few enough digits to read off the screen and to type after --seed=
+const STIR_BITS := 0x7fffffff # fresh_seed mixes on 31 bits, so that its products stay inside an int
 ## On the web, the first tap asks the browser for the whole screen held sideways (Android browsers allow it after a
 ## tap; an iPhone's Safari has no such call for a page, and nothing happens).
 const FULL_SCREEN_JS := "try{var d=document.documentElement;if(d.requestFullscreen){d.requestFullscreen({navigationUI:'hide'}).then(function(){if(screen.orientation&&screen.orientation.lock){return screen.orientation.lock('landscape');}}).catch(function(){});}}catch(e){}"
@@ -48,6 +51,7 @@ var overlay: Node2D # above the night and the lights: what glows by itself, and 
 var ui # src/ui.gd: every word on screen, and the offer cards
 var records # src/records.gd: the best runs on disk
 var seed_value := 1
+var seed_fixed := false
 var torch_lights: Array = [] # one PointLight2D per ring of tongues (Painter.LIGHT_RINGS), turning against each other
 var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step made
 var sfx := {} # sound name -> its AudioStreamPlayer
@@ -81,6 +85,7 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--seed="):
 			seed_value = int(a.substr(7))
+			seed_fixed = true
 		if a.begins_with("--skip="):
 			skip = int(a.substr(7))
 		if a.begins_with("--slot="): # which offer the bot always takes; --bot --seed=6 --slot=3 is the replay's night
@@ -92,6 +97,7 @@ func _ready() -> void:
 	perf = OS.get_cmdline_user_args().has("--perf")
 	if OS.get_cmdline_user_args().has("--bot"):
 		bot = Bot.new(slot)
+		seed_fixed = true
 	# The window's title is the game's name on the first screen. project.godot keeps the old config/name, which on
 	# desktop names the folder user://records.json lives in; the web build's page title comes from config/name.web.
 	get_window().title = Ui.INTRO_TITLE
@@ -100,15 +106,18 @@ func _ready() -> void:
 		push_warning("--char=%s is not a character (%s): the knight keeps the torch" % [character, ", ".join(Config.CHARACTERS.keys())])
 		character = "knight"
 	chosen_by_flag = character != ""
+	seed_value = _next_seed()
 	world = World.new(seed_value, character if chosen_by_flag else records.last_character())
+	painter = Painter.new(seed_value)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--night="):
 			start_night = int(a.substr(8))
 			start_slot = slot
 			world.begin_at(start_night, slot)
+	if bot != null or chosen_by_flag:
+		_take_character(world.character)
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
 		world.step(bot.frame(world))
-	painter = Painter.new(seed_value)
 	juice = Juice.new(seed_value)
 	juice.seen(world)
 	for name in Sfx.SOUNDS:
@@ -184,13 +193,44 @@ func _set_choosing(on: bool) -> void:
 		ui.chooser.show(world.character)
 
 
-## The run starts (again) with this keeper: the same seed, the offers drawn for it.
+## A run starts with this keeper, on a new seed unless the seed is fixed: the offers are drawn for the keeper and the
+## ground is laid out from the seed.
 func _take_character(id: String) -> void:
-	records.remember_character(id)
-	world.choose(id)
+	seed_value = _next_seed()
+	world.choose(id, seed_value)
 	if start_night > 0:
 		world.begin_at(start_night, start_slot)
-	_set_choosing(false)
+	painter.lay_ground(seed_value)
+	print("run: seed %d, %s" % [seed_value, id])
+
+
+## The seed the next world is made from: the fixed one, or a new one from the system's clock and the time since the
+## game began.
+func _next_seed() -> int:
+	if seed_fixed:
+		return seed_value
+	return fresh_seed(int(Time.get_unix_time_from_system() * 1000000.0), Time.get_ticks_usec())
+
+
+## A run's seed, 1 to SEED_MOST, from two clocks in microseconds: the system's, which tells one launch from another,
+## and the time since the game began, which tells apart two starts inside one tick of the system's (on Windows it
+## moves a whole millisecond at a time). Pure: the same two numbers give the same seed.
+static func fresh_seed(clock_usec: int, ticks_usec: int) -> int:
+	var h := 0
+	for n in [clock_usec, ticks_usec]:
+		var left: int = n & 0x7fffffffffffffff
+		for i in 3:
+			h = _stir(h ^ (left & STIR_BITS))
+			left >>= 31
+	return 1 + h % SEED_MOST
+
+
+## One turn of fresh_seed's mix: 31 bits in, 31 bits out, no two inputs giving the same output, and each bit that goes
+## in moving about half of those that come out.
+static func _stir(h: int) -> int:
+	h = ((h ^ (h >> 16)) * 0x7feb352d) & STIR_BITS
+	h = ((h ^ (h >> 15)) * 0x5bd1e995) & STIR_BITS
+	return h ^ (h >> 16)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -227,6 +267,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif moved != null:
 			ui.chooser.hover(moved.position)
 		if took != "":
+			records.remember_character(took)
+			_set_choosing(false)
 			_take_character(took)
 		return
 	if k != null and k.pressed and not k.echo and k.keycode == HELP_KEY:
@@ -270,8 +312,11 @@ func _physics_process(_delta: float) -> void:
 	pending = {}
 	if paused or intro or choosing or touch.upright(): # presses made while paused are dropped; keys still held count again once it goes on
 		return
-	if f.pressed.has("restart") and Ui.ENDINGS.has(world.phase) and bot == null and not chosen_by_flag:
-		_set_choosing(true) # a new run: who keeps the torch this time (the last one in focus)
+	if f.pressed.has("restart") and Ui.ENDINGS.has(world.phase) and bot == null:
+		if chosen_by_flag:
+			_take_character(world.character)
+		else:
+			_set_choosing(true)
 		return
 	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
 	juice.frame()

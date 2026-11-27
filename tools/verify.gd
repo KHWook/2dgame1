@@ -6,6 +6,7 @@ extends SceneTree
 const Checks := preload("res://tools/checks.gd")
 const Replay := preload("res://tools/replay_test.gd")
 const Balance := preload("res://tools/balance.gd")
+const Variety := preload("res://tools/variety.gd")
 const Sprites := preload("res://src/art/sprites.gd")
 const Looks := preload("res://src/art/looks.gd")
 const RulesTest := preload("res://tools/rules_test.gd")
@@ -42,6 +43,11 @@ func _initialize() -> void:
 			if a.begins_with("--char="):
 				character = a.substr(7)
 		print(Balance.run(args.has("--late"), character))
+		print("verify: PASS")
+		quit(0)
+		return
+	if args.has("--variety"):
+		print(Variety.run())
 		print("verify: PASS")
 		quit(0)
 		return
