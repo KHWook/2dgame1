@@ -16,7 +16,7 @@ static func digest(w) -> String:
 	var p = w.player
 	var nums := PackedFloat64Array([w.night, w.time, w.steps, w.fuel, w.score, w.picks.size(), w.offer.size(), w.schedule.size(),
 		p.pos.x, p.pos.y, p.vel.x, p.vel.y, p.hp, p.face.x, p.face.y, p.attack_t, 1.0 if p.carrying else 0.0, 1.0 if p.dropped != null else 0.0, w.enemies.size(), w.logs.size(), w.berries.size(),
-		w.sparks.size(), p.dash_t, w.blade_kills, w.rerolls])
+		w.sparks.size(), p.dash_t, w.blade_kills, w.rerolls, w.haste_until])
 	for e in w.enemies:
 		nums.append_array([e.pos.x, e.pos.y, e.hp, e.knock.x, e.knock.y, 1.0 if e.carrying else 0.0, e.tier])
 	for l in w.logs + w.berries:
