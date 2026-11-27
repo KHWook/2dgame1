@@ -81,6 +81,15 @@ static func run() -> Array:
 	out.append_array(_needs())
 	out.append_array(_own_rows())
 	out.append_array(_combined_rows())
+	out.append_array(_moth())
+	out.append_array(_spitter())
+	out.append_array(_moth_packs())
+	out.append_array(_drummer())
+	out.append_array(_chief())
+	out.append_array(_boss_order())
+	out.append_array(_early_tiers())
+	out.append_array(_fair())
+	out.append_array(_coming_arrow())
 	return out
 
 
@@ -605,11 +614,11 @@ static func _bosses() -> Array:
 	for night in [every - 1, every, every * 2]:
 		var w = _night(DARK)
 		w.night = night
-		w.bosses_due = w._plan_bosses()
+		w._plan_night()
 		w.time = Config.NIGHT.length * Config.BOSS.at - Config.STEP * 0.5
 		var told := _play(w, 1)
 		var bosses: Array = w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.kind)
-		var want: Array = [] if night % every != 0 else [Config.BOSS.kinds[(night / every - 1) % Config.BOSS.kinds.size()]]
+		var want: Array = [] if night % every != 0 else [w.boss_order[(night / every - 1) % w.boss_order.size()]]
 		_expect(out, "night %d brings its boss partway through, and says so" % night, [bosses, told.has("boss")], [want, not want.is_empty()])
 	var w = _night(DARK)
 	var king = _add(w, "slime_king", Vector2(60.0, 0.0))
@@ -717,7 +726,7 @@ static func _patterns() -> Array:
 	# a boss's coming is told ahead, from the edge it comes from
 	w = _night(DARK)
 	w.night = Config.BOSS.every
-	w.bosses_due = w._plan_bosses()
+	w._plan_night()
 	w.time = Config.NIGHT.length * Config.BOSS.at - Config.BOSS.warn - Config.STEP * 0.5
 	told = []
 	var coming_at = null
@@ -743,10 +752,11 @@ static func _patterns() -> Array:
 static func _boss_nights() -> Array:
 	var out := []
 	var every: int = Config.BOSS.every
-	var kinds: Array = Config.BOSS.kinds
+	var kinds: Array = ["boar_chief", "slime_king", "shade_lord"] # this run's order, as its first boss dusk might draw it
 	for night in range(1, 25):
 		var w = _night(DARK)
 		w.night = night
+		w.boss_order = kinds
 		var want := 0
 		if night % every == 0:
 			for r in Config.BOSS.counts:
@@ -755,16 +765,16 @@ static func _boss_nights() -> Array:
 		var got: Array = w.boss_kinds()
 		_expect(out, "night %d brings %d bosses" % [night, want], got.size(), want)
 		if want > 0:
-			_expect(out, "night %d's first boss takes its turn" % night, got[0], kinds[(night / every - 1) % kinds.size()])
+			_expect(out, "night %d's first boss takes its turn in the run's order" % night, got[0], kinds[(night / every - 1) % kinds.size()])
 		if want > 1:
-			_expect(out, "night %d's bosses are of mixed kinds" % night, kinds.all(func(k): return got.has(k)), true)
+			_expect(out, "night %d's bosses are all different kinds" % night, got.all(func(k): return got.count(k) == 1), true)
 	_expect(out, "bosses come every third night, one at first, two from night 12, three from night 21", [Config.BOSS.every, Config.BOSS.counts.map(func(r): return [r.from, r.count])], [3, [[3, 1], [12, 2], [21, 3]]])
 	# a night with several: each warned and coming in turn, apart
 	var w = _night(DARK)
 	w.night = 12
 	w.player.hp = 1000
 	w.fuel = 1.0e6
-	w.bosses_due = w._plan_bosses()
+	w._plan_night()
 	var at: float = Config.NIGHT.length * Config.BOSS.at
 	w.time = at - Config.BOSS.warn - 1.0
 	var seen := [] # [kind of event, enemy, night time, pos]
@@ -793,11 +803,21 @@ static func _boss_nights() -> Array:
 		w.night = night
 		var king = w._boss("slime_king", w.player.pos + Vector2(60.0, 0.0))
 		hp_on[night] = [king.full_hp, king.hp, king.summons, king.splits]
-	_expect(out, "the first boss night's king is gentle: hp, summons and what it breaks into multiplied by strength.first", hp_on[every], [ceili(K.hp * S.first), ceili(K.hp * S.first), maxi(1, roundi(K.summon.count * S.first)), maxi(1, roundi(K.split_count * S.first))])
+	var gentle: float = S.first * S.opens.slime_king
+	_expect(out, "the first boss night's king is gentle: hp, summons and what it breaks into multiplied by strength.first (and its opens)", hp_on[every], [ceili(K.hp * gentle), ceili(K.hp * gentle), maxi(1, roundi(K.summon.count * gentle)), maxi(1, roundi(K.split_count * gentle))])
 	_expect(out, "a later boss night's king is stronger", hp_on[every * 5][0] > hp_on[every][0], true)
 	w = _night(DARK)
 	w.night = every * 30
-	_expect(out, "boss strength stops at strength.most", w.boss_strength(), S.most)
+	_expect(out, "boss strength stops at strength.most", w.boss_strength("slime_king"), S.most)
+	for kind in Config.BOSS.kinds:
+		var B: Dictionary = Config.ENEMY_TYPES[kind]
+		w = _night(DARK)
+		w.night = every
+		var opener = w._boss(kind, w.player.pos + Vector2(60.0, 0.0))
+		_expect(out, "%s opening a run is strength.first times its own opens strong: hp, summons" % kind, [opener.full_hp, opener.summons],
+			[ceili(B.hp * S.first * S.opens[kind]), maxi(1, roundi(B.summon.count * S.first * S.opens[kind]))])
+		w.night = every * 2
+		_expect(out, "%s on the second boss night is as strong as any boss is then: opens is for the first only" % kind, snappedf(w.boss_strength(kind), 0.001), snappedf(S.first + S.grow, 0.001))
 	w = _night(DARK)
 	w.night = every
 	var king = w._boss("slime_king", w.player.pos + Vector2(22.0, 0.0))
@@ -1244,8 +1264,9 @@ const OMEN_SAYS := {
 	"harvest": { "log_mult": 1, "kinds": { "thief": 1 } },
 	"dew": { "log_mult": -1, "berry_mult": -1 },
 	"dark_moon": { "light_mult": -1, "kinds": { "shade": 1 } },
+	"sultry": { "light_mult": 1, "kinds": { "moth": 1 } },
 }
-const OMEN_NIGHT := 5 # a night whose row has every kind an omen names, and no company
+const OMEN_NIGHT := 5 # a night whose row has every kind an omen names
 const OMEN_SPAWNS := 3000
 
 
@@ -1471,6 +1492,8 @@ static func _surges() -> Array:
 				_expect(out, "seed %d night %d: pack %d's warning points where surges_coming() does, beyond the field" % [seed_value, night, i], [warned[0][6].has(edge), Config.FIELD.has_point(edge)], [true, false])
 				_expect(out, "seed %d night %d: pack %d comes from the edge its warning pointed at, as many and of the kind it said" % [seed_value, night, i],
 					[came[0][3], came[0][4], came[0][1], warned[0][4], warned[0][1]], [edge, s.size, s.kind, s.size, s.kind])
+				if S.own.get(s.kind, {}).has("apart"): # it comes one by one (_moth_packs)
+					continue
 				_expect(out, "seed %d night %d: pack %d is all of its kind, as many as planned" % [seed_value, night, i], pack.map(func(e): return e.kind), _times(s.kind, s.size))
 				_expect(out, "seed %d night %d: pack %d is of one tier" % [seed_value, night, i], pack.all(func(e): return e.tier == pack[0].tier), true)
 				if pack.is_empty():
@@ -1487,9 +1510,9 @@ static func _surges() -> Array:
 					[pack.all(func(e): return absf((e.pos - edge).dot(along.orthogonal())) < 0.001), pack.any(func(e): return Config.FIELD.has_point(e.pos))], [true, false])
 	_expect(out, "packs were seen, of more than one kind, and on a late night of more than one tier", [packs_seen >= 40, kinds_seen.size() > 1, tiers_seen.size() > 1], [true, true, true])
 	_expect(out, "the line for a pack on its way", Config.SURGE.kinds.map(func(k): return Ui.coming_line(Ui.PACK % Looks.kind_name(k), Ui.PACK_COMING)),
-		["슬라임 떼가 몰려온다!", "박쥐 떼가 몰려온다!", "그림자 떼가 몰려온다!", "도둑 비버 떼가 몰려온다!", "멧돼지 떼가 몰려온다!"])
-	_expect(out, "the line for a boss on its way reads as before", Config.BOSS.kinds.map(func(k): return Ui.coming_line(Config.ENEMY_TYPES[k].name, Ui.BOSS_COMING)),
-		["슬라임 왕이 다가온다!", "그림자 군주가 다가온다!"])
+		["슬라임 떼가 몰려온다!", "박쥐 떼가 몰려온다!", "그림자 떼가 몰려온다!", "도둑 비버 떼가 몰려온다!", "멧돼지 떼가 몰려온다!", "불나방 떼가 몰려온다!"])
+	_expect(out, "the line for a boss on its way names each boss", Config.BOSS.kinds.map(func(k): return Ui.coming_line(Config.ENEMY_TYPES[k].name, Ui.BOSS_COMING)),
+		["슬라임 왕이 다가온다!", "그림자 군주가 다가온다!", "멧돼지 대장이 다가온다!"])
 	return out
 
 
@@ -1709,12 +1732,13 @@ static func _tier_stats() -> Array:
 		_expect(out, "%s at tier 1 is its row" % kind, Enemy.row(kind, 1) == base, true)
 		if base.get("boss", false):
 			continue
+		var frail: bool = base.get("frail", false)
 		for t in Config.TIERS.size():
 			var up: Dictionary = Config.TIERS[t]
 			var r: Dictionary = Enemy.row(kind, t + 2)
 			_expect(out, "%s tier %d: hp, speed, smother, score" % [kind, t + 2], [r.hp, snappedf(r.speed, 0.001), snappedf(r.smother, 0.001), r.score],
-				[ceili(base.hp * up.hp), snappedf(base.speed * up.speed, 0.001), snappedf(base.get("smother", 1.0) * up.smother, 0.001), ceili(base.get("score", Config.SCORE.kill) * up.score)])
-		_expect(out, "%s: each tier is tougher than the one below" % kind, base.hp <= Enemy.row(kind, 2).hp and Enemy.row(kind, 2).hp <= Enemy.row(kind, 3).hp and Enemy.row(kind, 3).hp > base.hp, true)
+				[base.hp if frail else ceili(base.hp * up.hp), snappedf(base.speed * up.speed, 0.001), snappedf(base.get("smother", 1.0) * up.smother, 0.001), ceili(base.get("score", Config.SCORE.kill) * up.score)])
+		_expect(out, "%s: each tier is tougher than the one below, unless the kind is frail" % kind, base.hp <= Enemy.row(kind, 2).hp and Enemy.row(kind, 2).hp <= Enemy.row(kind, 3).hp and Enemy.row(kind, 3).hp > base.hp, not frail)
 	var e = Enemy.new("slime", Vector2.ZERO, 3)
 	_expect(out, "an enemy made at a tier has its tier's row and hp", [e.tier, e.hp, is_same(e.T, Enemy.row("slime", 3))], [3, Enemy.row("slime", 3).hp, true])
 	# a kill scores the tier's worth and the event names the tier, so the E1 count can follow it
@@ -1808,7 +1832,7 @@ static func _tier_nights() -> Array:
 		_expect(out, "night %d: an enemy and those that come along with it are of one tier" % night, mixed, 0)
 	var w = _night(DARK)
 	w.night = 21
-	w.bosses_due = w._plan_bosses()
+	w._plan_night()
 	w.time = Config.NIGHT.length * Config.BOSS.at + Config.BOSS.apart * 2
 	_play(w, 2)
 	_expect(out, "bosses are tier 1 on a late night", w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.tier), [1, 1, 1])
@@ -3765,4 +3789,622 @@ static func _combined_rows() -> Array:
 		_play(w, 30)
 		_expect(out, "a log on the fire %s: the slime that smothered the torch %s" % ["with blast" if with else "without", "is off it, and the fire burns freely" if with else "is still on it"],
 			[on.at_torch, w.burn_rate() < smothered], [not with, with])
+	return out
+
+
+## A pack of moths (Config.SURGE.own.moth) holds at most own.most whatever the night's packs hold, so one no one
+## answers takes at most MOTH_PACK_FUEL of the fuel, at every size and tier; it comes out of the warned spot one moth
+## at a time, own.apart apart, so that fuel goes over (size - 1) * apart seconds and never two moths' worth at once.
+## Every night plans its moth packs no bigger than that, and the trickle makes up for what they really hold.
+const MOTH_PACK_FUEL := 30.0
+static func _moth_packs() -> Array:
+	var out := []
+	var S: Dictionary = Config.SURGE
+	var own: Dictionary = S.own.moth
+	var burns: float = Config.ENEMY_TYPES.moth.burns
+	var biggest := 0
+	for r in S.packs:
+		biggest = maxi(biggest, r.most)
+	_expect(out, "the biggest moth pack is smaller than the biggest pack, and takes at most MOTH_PACK_FUEL", [own.most < biggest, own.most * burns <= MOTH_PACK_FUEL], [true, true])
+	var tiers := {}
+	for scene in [[1, 2, 0], [1, 3, 0], [1, 4, 0], [1, 8, 0], [1, 10, 0], [16, 10, 0], [16, 10, 1], [16, 10, 2], [16, 10, 3], [16, 10, 4], [16, 10, 5]]: # [night, the most that night's packs hold, rolls before its tier's]
+		var size: int = World.pack_size("moth", scene[1])
+		var from := Vector2(Config.FIELD.position.x - Config.ENEMY.edge, Config.TORCH.pos.y - 40.0)
+		var plain = _night(Vector2(0.0, 100.0))
+		var w = _night(Vector2(0.0, 100.0))
+		for world in [plain, w]:
+			world.night = scene[0]
+			world.fuel = 1.0e6
+			world.time = 5.0
+		for i in scene[2]:
+			w.rng.next()
+		w.surges_due = [{ "kind": "moth", "at": w.time, "size": size, "from": from }]
+		var came := [] # the night time each moth came out, and where
+		var burned := [] # the night time each burned up
+		var hps := {}
+		var tier := 0
+		var seen := {}
+		for i in int(12.0 / Config.STEP):
+			plain.step(InputFrame.new())
+			w.step(InputFrame.new())
+			for e in w.enemies:
+				if not seen.has(e):
+					seen[e] = true
+					came.append([w.time, e.pos.distance_to(from) < e.T.speed * Config.STEP * 1.5])
+					hps[e.hp] = true
+					tier = e.tier
+			for ev in w.events:
+				if ev.kind == "burned":
+					burned.append(w.time)
+		tiers[tier] = true
+		var name := "a pack of %d moths (of %d a pack, tier %d)" % [size, scene[1], tier]
+		_expect(out, "%s holds min(size, own.most), each of 1 hp" % name, [size, came.size(), hps.keys()], [mini(scene[1], own.most), size, [1]])
+		var even := true
+		for i in range(1, came.size()):
+			even = even and absf(came[i][0] - came[i - 1][0] - own.apart) < 1.5 * Config.STEP
+		_expect(out, "%s comes out of the warned spot one by one, own.apart apart" % name, [came.all(func(c): return c[1]), even], [true, true])
+		_expect(out, "%s, unanswered, takes burns each and at most MOTH_PACK_FUEL" % name, [snappedf(plain.fuel - w.fuel, 0.001), plain.fuel - w.fuel <= MOTH_PACK_FUEL + 0.001, burned.size()], [snappedf(size * burns, 0.001), true, size])
+		if burned.size() == size:
+			var close := INF
+			for i in range(1, size):
+				close = minf(close, burned[i] - burned[i - 1])
+			_expect(out, "%s burns up over (size - 1) * apart seconds, no two moths at once" % name, [snappedf(burned[-1] - burned[0], 0.05), close > own.apart * 0.8], [snappedf((size - 1) * own.apart, 0.05), true])
+	_expect(out, "moth packs of every tier were played", tiers.keys().size(), Config.TIERS.size() + 1)
+	var planned := {}
+	for seed_value in range(1, 41):
+		for night in [3, 8, 12]:
+			var w = _dusk_at(seed_value, night)
+			var most: int = w.surge_packs()[1]
+			var held := 0
+			for s in w.surges_due:
+				held += s.size
+				if s.kind == "moth":
+					planned[s.size] = true
+					if s.size > own.most:
+						_expect(out, "seed %d night %d: a planned moth pack holds no more than own.most" % [seed_value, night], s.size, own.most)
+				elif s.size > most:
+					_expect(out, "seed %d night %d: a planned pack holds no more than the night's most" % [seed_value, night], s.size, most)
+			if held > 0:
+				var bodies: float = w._bodies_tonight()
+				var slow: float = bodies / (bodies - held * S.makes_up)
+				if absf(w.surge_slow - slow) > 0.0001:
+					_expect(out, "seed %d night %d: the trickle makes up for what the packs really hold" % [seed_value, night], w.surge_slow, slow)
+	_expect(out, "moth packs were planned, the biggest of own.most", planned.keys().max(), own.most)
+	return out
+
+
+## How far an enemy moves in steps.
+static func _went(w, e, steps: int) -> float:
+	var from: Vector2 = e.pos
+	_play(w, steps)
+	return e.pos.distance_to(from)
+
+
+## The moth (Config.ENEMY_TYPES.moth): it flies to the flame and burns up there, taking burns of the fuel (the same at
+## every tier, and one blow fells it at every tier) and nothing else: it smothers nothing and is no kill. One that dies on the way (to a blow, a spark, the ember
+## ring's scorch) takes nothing. It hurts no one. Nights 1 and 2 have no moth and no new kind.
+static func _moth() -> Array:
+	var out := []
+	var M: Dictionary = Config.ENEMY_TYPES.moth
+	var steps := int(40.0 / M.speed / Config.STEP) + 20
+	for tier in [1, 2, 3]:
+		var plain = _night(DARK)
+		var w = _night(DARK)
+		var moth = Enemy.new("moth", Config.TORCH.pos + Vector2(-40.0, 0.0), tier)
+		w.enemies.append(moth)
+		_play(plain, steps)
+		var told := _play(w, steps)
+		_expect(out, "a tier %d moth that reaches the flame burns up and takes burns of the fuel, no more: it smothers nothing" % tier,
+			[moth.gone, moth.dead, w.enemies.size(), snappedf(plain.fuel - w.fuel, 0.001), told.count("burned")], [true, false, 0, snappedf(M.burns, 0.001), 1])
+		_expect(out, "a tier %d moth has 1 hp and is faster than the tier below" % tier, [moth.hp, tier == 1 or moth.T.speed > Enemy.row("moth", tier - 1).speed], [1, true])
+		_expect(out, "a tier %d moth burning up is no kill" % tier, [w.score, told.has("kill")], [0, false])
+	_expect(out, "a moth takes a fifth of a log", M.burns, Config.TORCH.log_fuel / 5.0)
+	var plain = _night(DARK)
+	var w = _night(DARK)
+	var moth = _add(w, "moth", NEAR)
+	_play(plain, SWING)
+	var told := _play(w, SWING, "attack")
+	_expect(out, "a moth cut down on the way takes nothing, and is a kill", [moth.dead, told.has("burned"), snappedf(plain.fuel - w.fuel, 0.001), w.score], [true, false, 0.0, Config.SCORE.kill])
+	plain = _night(DARK, ["spark"])
+	w = _night(DARK, ["spark"])
+	moth = Enemy.new("moth", Config.TORCH.pos + Vector2(-60.0, 0.0))
+	w.enemies.append(moth)
+	_play(plain, 150)
+	told = _play(w, 150)
+	_expect(out, "a moth the torch's spark burns on the way takes nothing", [moth.dead, told.has("burned"), snappedf(plain.fuel - w.fuel, 0.001)], [true, false, 0.0])
+	var build := ["ember_ring", "warm_glow", "scorch"]
+	plain = _night(DARK, build)
+	w = _night(DARK, build)
+	moth = Enemy.new("moth", Config.TORCH.pos + Vector2(-(World.upgrade("ember_ring", 1).ember_radius - 2.0), 0.0))
+	w.enemies.append(moth)
+	_play(plain, 30)
+	told = _play(w, 30)
+	_expect(out, "a moth the ring's scorch finishes takes nothing", [moth.dead, told.has("burned"), snappedf(plain.fuel - w.fuel, 0.001)], [true, false, 0.0])
+	w = _night(DARK)
+	moth = _add(w, "moth", Vector2.ZERO)
+	_play(w, 2)
+	_expect(out, "a moth that flies through the keeper does not hurt it", w.player.hp, Config.PLAYER.hp)
+	_expect(out, "moths come from the third night, in twos, later in threes", [Config.NIGHTS.map(func(r): return r.who.has("moth")).find(true) + 1, Config.NIGHTS[2].with.moth, Config.NIGHTS[-1].with.moth], [3, ["moth"], ["moth", "moth"]])
+	_expect(out, "the first night is as it was", Config.NIGHTS[0], { "burn": 2.0, "spawn": [3.0, 2.0], "who": { "slime": 0.8, "bat": 0.2 } })
+	_expect(out, "the second night is as it was", Config.NIGHTS[1], { "burn": 2.4, "spawn": [2.5, 1.7], "who": { "slime": 0.6, "bat": 0.2, "thief": 0.2 } })
+	return out
+
+
+## The spitter (Config.ENEMY_TYPES.spitter): it hunts the keeper but stops spit.range off and stands there; on the
+## field and in range it fixes its line, puffs up for spit.warn (hurting no one yet), then spits a blob that flies
+## along that line, where the keeper stood when the warning began, for spit.reach or to the field's edge. The blob
+## hurts a keeper who stayed on the line and misses one who stepped off it; a blow or an ember bursts it. It never
+## spits from beyond the field, nor from out of range, and one killed while it puffs spits nothing.
+static func _spitter() -> Array:
+	var out := []
+	var T: Dictionary = Config.ENEMY_TYPES.spitter
+	var S: Dictionary = T.spit
+	var warn_steps := int(round(S.warn / Config.STEP))
+	var fly_steps := int(S.reach / S.speed / Config.STEP) + 3
+	var w = _night(Vector2(-120.0, 60.0))
+	var toad = _add(w, "spitter", Vector2(S.range + 40.0, 0.0))
+	toad.move_t = NEVER
+	_play(w, int(60.0 / T.speed / Config.STEP))
+	var off: float = toad.pos.distance_to(w.player.pos)
+	_expect(out, "the spitter walks up to spit.range of the keeper and stops there", [off <= S.range, off > S.range - T.speed * Config.STEP * 2.0, _went(w, toad, 60) < 0.01], [true, true, true])
+	for dodge in [false, true]:
+		w = _night(Vector2(-120.0, 60.0))
+		toad = _add(w, "spitter", Vector2(S.range - 10.0, 0.0))
+		toad.move_t = 0.0
+		var told := _play(w, 1)
+		var line: Vector2 = toad.aim
+		var from: Vector2 = toad.pos
+		_expect(out, "the spitter fixes its line at the keeper, puffs up and says so (dodge %s)" % dodge, [toad.move, line.is_equal_approx(Vector2.LEFT), told.has("warn"), toad.move_to.is_equal_approx(from + line * S.reach)], ["warn", true, true, true])
+		told = _play(w, warn_steps - 2, "", "up" if dodge else "")
+		_expect(out, "while it puffs nothing flies and no one is hurt (dodge %s)" % dodge, [toad.move, w.blobs.size(), w.player.hp, told.has("spat")], ["warn", 0, Config.PLAYER.hp, false])
+		told = _play(w, 2, "", "up" if dodge else "")
+		_expect(out, "after spit.warn it spits one blob along the line it showed, not at where the keeper is now (dodge %s)" % dodge,
+			[w.blobs.size(), told.count("spat"), w.blobs.size() == 1 and w.blobs[0].dir.is_equal_approx(line)], [1, 1, true])
+		var strayed := 0.0
+		var furthest := 0.0
+		for i in fly_steps:
+			_play(w, 1)
+			for b in w.blobs:
+				strayed = maxf(strayed, absf((b.pos - from).dot(line.orthogonal())))
+				furthest = maxf(furthest, (b.pos - from).dot(line))
+		_expect(out, "the blob keeps to its line (dodge %s)" % dodge, strayed < 0.01, true)
+		_expect(out, "the blob hurts a keeper who stayed on the line, and misses one who stepped off it (dodge %s)" % dodge, w.player.hp, Config.PLAYER.hp - (0 if dodge else 1))
+		_expect(out, "the blob is gone (dodge %s)" % dodge, w.blobs.size(), 0)
+		if dodge:
+			_expect(out, "a blob that meets no one flies spit.reach and no further", [furthest <= S.reach + 0.01, furthest > S.reach - S.speed * Config.STEP * 1.5], [true, true])
+	w = _night(Vector2.ZERO)
+	w.player.pos = Vector2(Config.FIELD.end.x - 6.0, Config.TORCH.pos.y)
+	toad = _add(w, "spitter", Vector2(-40.0, 0.0))
+	toad.move_t = 0.0
+	_play(w, warn_steps + 1, "", "up")
+	var past := 0.0
+	for i in fly_steps:
+		_play(w, 1, "", "up")
+		for b in w.blobs:
+			past = maxf(past, b.pos.x - Config.FIELD.end.x)
+	_expect(out, "a blob dies at the field's edge", [w.blobs.size(), past <= 0.0], [0, true])
+	for who in ["knight", "woodcutter", "mage"]:
+		w = _night(Vector2(-120.0, 60.0), [], who)
+		var at: Vector2 = w.player.pos + (Vector2(60.0, 0.0) if who == "mage" else NEAR)
+		w.blobs.append({ "pos": at, "dir": Vector2.LEFT, "left": 200.0, "radius": S.radius, "speed": 0.0 if who != "mage" else S.speed })
+		var told := _play(w, 40, "attack")
+		_expect(out, "the %s's blow bursts a blob before it hurts" % who, [w.blobs.size(), told.count("splat"), w.player.hp], [0, 1, w.stats.hp])
+	w = _night(Vector2.ZERO)
+	w.player.pos = Vector2(Config.FIELD.position.x + 30.0, Config.TORCH.pos.y)
+	toad = Enemy.new("spitter", Vector2(Config.FIELD.position.x - Config.ENEMY.edge, Config.TORCH.pos.y))
+	w.enemies.append(toad)
+	toad.move_t = 0.0
+	var before: float = toad.pos.x
+	_play(w, 5)
+	_expect(out, "a spitter beyond the field does not spit, in range or not: it walks in first", [toad.move, toad.pos.x > before, w.blobs.size()], ["", true, 0])
+	_play(w, int((Config.ENEMY.edge + 2.0) / T.speed / Config.STEP))
+	_expect(out, "once on the field it lines up", [toad.move, Config.FIELD.has_point(toad.pos)], ["warn", true])
+	w = _night(Vector2(-120.0, 60.0))
+	toad = _add(w, "spitter", Vector2(S.range + 20.0, 0.0))
+	toad.move_t = 0.0
+	_play(w, 1)
+	_expect(out, "the spitter does not spit from out of range", toad.move, "")
+	w = _night(Vector2(-120.0, 60.0))
+	toad = _add(w, "spitter", Vector2(S.range - 10.0, 0.0))
+	toad.move_t = 0.0
+	_play(w, 5)
+	w._damage(toad, T.hp, toad.pos + Vector2(4.0, 0.0))
+	_play(w, warn_steps + 5)
+	_expect(out, "a spitter killed while it puffs spits nothing", [toad.dead, w.blobs.size(), w.player.hp], [true, 0, Config.PLAYER.hp])
+	_expect(out, "its warning is long enough to step off the line: the keeper, carrying, clears the blob's width in a third of it", (S.radius + Config.PLAYER.radius) / Config.PLAYER.carry_speed < S.warn / 3.0, true)
+	_expect(out, "its blob is slower than the keeper carrying a log", S.speed < Config.PLAYER.speed and S.range < S.reach, true)
+	return out
+
+
+## The drummer (Config.ENEMY_TYPES.drummer): it walks to the edge of the torch's light (drum.gap outside it) and stands
+## there, following the light as it shrinks. On the field it beats every drum.beat; every other enemy within
+## drum.radius walks drum.speed_mult times as fast, and is marked (Enemy.drum, which the painter reads). One beyond
+## the radius is not; two drummers do no more than one; another drummer is not sped; and when the drummer dies the
+## enemy walks as before from its next step.
+static func _drummer() -> Array:
+	var out := []
+	var T: Dictionary = Config.ENEMY_TYPES.drummer
+	var D: Dictionary = T.drum
+	var w = _night(Vector2(0.0, 100.0))
+	w.fuel = 1.0e6
+	var imp = Enemy.new("drummer", Config.TORCH.pos + Vector2(200.0, 0.0))
+	w.enemies.append(imp)
+	_play(w, int(120.0 / T.speed / Config.STEP))
+	var ring: float = w.light_radius() + D.gap + T.radius
+	_expect(out, "the drummer walks to the edge of the light and stops just outside it",
+		[absf(imp.pos.distance_to(Config.TORCH.pos) - ring) <= Config.ENEMY.drum_slack + 0.5, w.in_light(imp.pos), _went(w, imp, 60) < 0.01], [true, false, true])
+	w.fuel = 30.0
+	_play(w, int(80.0 / T.speed / Config.STEP))
+	ring = w.light_radius() + D.gap + T.radius
+	_expect(out, "when the light shrinks the drummer follows its edge in", absf(imp.pos.distance_to(Config.TORCH.pos) - ring) <= Config.ENEMY.drum_slack + 1.0, true)
+	# what hears it: [how many drummers, how far the slime is from the first]
+	var steps := 60
+	var went := {}
+	for scene in [[0, 30.0], [1, 30.0], [1, D.radius + 10.0], [2, 30.0]]:
+		w = _night(Vector2(0.0, 100.0))
+		w.fuel = 1.0e6
+		var at: Vector2 = Config.TORCH.pos + Vector2(w.light_radius() + D.gap + T.radius, 0.0)
+		var imps := []
+		for i in scene[0]:
+			var d = Enemy.new("drummer", at + Vector2(0.0, -6.0 * i))
+			d.move_t = 0.0
+			w.enemies.append(d)
+			imps.append(d)
+		var slime = Enemy.new("slime", at + Vector2(0.0, scene[1]))
+		w.enemies.append(slime)
+		_play(w, 1)
+		went[scene] = _went(w, slime, steps)
+		var marked: bool = slime.drum != null
+		_expect(out, "with %d drummers, a slime %d from the first is marked as hearing one: %s" % [scene[0], scene[1], scene[0] > 0 and scene[1] <= D.radius], marked, scene[0] > 0 and scene[1] <= D.radius)
+		if scene == [2, 30.0]:
+			_expect(out, "a drummer does not speed another drummer", imps[1].drum, null)
+		if scene == [1, 30.0]: # killed right after a beat, with all of that beat still to carry the slime
+			var waited := 0
+			while not _play(w, 1).has("beat") and waited < 100:
+				waited += 1
+			w._damage(imps[0], T.hp, imps[0].pos + Vector2(4.0, 0.0))
+			var short: int = int(D.beat / Config.STEP) - 5
+			var after: float = _went(w, slime, short)
+			_expect(out, "when the drummer dies, what it drove walks as before from its next step, and is no longer marked", [snappedf(after / (went[[0, 30.0]] * short / steps), 0.01), slime.drum], [1.0, null])
+	_expect(out, "a slime within drum.radius walks speed_mult times as fast", snappedf(went[[1, 30.0]] / went[[0, 30.0]], 0.01), snappedf(D.speed_mult, 0.01))
+	_expect(out, "a slime beyond drum.radius walks as it always does", snappedf(went[[1, D.radius + 10.0]] / went[[0, 30.0]], 0.01), 1.0)
+	_expect(out, "two drummers speed it no more than one", snappedf(went[[2, 30.0]] / went[[1, 30.0]], 0.01), 1.0)
+	w = _night(Vector2(0.0, 100.0))
+	imp = Enemy.new("drummer", Vector2(Config.FIELD.end.x + Config.ENEMY.edge, Config.TORCH.pos.y))
+	imp.move_t = 0.0
+	w.enemies.append(imp)
+	var told := _play(w, 3)
+	_expect(out, "a drummer beyond the field does not beat", told.has("beat"), false)
+	told = _play(w, int(Config.ENEMY.edge / T.speed / Config.STEP) + 3 + int(D.beat / Config.STEP))
+	_expect(out, "on the field it beats, and says so", told.has("beat"), true)
+	var gaps := []
+	var since := -1 # steps since the last beat heard here, -1 before the first
+	for i in roundi(D.beat / Config.STEP) * 5:
+		since += 1 if since >= 0 else 0
+		if _play(w, 1).has("beat"):
+			if since >= 0 and not gaps.has(since):
+				gaps.append(since)
+			since = 0
+	_expect(out, "it beats every drum.beat seconds, to the step", gaps, [roundi(D.beat / Config.STEP)])
+	_expect(out, "the drummer is weak itself: no tougher than a slime", T.hp <= Config.ENEMY_TYPES.slime.hp, true)
+	return out
+
+
+## The boar chief (Config.ENEMY_TYPES.boar_chief), the boss that hunts the keeper: a set of charge.count charges,
+## each lined up afresh and warned for charge.warn, then it stands winded for charge.winded (and only then: the short
+## stops between its charges are not the winded one), and after charge.every walking it starts again. A charge hurts a
+## keeper who stayed in its lane and misses one who left it. Logs on its line slide ahead and aside (none is lost,
+## none jumps), a keeper it runs down drops the logs it carries (a boar's charge leaves them), and its line stops
+## short of the torch: it never runs through the torch's spot. With its charge due on the torch's spot, or with no
+## more line than the torch leaves it, it starts none: it walks straight out from the fire first.
+static func _chief() -> Array:
+	var out := []
+	var T: Dictionary = Config.ENEMY_TYPES.boar_chief
+	var C: Dictionary = T.charge
+	var warn_steps := int(round(C.warn / Config.STEP))
+	var w = _night(Vector2(-150.0, 80.0))
+	w.player.hp = 1000
+	w.fuel = 1.0e6
+	var chief = _add(w, "boar_chief", Vector2(200.0, 0.0))
+	chief.summon_t = NEVER
+	chief.move_t = 0.0
+	var moves := [] # each part of its pattern as it begins: [move, spent()]
+	var warned := 0
+	var warn_len := 0
+	var guard := 0
+	while not chief.spent() and guard < 2000:
+		guard += 1
+		var was: String = chief.move
+		warned += _play(w, 1).count("warn")
+		if chief.move == "warn" and moves.count(["warn", false]) <= 1 and was == "warn":
+			warn_len += 1
+		if chief.move != was and chief.move != "":
+			moves.append([chief.move, chief.spent()])
+	var want := []
+	for i in C.count:
+		want.append_array([["warn", false], ["charge", false], ["rest", i == C.count - 1]])
+	_expect(out, "the chief charges charge.count times in a row, each warned, and only then stands winded", [moves, warned], [want, C.count])
+	_expect(out, "each of its charges is warned for charge.warn", absi(warn_len + 1 - warn_steps) <= 1, true)
+	var at: Vector2 = chief.pos
+	_expect(out, "the skid puff where it stopped starts at its first frame", Painter.skid_frame(chief), 0)
+	var puffs := {}
+	var told := []
+	for i in int(C.winded / Config.STEP) - 3:
+		told.append_array(_play(w, 1))
+		puffs[Painter.skid_frame(chief)] = true
+	var frames: Array = puffs.keys()
+	frames.sort()
+	_expect(out, "and plays each of its frames once through the winded stop, then clears", frames, [-1] + range(Effects.POOF.size()))
+	_expect(out, "winded, it stands still for charge.winded and lines nothing up", [chief.spent(), chief.pos.distance_to(at) < 0.01, told.has("warn")], [true, true, false])
+	_play(w, 5)
+	_expect(out, "then it walks again", [chief.move, chief.spent()], ["", false])
+	told = _play(w, int(C.every / Config.STEP) - 8)
+	_expect(out, "and waits charge.every before its next set", told.has("warn"), false)
+	_expect(out, "which then begins", _play(w, 12).has("warn"), true)
+	for dodge in [false, true]:
+		w = _night(Vector2(-150.0, 80.0))
+		w.fuel = 1.0e6
+		chief = _add(w, "boar_chief", Vector2(200.0, 0.0))
+		chief.summon_t = NEVER
+		chief.move_t = 0.0
+		_play(w, warn_steps - 2, "", "up" if dodge else "")
+		_expect(out, "the chief has hurt no one while it paws (dodge %s)" % dodge, [chief.move, w.player.hp], ["warn", Config.PLAYER.hp])
+		_play(w, int(210.0 / C.speed / Config.STEP), "", "up" if dodge else "")
+		_expect(out, "its charge hurts a keeper who stayed in its lane, and misses one who left it (dodge %s)" % dodge, w.player.hp, Config.PLAYER.hp - (0 if dodge else 1))
+	w = _night(Vector2(-150.0, 80.0))
+	w.fuel = 1.0e6
+	w.player.pos = Vector2(Config.FIELD.position.x + 4.0, Config.TORCH.pos.y + 80.0)
+	chief = Enemy.new("boar_chief", Vector2(Config.FIELD.end.x - 100.0, Config.TORCH.pos.y + 80.0))
+	w.enemies.append(chief)
+	chief.summon_t = NEVER
+	chief.move_t = 0.0
+	var laid := [chief.pos + Vector2(-60.0, 0.0), chief.pos + Vector2(-90.0, 8.0), chief.pos + Vector2(-90.0, 45.0)]
+	w.logs = laid.duplicate()
+	var jump := 0.0
+	var close := INF
+	for i in warn_steps + int(C.dist / C.speed / Config.STEP) + 2:
+		var were: Array = w.logs.duplicate()
+		_play(w, 1, "", "up")
+		for k in mini(were.size(), w.logs.size()):
+			jump = maxf(jump, w.logs[k].distance_to(were[k]))
+			if chief.move == "charge":
+				close = minf(close, w.logs[k].distance_to(chief.pos))
+	_expect(out, "logs on the chief's line are pushed along, and none is lost", [w.logs.size(), w.logs[0].distance_to(laid[0]) > 20.0, w.logs[1].distance_to(laid[1]) > 4.0], [3, true, true])
+	_expect(out, "a log beside its lane lies where it lay", w.logs[2], laid[2])
+	_expect(out, "a pushed log slides: it never moves further in a step than the charge does", jump <= C.speed * Config.STEP * 1.5, true)
+	_expect(out, "no log stays under the charging chief", close >= T.radius + C.plough - 0.01, true)
+	_expect(out, "every pushed log is still on the field", w.logs.all(func(l): return Config.FIELD.has_point(l)), true)
+	for kind in ["boar_chief", "boar"]:
+		w = _night(Vector2(-150.0, 80.0), [], "woodcutter")
+		w.fuel = 1.0e6
+		var runner = _add(w, kind, Vector2(100.0, 0.0))
+		runner.summon_t = NEVER
+		runner.move_t = 0.0
+		for i in 3:
+			w.player.take_log(w.carry())
+		_play(w, int(round(runner.T.charge.warn / Config.STEP)) + int(110.0 / runner.T.charge.speed / Config.STEP))
+		var dropped: bool = kind == "boar_chief"
+		_expect(out, "a keeper run down by a %s %s the logs it carries" % [kind, "drops" if dropped else "keeps"], [w.player.hp, w.player.held, w.player.carrying, w.logs.size()], [w.stats.hp - 1, 0 if dropped else 3, not dropped, 3 if dropped else 0])
+		if dropped:
+			_expect(out, "the logs knocked out of its arms land beside the lane, out of its reach, on the field",
+				w.logs.all(func(l): return absf((l - runner.pos).dot(runner.aim.orthogonal())) >= runner.lane_half() and l.distance_to(w.player.pos) > w.stats.grab and Config.FIELD.has_point(l)), true)
+	var keep: float = Config.TORCH.reach + T.radius + C.torch_gap
+	w = _night(Vector2(120.0, 0.0))
+	w.fuel = 1.0e6
+	w.player.hp = 1000
+	chief = Enemy.new("boar_chief", Config.TORCH.pos + Vector2(-120.0, 0.0))
+	w.enemies.append(chief)
+	chief.summon_t = NEVER
+	chief.move_t = 0.0
+	_play(w, 1)
+	_expect(out, "a line through the torch stops short of it: its end, and the end of the band drawn for it, are torch_gap clear",
+		[chief.move, snappedf(chief.move_to.distance_to(Config.TORCH.pos), 0.01), chief.charge_end().is_equal_approx(chief.move_to)], ["warn", snappedf(keep, 0.01), true])
+	var nearest := INF
+	guard = 0
+	while chief.move in ["warn", "charge"] and guard < 600:
+		guard += 1
+		_play(w, 1)
+		nearest = minf(nearest, chief.pos.distance_to(Config.TORCH.pos))
+	_expect(out, "the charge itself never comes nearer the torch than that", [chief.move, nearest >= keep - C.speed * Config.STEP], ["rest", true])
+	w = _night(Vector2(120.0, 60.0))
+	chief = Enemy.new("boar_chief", Config.TORCH.pos + Vector2(-120.0, 60.0))
+	w.enemies.append(chief)
+	chief.move_t = 0.0
+	_play(w, 1)
+	_expect(out, "a line that passes clear of the torch runs its whole length", [chief.move, chief.run], ["warn", C.dist])
+	for scene in [[Vector2(26.0, 14.0), Vector2(-4.0, 3.0)], [Vector2(0.0, 40.0), Vector2.ZERO], [Vector2(60.0, 0.0), Vector2(-20.0, 0.0)], [Vector2.ZERO, Vector2(-20.0, 0.0)]]: # [the keeper, the chief], from the torch
+		w = _night(scene[0])
+		w.fuel = 1.0e6
+		w.player.hp = 1000
+		chief = Enemy.new("boar_chief", Config.TORCH.pos + scene[1])
+		w.enemies.append(chief)
+		chief.summon_t = NEVER
+		chief.move_t = 0.0
+		var name := "the chief %s from the torch with its charge due, the keeper %s from it" % [scene[1], scene[0]]
+		var off: float = chief.pos.distance_to(Config.TORCH.pos)
+		var inward := false
+		guard = 0
+		while chief.move == "" and guard < 600:
+			guard += 1
+			_play(w, 1)
+			inward = inward or chief.pos.distance_to(Config.TORCH.pos) < off - 0.001
+			off = chief.pos.distance_to(Config.TORCH.pos)
+		_expect(out, "%s: it lines nothing up on the fire, steps straight off it and only then paws, a whole lane's width of line before it" % name,
+			[chief.move, chief.by_torch(), inward, off >= keep, chief.run >= chief.lane_half()], ["warn", false, false, true, true])
+		nearest = INF
+		guard = 0
+		while chief.move in ["warn", "charge"] and guard < 600:
+			guard += 1
+			_play(w, 1)
+			nearest = minf(nearest, chief.pos.distance_to(Config.TORCH.pos))
+		_expect(out, "%s: its charge from there does not cross the torch's spot either" % name, [chief.move, nearest >= keep - C.speed * Config.STEP], ["rest", true])
+	w = _night(DARK)
+	chief = _add(w, "boar_chief", Vector2(60.0, 0.0))
+	chief.move_t = NEVER
+	_play(w, int(T.summon.every / Config.STEP) + 1)
+	_expect(out, "the chief calls boars", w.enemies.filter(func(e): return e.kind == "boar").size(), T.summon.count)
+	_expect(out, "the chief is a boss the nights can bring, and hunts the keeper", [T.get("boss", false), Config.BOSS.kinds.has("boar_chief"), T.target], [true, true, "player"])
+	_expect(out, "its warning is long enough to leave its lane carrying a log", (chief.lane_half() + T.radius) / Config.PLAYER.carry_speed < C.warn, true)
+	return out
+
+
+## The order the bosses take turns in (World.boss_order) is drawn from the run's rng at the dusk of its first boss
+## night and kept: nothing is drawn for it before (the dusk of the night before draws the same with or without an
+## order), that dusk draws one number per place but the last, one seed gives one order, seeds differ, and the first
+## boss night brings the first of the order.
+static func _boss_order() -> Array:
+	var out := []
+	var every: int = Config.BOSS.every
+	var kinds: Array = Config.BOSS.kinds
+	var sorted: Array = kinds.duplicate()
+	sorted.sort()
+	var orders := {}
+	var firsts := {}
+	for seed_value in range(1, 61):
+		var w = World.new(seed_value)
+		var fresh: Array = w.boss_order.duplicate()
+		w.night = every - 1
+		w._dusk()
+		var early: Array = w.boss_order.duplicate()
+		w.night = every
+		w._dusk()
+		var order: Array = w.boss_order.duplicate()
+		var again = World.new(seed_value)
+		again.night = every - 1
+		again._dusk()
+		again.night = every
+		again._dusk()
+		var same: Array = order.duplicate()
+		same.sort()
+		if fresh != [] or early != [] or same != sorted or again.boss_order != order or w.bosses_due[0].kind != order[0]:
+			_expect(out, "seed %d: no order before the first boss night, then a shuffle of BOSS.kinds, the same each time, whose first comes that night" % seed_value,
+				[fresh, early, same, again.boss_order, w.bosses_due[0].kind], [[], [], sorted, order, order[0]])
+		w.night = every * 2
+		w._dusk()
+		if w.boss_order != order or w.boss_kinds() != [order[1]]:
+			_expect(out, "seed %d: the order is kept, and the second boss night brings its second" % seed_value, [w.boss_order, w.boss_kinds()], [order, [order[1]]])
+		orders[order] = true
+		firsts[order[0]] = true
+		w.reset()
+		if w.boss_order != []:
+			_expect(out, "seed %d: a new run has no order yet" % seed_value, w.boss_order, [])
+	_expect(out, "over 60 seeds every boss opens some run, and most orders turn up", [firsts.size(), orders.size() >= 5], [kinds.size(), true])
+	for night in [every - 1, every]:
+		var a = World.new(7)
+		var b = World.new(7)
+		a.night = night
+		b.night = night
+		a.omen = ""
+		b.omen = ""
+		if night == every:
+			for i in kinds.size() - 1: # what the shuffle draws, drawn first here
+				b.rng.next()
+		b.boss_order = kinds.duplicate()
+		a._plan_night()
+		b._plan_night()
+		_expect(out, "night %d: planning the night draws %d numbers for the order" % [night, kinds.size() - 1 if night == every else 0], a.rng.state(), b.rng.state())
+	var w = World.new(11)
+	w.begin_at(every, 1)
+	_expect(out, "a run started at the first boss night (begin_at) has its order and that night's boss from it", [w.boss_order.size(), w.bosses_due.map(func(b): return b.kind)], [kinds.size(), [w.boss_order[0]]])
+	w = World.new(11)
+	w.begin_at(every * 4, 1)
+	_expect(out, "a night with two bosses brings two different kinds", [w.boss_kinds().size(), w.boss_kinds()[0] != w.boss_kinds()[1]], [2, true])
+	return out
+
+
+## Stronger tiers come early enough to be met (Config.TIER_NIGHTS): from the fifth night a tenth of what comes is tier
+## 2, none tier 3, and the fourth night has none (_tier_nights holds each row to its shares).
+static func _early_tiers() -> Array:
+	var out := []
+	_expect(out, "the first tier row is the fifth night's: a tenth tier 2, no tier 3", [Config.TIER_NIGHTS[0].from, Config.TIER_NIGHTS[0].shares], [5, [0.9, 0.1, 0.0]])
+	var got := {}
+	for night in [4, 5]:
+		var w = _night(DARK)
+		w.night = night
+		got[night] = w.tier_shares()
+	_expect(out, "the fourth night rolls no tier, the fifth rolls the first row", [got[4], got[5]], [[], Config.TIER_NIGHTS[0].shares])
+	_expect(out, "every regular kind has a row at every tier, the new ones too", Config.ENEMY_TYPES.keys().filter(func(k): return not Config.ENEMY_TYPES[k].get("boss", false)).all(func(k): return Enemy.row(k, 2).hp >= Config.ENEMY_TYPES[k].hp and Enemy.row(k, 3).speed > Config.ENEMY_TYPES[k].speed), true)
+	return out
+
+
+## Fairness: a keeper who answers a new kind is not hurt by it, and loses nothing to it. The bot, alone with a boar
+## chief through two of its sets (or until it has cut it down), leaves every lane in time, whoever it plays; a keeper
+## who waits by the fire for a pair of moths cuts both before the flame; the bot walks out and kills a drummer without
+## being touched. (The spitter's blob: _spitter, where the keeper who steps off the line is missed.)
+static func _fair() -> Array:
+	var out := []
+	for who in Config.CHARACTERS:
+		var w = _night(Vector2(-100.0, 60.0), [], who)
+		var chief = _add(w, "boar_chief", Vector2(180.0, 0.0))
+		chief.summon_t = NEVER
+		var bot = Bot.new(1)
+		var sets := 0
+		var was := false
+		for i in 60 * 40:
+			w.fuel = w.max_fuel()
+			w.step(bot.frame(w))
+			if chief.spent() and not was:
+				sets += 1
+			was = chief.spent()
+			if chief.dead or sets >= 2:
+				break
+		_expect(out, "the %s's bot is not hurt by the chief through two sets of charges (or until it has killed it)" % who, [w.player.hp, sets >= 2 or chief.dead], [w.stats.hp, true])
+	var w = _night(Vector2(-20.0, 0.0))
+	var plain = _night(Vector2(-20.0, 0.0))
+	var pair := [Enemy.new("moth", Config.TORCH.pos + Vector2(-150.0, 0.0)), Enemy.new("moth", Config.TORCH.pos + Vector2(-150.0, Config.ENEMY.with_gap))]
+	w.enemies.append_array(pair)
+	var told := []
+	for i in 60 * 6:
+		var f := InputFrame.new()
+		if w.foe_in_reach(w.player.pos):
+			f.pressed["attack"] = true
+		w.step(f)
+		plain.step(InputFrame.new())
+		told.append_array(w.events.map(func(ev): return ev.kind))
+	_expect(out, "a keeper waiting by the fire cuts a pair of moths before the flame: the fire loses nothing", [pair.map(func(m): return m.dead), told.has("burned"), snappedf(plain.fuel - w.fuel, 0.001)], [[true, true], false, 0.0])
+	w = _night(Vector2(0.0, 20.0))
+	w.fuel = 1.0e6
+	var imp = Enemy.new("drummer", Config.TORCH.pos + Vector2(160.0, 0.0))
+	w.enemies.append(imp)
+	var bot = Bot.new(1)
+	for i in 60 * 20:
+		w.step(bot.frame(w))
+		if imp.dead:
+			break
+	_expect(out, "the bot leaves the fire, kills a drummer and is not touched", [imp.dead, w.player.hp], [true, Config.PLAYER.hp])
+	return out
+
+
+## The arrow for a boss or a pack on its way (Painter.coming_arrow) is drawn clear of the HUD's panels wherever it
+## comes from: along the top edge it sits below the panel that would hide it; elsewhere it stays on its edge.
+static func _coming_arrow() -> Array:
+	var out := []
+	var painter = Painter.new(1)
+	painter.score_panel = Vector2(70.0, 25.0)
+	painter.fuel_text_width = 40.0
+	var w = _night(DARK, ["spark", "sturdy", "big_logs"])
+	var edge: Rect2 = Config.FIELD.grow(Config.ENEMY.edge)
+	var panels: Array = painter.hud_rects(w)
+	_expect(out, "the HUD has its three panels along the top during a night", panels.size(), 3)
+	var hidden := 0
+	var moved := 0
+	var spots := []
+	for x in range(int(edge.position.x), int(edge.end.x) + 1, 4):
+		spots.append(Vector2(x, edge.position.y))
+		spots.append(Vector2(x, edge.end.y))
+	for y in range(int(edge.position.y), int(edge.end.y) + 1, 4):
+		spots.append(Vector2(edge.position.x, y))
+		spots.append(Vector2(edge.end.x, y))
+	for f in spots:
+		var arrow: PackedVector2Array = painter.coming_arrow(w, f)
+		if panels.any(func(p): return Array(arrow).any(func(v): return p.has_point(v))):
+			hidden += 1
+		if painter.coming_spot(w, f) != f.clamp(Vector2.ZERO, Painter.VIEW):
+			moved += 1
+	_expect(out, "no arrow for what is coming has a corner under a HUD panel, from any of %d spots round the field" % spots.size(), hidden, 0)
+	_expect(out, "some of them had to be moved clear, most stay on their edge", [moved > 10, moved < spots.size() / 2], [true, true])
+	var free := Vector2((panels[0].end.x + panels[1].position.x) / 2.0, edge.position.y)
+	_expect(out, "a top arrow between two panels stays at the edge", painter.coming_spot(w, free), free.clamp(Vector2.ZERO, Painter.VIEW))
+	var under := Vector2(panels[1].get_center().x, edge.position.y)
+	_expect(out, "a top arrow under the clock sits just below it, pointing up", [painter.coming_spot(w, under).y, painter.coming_arrow(w, under)[0].y < painter.coming_arrow(w, under)[1].y], [panels[1].end.y + Painter.COMING_CLEAR, true])
 	return out

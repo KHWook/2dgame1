@@ -117,6 +117,9 @@ const GUIDE_PAGES := [
 	{ "title": "어둠에서 오는 것들", "lead": "칼로 베어서 쫓아내라", "rows": [
 		[["slime_a"], "슬라임", "횃불에 붙어 불을 덮는다. 먼저 베어라"],
 		[["bat_a"], "박쥐", "너를 쫓는다. 빛 밖에서 더 빠르다"],
+		[["moth_a"], "불나방", "불에 뛰어들어 연료를 태운다. 닿기 전에 베어라"],
+		[["spitter_a"], "두꺼비", "멀리서 독을 뱉는다. 점선에서 비켜라"],
+		[["drummer_a"], "도깨비", "북을 쳐 적을 빠르게 한다. 불을 떠나 먼저 베어라"],
 		[["shade_a"], "어둠", "빛 밖은 캄캄하다. 적은 눈빛으로만 보인다"],
 		[["icon_spark"], "힘", "해 질 녘과 한밤중에 횃불이 셋 중 하나를 준다"],
 	] },
@@ -1083,12 +1086,15 @@ func _hint_frame(w, delta: float) -> void:
 	hint_box.modulate.a = k * out * _behind(w, Rect2(hint_box.position, hint_box.size))
 
 
-## How solid a line over the field should be: faint while the keeper, or something about to strike, is under it,
-## and see-through while an enemy is.
+## How solid a line over the field should be: faint while the keeper, something about to strike, or the arrow for
+## a boss or a pack on its way is under it, and see-through while an enemy is.
 func _behind(w, r: Rect2) -> float:
 	var near := r.grow(BEHIND_MARGIN)
 	if near.has_point(w.player.pos):
 		return BEHIND
+	for b in w.bosses_coming() + w.surges_coming():
+		if near.has_point(painter.coming_arrow(w, b.from)[0]):
+			return BEHIND
 	var solid := 1.0
 	for e in w.enemies:
 		if e.move == "warn" and (near.has_point(e.pos) or near.has_point(e.move_to)):

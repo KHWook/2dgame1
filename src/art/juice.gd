@@ -94,6 +94,14 @@ func step(w) -> void:
 				_shake("landed")
 			"boss_coming", "pack_coming":
 				_sound("coming")
+			"burned":
+				_sound("sizzle")
+			"spat":
+				_sound("spit")
+			"splat":
+				_sound("splat")
+			"beat":
+				_sound("drum")
 	if CRUSH.has(w.character) and crushed >= CRUSH[w.character].kills and since_crush >= CRUSH[w.character].apart:
 		_shake("crush")
 		since_crush = 0

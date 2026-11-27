@@ -29,6 +29,10 @@ const ENEMIES := {
 	"big_slime": { "steps": 18, "anchor": Vector2(12.0, 13.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 2.0), "bits": ["h", "G", "j"], "in_dark": ["W", "h"] },
 	"thief": { "steps": 6, "turns": true, "bits": ["o", "O", "n"], "in_dark": ["W", "y"] },
 	"boar": { "steps": 7, "turns": true, "bits": ["b", "B", "S"], "in_dark": ["i", "i"] },
+	"moth": { "steps": 4, "anchor": Vector2(8.0, 9.0), "shadow": "shadow_small", "shadow_at": Vector2(-4.0, 5.0), "flies": true, "bits": ["w", "c", "d"], "in_dark": ["w", "f"] },
+	"spitter": { "steps": 16, "bits": ["C", "D", "y"], "in_dark": ["e", "e"] },
+	"drummer": { "steps": 15, "anchor": Vector2(8.0, 11.0), "bits": ["F", "O", "w"], "in_dark": ["w", "y"] },
+	"boar_chief": { "steps": 7, "turns": true, "anchor": Vector2(12.0, 12.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 4.0), "bits": ["b", "B", "W"], "in_dark": ["i", "i"] },
 	"slime_king": { "steps": 20, "anchor": Vector2(16.0, 17.0), "shadow": "shadow_huge", "shadow_at": Vector2(-14.0, 5.0), "bits": ["h", "g", "Y"], "in_dark": ["W", "h"] },
 	"shade_lord": { "steps": 16, "anchor": Vector2(12.0, 14.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 6.0), "bits": ["7", "8", "Y"], "glow": "shade_lord_eyes" },
 	"shade_decoy": { "steps": 16, "anchor": Vector2(12.0, 14.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 6.0), "bits": ["7", "8", "9"], "glow": "shade_decoy_eyes" },
@@ -46,6 +50,10 @@ const HINTS := {
 	"shade": "그림자: 횃불 빛 안에서만 벨 수 있다",
 	"big_slime": "큰 슬라임: 죽으면 둘로 갈라진다",
 	"boar": "멧돼지: 멈춰 붉은 띠가 깔리면 곧장 돌진한다, 띠 밖으로 비켜라. 돌진 뒤 어지러울 때 베라",
+	"moth": "불나방: 불꽃에 뛰어들어 연료를 태워 없앤다. 횃불에 닿기 전에 베어라",
+	"spitter": "독 두꺼비: 멀찍이 서서 몸을 부풀리고 점선을 따라 독을 뱉는다. 옆으로 비키거나 다가가 베어라",
+	"drummer": "북 도깨비: 빛 가장자리에서 북을 쳐 둘레의 적을 빠르게 한다. 불을 떠나 먼저 베어라",
+	"boar_chief": "멧돼지 대장: 긴 띠를 깔고 세 번 내리 돌진한다, 띠 밖으로 비켜라. 숨을 몰아쉴 때 베라",
 	"slime_king": "슬라임 왕: 가까이 가면 뛰어올라 덮친다, 빨간 원 밖으로 피하라",
 	"shade_lord": "그림자 군주: 어둠 속을 돌다 횃불로 달려든다, 빛 안에 있을 때 베라. 왕관이 없고 눈이 흐린 분신은 가짜다",
 	"berry": "열매: 다쳤을 때 밟으면 체력이 회복된다",
@@ -60,6 +68,9 @@ const TIER_NAMES := {
 	"big_slime": ["큰 주황 슬라임", "큰 빨간 슬라임"],
 	"thief": ["잿빛 도둑 비버", "붉은 도둑 비버"],
 	"boar": ["잿빛 멧돼지", "붉은 멧돼지"],
+	"moth": ["노란 불나방", "붉은 불나방"],
+	"spitter": ["보랏빛 독 두꺼비", "붉은 독 두꺼비"],
+	"drummer": ["푸른 북 도깨비", "붉은 북 도깨비"],
 }
 const TIER_HINTS := ["더 튼튼하고 빠르다", "훨씬 튼튼하고 빠르며, 칼에 덜 밀린다"]
 

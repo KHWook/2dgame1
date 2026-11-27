@@ -8,12 +8,19 @@
 ## it stands), "landed" { pos, enemy, shock } when the slime king comes down (shock: how far round it it hurt), "decoy" { pos, enemy } where a decoy appears and
 ## "faded" { pos, enemy } where one breaks or fades.
 ## A charger (the boar) has a pattern too: it stops and paws the ground with its line drawn, charges straight along
-## it, and stands dazed where the charge ends. It tells "warn" as well, at: the end of its line.
+## it, and stands dazed where the charge ends. It tells "warn" as well, at: the end of its line. The boar chief, a
+## boss, hunts the keeper with sets of such charges across the field, ploughing aside the logs on its line, and
+## stands winded after each set.
+## A moth flies to the flame and burns up in it, taking fuel ("burned" { pos, enemy, tier }). A spitter stops short of
+## the keeper, puffs up ("warn", at: the end of its line) and spits a blob along the line ("spat" { pos, enemy }). A
+## drummer stands at the edge of the light and beats ("beat" { pos, enemy }); what hears it walks faster.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
 const E := Config.ENEMY
 const KNOCK_KEEP: float = pow(E.knock_decay, Config.STEP) # share of its knockback a body keeps from one step to the next
+## The patterns a row can give (a kind has at most one), each with the key of the time it first waits (move_t).
+const PATTERNS := { "leap": "every", "lunge": "every", "charge": "every", "spit": "every", "drum": "beat" }
 
 var kind: String
 var tier := 1 # how strong it is, from 1 (Config.TIERS); T is its kind's row made that strong
@@ -41,7 +48,13 @@ var move := "" # a pattern: "" (walking), "warn" (about to strike), "air" (the k
 var move_t := 0.0 # time left in this part of the pattern, or, walking, until the next strike
 var move_from := Vector2.ZERO # where the leap took off
 var move_to := Vector2.ZERO # where it lands, or where the rush goes, or where a charge would end
-var aim := Vector2.ZERO # the way a charger charges, fixed when it starts to warn
+var pattern := "" # which pattern its row gives it (PATTERNS), "" for none
+var aim := Vector2.ZERO # the way a charger charges or a spitter spits, fixed when it starts to warn
+var run := 0.0 # how far the charge lined up or under way goes: charge.dist, or less where the torch is in the way
+var runs_left := 0 # a charger's charges still to come in this set, the one under way included
+var steps_off := false # a charger whose charge is due but has no line for it by the torch: it walks out from the fire
+var drum = null # the drummer whose beat it last heard, while that beat carries it
+var drum_t := 0.0 # time that beat still carries it
 
 
 static var _rows := {} # "kind~tier" -> row(), made once
@@ -60,12 +73,10 @@ func _init(kind_: String, pos_: Vector2, tier_: int = 1) -> void:
 		summons = T.summon.count
 	if T.has("split"):
 		split_t = T.split.first
-	if T.has("leap"):
-		move_t = T.leap.every
-	if T.has("lunge"):
-		move_t = T.lunge.every
-	if T.has("charge"):
-		move_t = T.charge.every
+	for key in PATTERNS:
+		if T.has(key):
+			pattern = key
+			move_t = T[key][PATTERNS[key]]
 
 
 ## A kind's row in Config.ENEMY_TYPES at a tier: the row itself at tier 1, made stronger by Config.TIERS above it.
@@ -77,7 +88,7 @@ static func row(kind_: String, tier_: int) -> Dictionary:
 	if not _rows.has(key):
 		var up: Dictionary = Config.TIERS[tier_ - 2]
 		var r: Dictionary = base.duplicate()
-		r.hp = ceili(base.hp * up.hp)
+		r.hp = base.hp if base.get("frail", false) else ceili(base.hp * up.hp)
 		r.speed = base.speed * up.speed
 		r.smother = base.get("smother", 1.0) * up.smother
 		r.score = ceili(base.get("score", Config.SCORE.kill) * up.score)
@@ -95,16 +106,17 @@ func step(world) -> void:
 			fade(world)
 			return
 	var flying := move == "air" # through the step it lands on, too
-	if T.has("leap"):
-		_leap(world)
-	if T.has("lunge"):
-		_lunge(world)
-	if T.has("charge"):
-		_charge(world)
+	if pattern != "":
+		match pattern:
+			"leap": _leap(world)
+			"lunge": _lunge(world)
+			"charge": _charge(world)
+			"spit": _spit(world)
+			"drum": _drum(world)
 	if flying:
 		at_torch = false
 		knock = Vector2.ZERO
-		if T.has("summon"):
+		if summons > 0:
 			_summon(world)
 		return
 	var stop: float = Config.TORCH.reach + T.radius if T.target == "torch" else 0.0
@@ -116,8 +128,21 @@ func step(world) -> void:
 	if move == "lunge" and at_torch:
 		move = "stay"
 		move_t = T.lunge.stay
-	var to: Vector2 = (_goal(world) - pos).normalized()
+	if at_torch and T.has("burns"): # burning up is no kill: gone, not dead
+		at_torch = false
+		gone = true
+		world.fuel -= T.burns
+		world.events.append({ "kind": "burned", "pos": pos, "enemy": kind, "tier": tier })
+		return
+	var goal: Vector2 = _goal(world)
+	var to: Vector2 = (goal - pos).normalized()
 	var speed: float = T.speed * (world.mod("glow_slow", 1.0) if world.in_light(pos) else T.get("dark_speed_mult", 1.0))
+	if drum != null:
+		drum_t -= Config.STEP
+		if drum_t <= 0.0 or drum.dead or drum.gone:
+			drum = null
+		else:
+			speed *= drum.T.drum.speed_mult
 	if move == "lunge":
 		speed = T.lunge.speed
 	if move == "charge": # nothing turns a charge aside, blows neither
@@ -125,18 +150,24 @@ func step(world) -> void:
 		to = aim
 		knock = Vector2.ZERO
 	# Most smotherers stop at the torch; the shade lord stops only while it warns and while it stays, so it can leave.
-	var halt: bool = move in ["warn", "stay", "rest", "split"] or (at_torch and not T.has("lunge"))
+	var halt: bool = move in ["warn", "stay", "rest", "split"] or (at_torch and pattern != "lunge")
+	if pattern == "spit":
+		halt = halt or spits_from_here(world)
+	elif pattern == "drum":
+		halt = halt or pos.distance_to(goal) < E.drum_slack
 	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to * speed)
 	knock *= KNOCK_KEEP
 	if knock.length() < E.knock_stop:
 		knock = Vector2.ZERO
 	pos += vel * Config.STEP
+	if move == "charge" and T.charge.has("plough"):
+		_plough(world)
 	if move == "charge" and not Config.FIELD.has_point(pos): # it runs into the trees at the edge and stops there
 		pos = pos.clamp(Config.FIELD.position, Config.FIELD.end)
 		_daze()
 	if T.target == "log":
 		_thieve(world)
-	if T.has("summon"):
+	if summons > 0:
 		_summon(world)
 
 
@@ -283,24 +314,35 @@ func fade(world) -> void:
 ## A charger's run. Walking, it counts down to the next one, which it starts only on the field with the player in
 ## range: it fixes its line at the player and paws the ground; then it charges along the line for charge.dist (step()
 ## moves it and stops it at the field's edge) and stands dazed for charge.rest, when it is easy to hit.
+## A charger with charge.count (the boar chief) charges that many times in a row, charge.rest between them and each
+## lined up afresh, and after the last stands winded for charge.winded. Its line stops short of the torch (_run()).
+## It starts no charge from the torch's spot (by_torch()), nor one the torch leaves too short to be a charge (shorter
+## than lane_half()): with its charge due it walks straight out from the fire until it has a line (steps_off).
 func _charge(world) -> void:
 	var C: Dictionary = T.charge
 	var p = world.player
 	match move:
 		"":
 			move_t = maxf(0.0, move_t - Config.STEP)
-			if move_t <= 0.0 and not p.dead and pos.distance_to(p.pos) <= C.range and Config.FIELD.has_point(pos):
+			var at: Vector2 = (p.pos - pos).normalized() if p.pos != pos else Vector2.RIGHT
+			var due: bool = move_t <= 0.0 and not p.dead and pos.distance_to(p.pos) <= C.range and Config.FIELD.has_point(pos)
+			steps_off = due and (by_torch() or _run(at) < lane_half())
+			if due and not steps_off:
+				if runs_left <= 0:
+					runs_left = C.get("count", 1)
 				move = "warn"
 				move_t = C.warn
-				aim = (p.pos - pos).normalized() if p.pos != pos else Vector2.RIGHT
-				move_to = pos + aim * C.dist
+				aim = at
+				run = _run(aim)
+				move_to = pos + aim * run
 				world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
 		"warn":
 			move_t -= Config.STEP
-			move_to = pos + aim * C.dist # a blow can push it while it paws; the line goes with it
+			run = _run(aim)
+			move_to = pos + aim * run # a blow can push it while it paws; the line goes with it
 			if move_t <= 0.0:
 				move = "charge"
-				move_t = C.dist / C.speed
+				move_t = run / C.speed
 		"charge":
 			move_t -= Config.STEP
 			if move_t <= 0.0:
@@ -309,12 +351,99 @@ func _charge(world) -> void:
 			move_t -= Config.STEP
 			if move_t <= 0.0:
 				move = ""
-				move_t = C.every
+				move_t = C.every if runs_left <= 0 else 0.0
 
 
+## How far a charge along dir from here goes: charge.dist, or, for a charger with charge.torch_gap, only up to
+## where its body would come within that gap of touching the torch. Nothing, when it stands inside that already and
+## dir leads further in.
+func _run(dir: Vector2) -> float:
+	var C: Dictionary = T.charge
+	if not C.has("torch_gap"):
+		return C.dist
+	var keep: float = Config.TORCH.reach + T.radius + C.torch_gap
+	var to: Vector2 = Config.TORCH.pos - pos
+	var along: float = to.dot(dir)
+	var off2: float = to.length_squared() - along * along
+	if along <= 0.0 or off2 >= keep * keep:
+		return C.dist
+	return clampf(along - sqrt(keep * keep - off2), 0.0, C.dist)
+
+
+## Whether a charger with charge.torch_gap stands where no charge of its may pass: its body within that gap of touching
+## the torch.
+func by_torch() -> bool:
+	return T.charge.has("torch_gap") and pos.distance_to(Config.TORCH.pos) < Config.TORCH.reach + T.radius + T.charge.torch_gap
+
+
+## The charge is over: it stands for rest_time().
 func _daze() -> void:
+	runs_left -= 1
 	move = "rest"
-	move_t = T.charge.rest
+	move_t = rest_time()
+
+
+## How long the stop after the charge just made lasts: charge.rest, or charge.winded after the last of a set.
+func rest_time() -> float:
+	return T.charge.winded if runs_left <= 0 and T.charge.has("winded") else T.charge.rest
+
+
+## Standing still after the last charge of a set: dazed (the boar) or winded (the chief), the time to cut it.
+func spent() -> bool:
+	return move == "rest" and runs_left <= 0
+
+
+## A charging chief ploughs the logs it runs into: each within charge.plough of its body is pushed out to that
+## distance, ahead and aside, and stays on the field.
+func _plough(world) -> void:
+	var reach: float = T.radius + T.charge.plough
+	for i in world.logs.size():
+		var off: Vector2 = world.logs[i] - pos
+		if off.length() < reach:
+			world.logs[i] = (pos + (off if off != Vector2.ZERO else aim).normalized() * reach).clamp(Config.FIELD.position, Config.FIELD.end)
+
+
+## Whether a spitter spits from where it stands: on the field, the keeper no further than spit.range.
+func spits_from_here(world) -> bool:
+	return Config.FIELD.has_point(pos) and pos.distance_to(world.player.pos) <= T.spit.range
+
+
+## A spitter's spit. Standing off, it counts down to the next one; then it fixes its line at the keeper and puffs up
+## for spit.warn, and lets a blob go along the line (World.blobs: the world flies it).
+func _spit(world) -> void:
+	var S: Dictionary = T.spit
+	var p = world.player
+	if move == "":
+		move_t = maxf(0.0, move_t - Config.STEP)
+		if move_t <= 0.0 and not p.dead and spits_from_here(world):
+			move = "warn"
+			move_t = S.warn
+			aim = (p.pos - pos).normalized() if p.pos != pos else Vector2.RIGHT
+			move_to = pos + aim * S.reach
+			world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
+	elif move == "warn":
+		move_t -= Config.STEP
+		move_to = pos + aim * S.reach # a blow can push it while it puffs; the line goes with it
+		if move_t <= 0.0:
+			move = ""
+			move_t = S.every
+			world.blobs.append({ "pos": pos, "dir": aim, "left": S.reach, "radius": S.radius, "speed": S.speed })
+			world.events.append({ "kind": "spat", "pos": pos, "enemy": kind })
+
+
+## A drummer's beat, every drum.beat seconds once it is on the field (to the nearest step: the count-down's last
+## crumb of a step is not waited for): every other enemy within drum.radius of it (drummers and decoys excepted)
+## hears it, and walks faster until the next beat (step() reads drum).
+func _drum(world) -> void:
+	move_t -= Config.STEP
+	if move_t > Config.STEP * 0.5 or not Config.FIELD.has_point(pos):
+		return
+	move_t = T.drum.beat
+	world.events.append({ "kind": "beat", "pos": pos, "enemy": kind })
+	for e in world.enemies:
+		if not e.dead and not e.decoy and not e.T.has("drum") and pos.distance_to(e.pos) <= T.drum.radius:
+			e.drum = self
+			e.drum_t = T.drum.beat + Config.STEP
 
 
 ## How far from a charger's line its charge hurts: its body and the keeper's touch (touches()) all along the run.
@@ -341,10 +470,10 @@ func charge_end() -> Vector2:
 
 
 ## Where it is heading. A boss that circles the light aims a little ahead of itself on a ring outside it, unless it is
-## rushing the torch. A thief goes for the nearest log, shadows the player when there is none, and once it has
+## rushing the torch. A charger stepping off the fire heads straight out from it. A thief goes for the nearest log, shadows the player when there is none, and once it has
 ## one runs straight away from the torch.
 func _goal(world) -> Vector2:
-	if T.has("lunge") and move == "":
+	if pattern == "lunge" and move == "":
 		var out: Vector2 = pos - Config.TORCH.pos
 		var r: float = world.light_radius() + T.lunge.ring + T.radius
 		# aiming at a point on the ring ahead would cut inside it; aiming this much further out keeps it on the ring.
@@ -353,8 +482,15 @@ func _goal(world) -> Vector2:
 		var aim: Vector2 = Config.TORCH.pos + (out if out != Vector2.ZERO else Vector2.RIGHT).normalized().rotated(E.orbit_lead) * r / cos(E.orbit_lead)
 		var inside := Config.FIELD.grow_individual(-T.radius, -E.orbit_top, -T.radius, -T.radius)
 		return aim.clamp(inside.position, inside.end)
+	if steps_off:
+		var out: Vector2 = pos - Config.TORCH.pos
+		return pos + (out if out != Vector2.ZERO else Vector2.RIGHT).normalized() * Config.FIELD.size.x
 	if T.target == "torch":
 		return Config.TORCH.pos
+	if T.target == "light": # its place on the edge of the light, straight out from the torch through where it stands
+		var out: Vector2 = pos - Config.TORCH.pos
+		var at: Vector2 = Config.TORCH.pos + (out if out != Vector2.ZERO else Vector2.RIGHT).normalized() * (world.light_radius() + T.drum.gap + T.radius)
+		return at.clamp(Config.FIELD.position + Vector2(T.radius, T.radius), Config.FIELD.end - Vector2(T.radius, T.radius))
 	if T.target == "log":
 		if carrying:
 			var away: Vector2 = pos - Config.TORCH.pos
