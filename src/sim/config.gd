@@ -267,7 +267,7 @@ const ENEMY_TYPES := {
 ## kills throws a spark (SPARK) at the nearest other enemy whose body is within that many pixels of it; scorch_every:
 ## every that many seconds the ember ring burns away the last point of each enemy in it that is down to one, bosses
 ## excepted; beacon_every: the keeper's own blow that lands on an enemy in the torch's light makes the torch fire a
-## spark at once, at that enemy if it still lives and else at the nearest enemy in the light, at most once in that
+## spark at once, at that enemy if it still lives and else at the nearest enemy a spark can reach, at most once in that
 ## many seconds, besides the sparks spark_every brings; dash_damage: a dash does that to each enemy it touches, once;
 ## feed_reach, feed_push: logs put on the fire throw back every enemy within reach of the torch.
 const UPGRADES := {
