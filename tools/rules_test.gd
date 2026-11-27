@@ -14,6 +14,7 @@ const Sprites := preload("res://src/art/sprites.gd")
 const Looks := preload("res://src/art/looks.gd")
 const Bot := preload("res://src/bot.gd")
 const Effects := preload("res://src/art/effects.gd")
+const Juice := preload("res://src/art/juice.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -164,6 +165,7 @@ static func _swing_area() -> Array:
 	# The painter's trail, step by step through swings of every kind: each line within what in_swing strikes.
 	var painter = Painter.new(1)
 	var drawn := 0
+	var smeared := 0
 	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing", "wide_swing"], "knight"], [["spin"], "knight"],
 			[[], "woodcutter"], [["long_blade", "wide_swing", "wide_swing"], "woodcutter"], [["spin", "spin"], "woodcutter"]]:
 		var ups: Array = run[0]
@@ -179,9 +181,16 @@ static func _swing_area() -> Array:
 						if not w.in_swing(at, 1.0):
 							out.append("the trail is drawn where the swing does not hit (%s, %s at %s)" % [ups, at - w.player.pos, w.player.attack_t])
 							break
-				if not painter.slash_lines(w).is_empty() and w.player.attack_t > w.stat("attack_hit_until"):
-					out.append("the trail still shows once the blow has stopped landing (%s)" % [ups])
+				for band in painter.smear(w):
+					smeared += 1
+					for at in band[0]:
+						if not w.in_swing(at, 1.0):
+							out.append("the smear is drawn where the swing does not hit (%s, %s at %s)" % [ups, at - w.player.pos, w.player.attack_t])
+							break
+				if not (painter.slash_lines(w).is_empty() and painter.smear(w).is_empty()) and w.player.attack_t > w.stat("attack_hit_until"):
+					out.append("the trail or the smear still shows once the blow has stopped landing (%s)" % [ups])
 	_expect(out, "the painter drew a trail in the swings", drawn > 0, true)
+	_expect(out, "the painter drew a smear in the swings", smeared > 0, true)
 	return out
 
 
@@ -1789,4 +1798,105 @@ static func _fx_sizes() -> Array:
 	var early: float = fposmod(first[1] - first[0], Painter.CHEVRON_GAP)
 	var late: float = fposmod(first[3] - first[2], Painter.CHEVRON_GAP)
 	_expect(out, "the chevrons slide toward the end, faster as the wind-up runs out", early > 0.0 and late > early, true)
+	out.append_array(_attack_fx())
+	return out
+
+
+## The keepers' own attacks are drawn as big as they hit: a swing's smear reaches exactly world.reach() (the long
+## blade's too) and, over the swing, sweeps the whole arc world.swing_half() each side of the facing (and not past
+## it); an ember's disc stays bolt_radius() however its middle flickers (the big ember's and each of a fan's too);
+## an ember pops where it touched what it burned and fizzles exactly bolt_range() from where it was cast (the long
+## ember's too); each keeper's blow plays its own mark; and the marks stay within Effects.MAX_FLASHES.
+## The marks (Effects.flashes) the last fx.step() started: they are a step old.
+static func _new_marks(fx) -> Array:
+	return fx.flashes.filter(func(f): return f.age == 1)
+
+
+static func _attack_fx() -> Array:
+	var out := []
+	var painter = Painter.new(1)
+	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing"], "knight"], [[], "woodcutter"], [["long_blade", "wide_swing"], "woodcutter"]]:
+		var w = _night(DARK, run[0], run[1])
+		var half: float = w.swing_half()
+		var far := 0.0
+		var low := INF
+		var high := -INF
+		_play(w, 1, "attack")
+		for i in roundi(w.stat("attack_time") / Config.STEP) + 1:
+			var centre: Vector2 = w.player.pos.round()
+			for band in painter.smear(w):
+				for at in band[0]:
+					far = maxf(far, at.distance_to(centre))
+					var turn: float = Vector2.RIGHT.angle_to(at - centre)
+					low = minf(low, turn)
+					high = maxf(high, turn)
+			_play(w, 1)
+		_expect(out, "the smear's outer edge is the reach (%s)" % [run], snappedf(far, 0.01), snappedf(w.reach(), 0.01))
+		_expect(out, "the smear sweeps the whole arc and no further (%s)" % [run], [snappedf(low, 0.01), snappedf(high, 0.01)], [snappedf(-half, 0.01), snappedf(half, 0.01)])
+	for run in [[[], 3], [["wide_swing", "wide_swing"], 3], [["spin"], 3]]: # the big ember; the fan on its third shot
+		var w = _night(DARK, run[0], "mage")
+		w.player.swings = 2
+		_play(w, 1, "attack")
+		var radii := {}
+		for i in 12:
+			_play(w, 1)
+			for d in Painter.bolt_discs(w):
+				radii[snappedf(d[1], 0.001)] = true
+		_expect(out, "every ember's disc is drawn as big as it hits, flicker or not (%s)" % [run[0]], radii.keys(), [snappedf(w.bolt_radius(), 0.001)])
+	var cores: Array = Painter.BOLT_CORES.map(func(n): return Sprites.texture(n).get_width() / 2.0)
+	_expect(out, "an ember's flickering middle and core stay inside its disc", Painter.BOLT_INNER.max() < 1.0 and cores.max() <= World.character_stats("mage").bolt.radius, true)
+	for ups in [[], ["long_blade"]]:
+		var w = _night(DARK, ups, "mage")
+		var from: Vector2 = w.player.pos
+		var fx = Effects.new(1)
+		var marks := []
+		for i in 60:
+			_play(w, 1, "attack" if i == 0 else "")
+			fx.step(w)
+			marks.append_array(_new_marks(fx))
+		var fizzles: Array = marks.filter(func(f): return f.kind == "fizzle")
+		_expect(out, "an ember that hits nothing fizzles once, where its range ends (%s)" % [ups], fizzles.map(func(f): return snappedf(f.pos.distance_to(from), 0.01)), [snappedf(w.bolt_range(), 0.01)])
+		_expect(out, "an ember that hits nothing pops nowhere (%s)" % [ups], marks.filter(func(f): return f.kind == "strike").size(), 0)
+	for gap in [40.0, 6.0]: # in flight, and so close that the ember burns it on its first step and is gone
+		var w = _night(DARK, [], "mage")
+		var slime = _add(w, "big_slime", Vector2(gap, 0.0))
+		slime.T = slime.T.duplicate()
+		slime.T.speed = 0.0
+		var fx = Effects.new(1)
+		var told := []
+		var marks := []
+		var struck_at := Vector2.INF
+		for i in 40:
+			told.append_array(_play(w, 1, "attack" if i == 0 else ""))
+			fx.step(w)
+			for f in _new_marks(fx):
+				marks.append(f)
+				struck_at = slime.pos # where it was when burned (it is pushed off afterwards)
+		_expect(out, "an ember that burns a big slime %d px off is told and pops once" % gap, [told.count("hit"), marks.size()], [1, 1])
+		if marks.size() == 1:
+			_expect(out, "the pop is where the ember touched it (%d px off)" % gap, [marks[0].kind, marks[0].frames, marks[0].pos.distance_to(struck_at) < w.bolt_radius() + slime.T.radius and (marks[0].pos - struck_at).x < 0.0], ["strike", Effects.STRIKES.mage.frames, true])
+	var looks := {}
+	for who in Effects.STRIKES:
+		looks[Effects.STRIKES[who].frames] = who
+	_expect(out, "each keeper's blow has its own mark", looks.size(), Config.CHARACTERS.size())
+	for who in ["knight", "woodcutter"]:
+		var w = _night(DARK, [], who)
+		var slime = _add(w, "big_slime", NEAR)
+		var fx = Effects.new(1)
+		var juice = Juice.new(1)
+		var marks := []
+		var shook := false
+		for i in SWING:
+			_play(w, 1, "attack" if i == 0 else "")
+			fx.step(w)
+			juice.step(w)
+			shook = shook or juice.shake_left > 0
+			marks.append_array(_new_marks(fx))
+		_expect(out, "the %s's blow jolts the field (only the axe's)" % who, shook, who == "woodcutter")
+		_expect(out, "the %s's blow plays its own mark once" % who, marks.map(func(f): return f.frames), [Effects.STRIKES[who].frames])
+		var many = Effects.new(1)
+		for i in Effects.MAX_FLASHES * 2:
+			many._strike(Effects.STRIKES[who], Vector2.ZERO, Vector2.RIGHT)
+		many.step(_night(DARK))
+		_expect(out, "the marks stay within MAX_FLASHES (%s)" % who, many.flashes.size() <= Effects.MAX_FLASHES, true)
 	return out

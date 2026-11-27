@@ -69,6 +69,19 @@ const SLASH := [[1.0, "W"], [0.7, "a"], [0.4, "A"]]
 const SLASH_FIRE := [[1.0, "f"], [0.85, "F"], [0.65, "F"], [0.45, "x"], [0.25, "X"]]
 const SLASH_GLEAM := [0.6, "l"] # the outermost line, at the reach, with the long blade
 const WIDE_LINE := 2.0 # pixels per trail line with the wide swing
+## Under the trail's lines, the smear: filled bands from the reach inward, widest at the blade and thinning to its
+## tail, each [pixels wide at the blade, share of the sweep it trails, PALETTE key, alpha], widest first; steps: the
+## facets along it (the axe's few and chunky, the sword's smooth). A burning blade's bands burn (SMEAR_FIRE keys in
+## order); the wide swing widens them by SMEAR_WIDE. Like the lines, every band lies inside world.in_swing() and its
+## outer edge is the reach (tools/rules_test.gd), so the smear shows exactly what the blow covers.
+const SMEAR := {
+	"sword": { "bands": [[6.0, 0.9, "A", 0.55], [4.0, 0.7, "a", 0.8], [2.0, 0.45, "W", 1.0]], "steps": 12 },
+	"axe": { "bands": [[11.0, 1.0, "T", 0.85], [8.0, 0.85, "A", 0.95], [5.0, 0.6, "a", 1.0], [2.0, 0.35, "W", 1.0]], "steps": 5 },
+}
+const SMEAR_FIRE := ["X", "x", "F", "f"]
+const SMEAR_WIDE := 1.4
+const SMEAR_TAIL := 0.2 # a band's width at its tail, as a share of its width at the blade
+const SMEAR_HEAD := 2.0 # the bright pixel square at the blade's end of the smear, while it strikes
 const SWORD := "%s%s%s" # the weapon + "_long" with the long blade, + "_fire" while the fire blade burns
 const SWORD_FLAMES := 4 # flames shed along the trail of a burning blade
 const FLAME_RISE := 7.0 # pixels they rise while the swing holds
@@ -130,7 +143,10 @@ const SPARK_TAIL := [[0.012, "F"], [0.024, "x"], [0.036, "X"]] # pixels behind a
 ## in the torch's light where it burns harder, with its core and a tail of [pixels back along its flight, colour].
 const BOLT_DISC := Color("#f58230")
 const BOLT_DISC_LIT := Color("#ffc94a")
-const BOLT_TAIL := [[3.0, "F"], [6.0, "x"], [9.0, "X"]]
+const BOLT_TAIL := [[3.0, "F"], [5.0, "x"]] # effects.gd sheds the sparks further back
+const BOLT_CORES := ["bolt", "bolt_c", "bolt_b", "bolt_c", "bolt", "bolt_b"] # the core's flicker, a frame a step
+const BOLT_INNER := [0.55, 0.7, 0.5, 0.65] # the hot middle's radius as a share of the disc's, flickering
+const BOLT_GLOW := 0.55 # how solid the disc (what it hits) is; the hot middle is solid
 const STACK_STEP := Vector2(0.0, -3.0) # each more log a keeper carries sits this far above the one under it
 
 ## An enemy faster in the dark (looks.gd's dark_glow) streaks its burning eyes behind it: this many copies, this many
@@ -616,16 +632,20 @@ static func bolt_discs(w) -> Array:
 	return w.bolts.map(func(b): return [b.pos, b.radius, w.in_light(b.pos)])
 
 
-## The keeper's embers glow: a disc of what they hit, a bright core and a short tail, where the night does not dim them.
+## The keeper's embers glow where the night does not dim them: a disc of what they hit, a hot middle that flickers
+## inside it, a flickering core and a short tail; effects.gd adds the sparks they shed, their pop and their fizzle.
 func _bolts(c: CanvasItem, w) -> void:
 	c.draw_set_transform(shake)
-	var core := Sprites.texture("bolt")
 	for i in w.bolts.size():
 		var b: Dictionary = w.bolts[i]
 		var disc: Array = bolt_discs(w)[i]
+		var beat: int = w.steps + i * 3
 		for t in BOLT_TAIL:
 			c.draw_rect(Rect2((b.pos - b.dir * t[0]).round(), Vector2.ONE), Sprites.PALETTE[t[1]])
-		c.draw_circle(disc[0], disc[1], Color(BOLT_DISC_LIT if disc[2] else BOLT_DISC, 0.75))
+		var hot: Color = BOLT_DISC_LIT if disc[2] else BOLT_DISC
+		c.draw_circle(disc[0], disc[1], Color(hot, BOLT_GLOW))
+		c.draw_circle(disc[0], disc[1] * BOLT_INNER[beat % BOLT_INNER.size()], Color(hot.lightened(0.25), 0.9))
+		var core := Sprites.texture(BOLT_CORES[beat % BOLT_CORES.size()])
 		c.draw_texture(core, (b.pos - core.get_size() / 2.0).round())
 	c.draw_set_transform(Vector2.ZERO)
 
@@ -1189,6 +1209,46 @@ func slash_lines(w) -> Array:
 	return out
 
 
+## The smear right now, widest band first: [polygon in field pixels, colour], the last the head's glint while the
+## blade strikes. None where slash_lines() has none.
+func smear(w) -> Array:
+	var p = w.player
+	var k := _swing_share(w)
+	if p.dead or p.carrying or _weapon(w) == "" or k < SWING_WIND or k >= _hold(w):
+		return []
+	var look: Dictionary = SMEAR[_weapon(w)]
+	var arc := _arc(w)
+	var a: float = clampf(_blade(w)[1], arc[1], arc[0])
+	var hold := _stage(k, SWING_STRIKE, _hold(w))
+	var grow: float = SMEAR_WIDE if w.mod("arc_bonus", 0.0) < 0.0 else 1.0
+	var centre: Vector2 = p.pos.round()
+	var r: float = w.reach()
+	var burning := _burning(w)
+	var out := []
+	for i in look.bands.size():
+		var band: Array = look.bands[i]
+		var tail: float = clampf(lerpf(a, arc[2], band[1] * (1.0 - hold)), arc[1], arc[0])
+		if absf(tail - a) < 0.08:
+			continue
+		var width: float = minf(band[0] * grow * (1.0 - 0.6 * hold), r - 2.0)
+		var steps: int = look.steps
+		var poly := PackedVector2Array()
+		for j in steps + 1:
+			poly.append(centre + Vector2.from_angle(lerpf(tail, a, float(j) / steps)) * r)
+		for j in range(steps, -1, -1):
+			var t := float(j) / steps
+			poly.append(centre + Vector2.from_angle(lerpf(tail, a, t)) * (r - width * lerpf(SMEAR_TAIL, 1.0, t)))
+		var key: String = SMEAR_FIRE[mini(i, SMEAR_FIRE.size() - 1)] if burning else band[2]
+		out.append([poly, Color(Sprites.PALETTE[key], band[3] * (1.0 - hold * hold))])
+	if not out.is_empty() and hold <= 0.0:
+		var h := SMEAR_HEAD / 2.0
+		var mid := r - h - 0.5
+		var inset := h * 1.5 / mid # the square's corners stay inside the arc's ends too
+		var at: Vector2 = centre + Vector2.from_angle(clampf(a, arc[1] + inset, maxf(arc[1] + inset, arc[0] - inset))) * mid
+		out.append([PackedVector2Array([at + Vector2(-h, -h), at + Vector2(h, -h), at + Vector2(h, h), at + Vector2(-h, h)]), Sprites.PALETTE["W"]])
+	return out
+
+
 func _slash(c: CanvasItem, w) -> void:
 	var p = w.player
 	if p.dead or p.carrying or _weapon(w) == "":
@@ -1203,9 +1263,11 @@ func _slash(c: CanvasItem, w) -> void:
 	var hold := _stage(_swing_share(w), SWING_STRIKE, _hold(w))
 	var fade := Color(1.0, 1.0, 1.0, 1.0 - hold * hold)
 	var at: Vector2 = p.pos.round()
+	for band in smear(w):
+		c.draw_colored_polygon(band[0], band[1])
 	var lines := slash_lines(w)
-	for line in lines:
-		c.draw_arc(at, line[0], line[1], line[2], 12, Sprites.PALETTE[line[3]] * fade, line[4])
+	for line in lines.slice(0, 1): # the outermost: a crisp edge at the reach over the smear, which shows the rest
+		c.draw_arc(at, line[0], line[1], line[2], SMEAR[_weapon(w)].steps, Sprites.PALETTE[line[3]] * fade, line[4])
 	if lines.is_empty():
 		return
 	var arc := _arc(w)
