@@ -3027,8 +3027,8 @@ static func _build() -> Array:
 	_expect(out, "the runs of offers reach builds with nothing left to offer", [offers, filler_offers > 0], [60 * per_night * 24, true])
 
 	# A rare card is drawn as often as its weight says: the first card of 4000 first offers, where every upgrade
-	# that may come on the first night is in the pool. Within a fifth of what the weights give (over four standard
-	# deviations of the count); were the weight ignored, it would be over twice that.
+	# that may come on the first night is in the pool. Within a fifth of what the weights give (over three standard
+	# deviations of the count); with the weight ignored it comes out near 470.
 	var pool: Array = Config.UPGRADES.keys().filter(func(id): return World.offered_on(id, 1))
 	var weights := 0.0
 	var rare_weights := 0.0
@@ -3098,7 +3098,8 @@ static func _fillers() -> Array:
 		w.offer = [id]
 		_play(w, 1, "pick_1")
 		_expect(out, "filler %s fills neither the torch nor the keeper past full" % id, [w.fuel <= w.max_fuel(), w.player.hp], [true, w.max_hp()])
-	# A late start (begin_at) takes fillers on its way once its build is done, and starts the night as it always did.
+	# A late start (begin_at) past a done build takes fillers on its way and still starts rested, the torch at its
+	# start share, no logs lying.
 	for slot in [1, 2, 3]:
 		w = World.new(4)
 		w.begin_at(30, slot)
@@ -3108,7 +3109,6 @@ static func _fillers() -> Array:
 	return out
 
 
-## One step with action pressed.
 static func _press(w, action: String) -> void:
 	var f := InputFrame.new()
 	f.pressed[action] = true

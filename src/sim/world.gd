@@ -131,7 +131,7 @@ func reset() -> void:
 
 ## Start at the dusk of night n instead of the first, as if every night before it had been kept: the offers those
 ## nights would have made are drawn and the one in slot is taken each time (the last slot when fewer are offered),
-## the keeper is rested and the torch topped up. For looking at and measuring late nights (the balance tool's
+## the keeper is rested and the torch at its start share. For looking at and measuring late nights (the balance tool's
 ## --late, main.gd's --night=N); a normal run never calls it.
 func begin_at(n: int, slot: int) -> void:
 	play_offers((n - 1) * (1 + N.picks_at.size()), func(cards: Array) -> int: return mini(slot, cards.size()) - 1)
@@ -439,7 +439,6 @@ func _sweep() -> void:
 		born.clear()
 
 
-## Which side an upgrade is on (its row's side): "torch" or "keeper".
 static func side(id: String) -> String:
 	return Config.UPGRADES[id].side
 
@@ -450,7 +449,6 @@ static func takes_slot(id: String) -> bool:
 	return not Config.UPGRADES[id].has("from_night")
 
 
-## How many slots a side has, and how many of them hold an upgrade.
 static func slots(side_id: String) -> int:
 	return Config.BUILD.slots[side_id]
 
@@ -527,7 +525,6 @@ func _take(id: String) -> void:
 	player.hp += upgrade(id, level(id)).get("hp_bonus", 0) - before
 
 
-## What a filler gives, now: fuel (up to a full tank), hearts (up to full), logs laid evenly round the torch.
 func _fill(row: Dictionary) -> void:
 	fuel = minf(max_fuel(), fuel + row.get("fuel", 0.0))
 	player.hp = mini(max_hp(), player.hp + row.get("heal", 0))

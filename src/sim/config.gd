@@ -324,8 +324,7 @@ const UPGRADES := {
 ## The build: what a keeper can hold. slots: how many different upgrades of each side; once a side is full the torch
 ## offers only further levels of what that side holds (an upgrade with from_night takes no slot and is offered all
 ## the same). rerolls: how many times in a run an offer can be drawn again (World.step's "reroll"). rare_weight: a
-## rare upgrade's chance of being drawn, against 1 for any other. The torch has the more slots: what the bot's runs
-## fall to late is the fire going out, and with fewer than six they fell a night sooner (docs/DECISIONS.md).
+## rare upgrade's chance of being drawn, against 1 for any other. The torch has the more slots (docs/DECISIONS.md).
 const BUILD := { "slots": { "torch": 6, "keeper": 4 }, "rerolls": 2, "rare_weight": 0.5 }
 
 ## What the torch gives when it has fewer upgrades to offer than NIGHT.offer_size: the offer is filled up from these,

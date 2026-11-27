@@ -449,12 +449,8 @@ static func _chooser() -> Array:
 	return out
 
 
-## The reroll button under the offer's cards (Picker.reroll_rect, where src/ui.gd draws it): in the middle, big
-## enough for a thumb, and CLEAR pixels or more below the cards' bottom edge even counting how far past its drawn
-## edge it answers, so a thumb that lands low on a card (a card answers only inside its own edge) or just under one
-## rerolls nothing, and one that lands on the button takes no card. Like the cards' keys it is deaf for Picker.WAIT
-## after an offer opens, so the tap that drew an offer again is not also the next reroll. R is its key while the
-## offer is up, and stays the restart key in main.gd's KEYS.
+## The reroll button (Picker.reroll_rect, REROLL_PAD): in the middle, thumb-sized, answering CLEAR pixels or more
+## under the cards and deaf for Picker.WAIT; R rerolls while an offer is up and stays restart in main.gd's KEYS.
 static func _reroll() -> Array:
 	var out := []
 	const CLEAR := 8.0

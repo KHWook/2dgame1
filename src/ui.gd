@@ -615,7 +615,7 @@ func _offer(w, delta: float) -> void:
 	heading.visible = true
 	row.visible = cards_on and not ended
 	reroll.visible = picking
-	if picking: # greyed when a reroll would do nothing: none left, or no other card to draw
+	if picking:
 		reroll_label.text = (REROLL_TOUCH if touch else REROLL_KEYS) % w.rerolls
 		reroll_label.add_theme_color_override("font_color", GOLD if w.can_reroll() else MUTED)
 		reroll.modulate.a = 1.0 if w.can_reroll() else REROLL_OFF
@@ -806,7 +806,7 @@ func _card(i: int) -> Dictionary:
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 1)
 	card.add_child(stack)
-	var badge_row := HBoxContainer.new() # the key and the tag share a line: the box has the reroll button to fit too
+	var badge_row := HBoxContainer.new()
 	badge_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	badge_row.add_theme_constant_override("separation", 4)
 	stack.add_child(badge_row)

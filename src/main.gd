@@ -304,7 +304,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		if slot >= 0:
 			pending["pick_%d" % (slot + 1)] = true
 		return
-	# While the offer is up, R draws it again (the world counts how often it may); it restarts only from an ending.
 	if k != null and k.pressed and world.phase == "pick" and k.keycode == Picker.REROLL_KEY:
 		if not k.echo and bot == null:
 			pending["reroll"] = true

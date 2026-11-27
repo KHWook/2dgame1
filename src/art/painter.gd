@@ -513,7 +513,7 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		var fill := Rect2(bar.position, Vector2(ceilf(bar.size.x * share), bar.size.y))
 		c.draw_rect(fill, Sprites.PALETTE["X" if low else "x"])
 		c.draw_rect(Rect2(fill.position, Vector2(fill.size.x, 1.0)), Sprites.PALETTE["x" if low else "F"])
-	for slot in empty_slots(w): # a slot with nothing in it yet: the side's edge, dim, round a dark hollow
+	for slot in empty_slots(w):
 		c.draw_rect(Rect2(slot[0], TILE), Color(TILE_EDGE[slot[1]], TILE_EMPTY_EDGE))
 		c.draw_rect(Rect2(slot[0] + Vector2.ONE, TILE - Vector2(2.0, 2.0)), Sprites.PALETTE["k"])
 	var tiles := tiles(w)
