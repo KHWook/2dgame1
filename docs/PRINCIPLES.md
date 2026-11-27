@@ -20,7 +20,7 @@
 - `src/touch.gd`: 휴대폰의 터치 조작(조이스틱, 칼·돌진·일시정지 버튼, 누르면 다시 하기). 버튼은 키와 같은 동작 이름으로, 조이스틱은 방향 번호(`InputFrame.stick`, 정수라 리플레이가 정확하다)로 바꿔 `main.gd`에 넘긴다. 시뮬레이션은 화면을 읽지 않는다.
 - `src/guide.gd`: 첫 화면 안내의 상태와 입력이 하는 일(쪽 넘기기, 시작 버튼으로만 닫기, 열린 뒤 잠깐 받지 않기). `src/coach.gd`: 첫 밤의 화살표 안내. 둘 다 그리기는 `ui.gd`가 한다. 웹·모바일의 화면 배율(`stretch_for`)도 여기서 정한다.
 - `src/chooser.gd`: 판을 시작할 때 캐릭터(`Config.CHARACTERS`)를 고르는 화면의 상태와 입력(카드 위치, 열린 뒤 잠깐 받지 않기, 탭·숫자 키·화살표). 그리기는 `ui.gd`가 한다. 고른 캐릭터는 `main.gd`가 뽑은 시드와 함께 `World.choose(id, seed)`로 새 판이 된다.
-- `src/picker.gd`: 횃불의 강화 카드를 키로 고르기(초점, ← →·A D, Enter·Space, 뜬 뒤 잠깐 받지 않기). 고른 카드는 숫자 키와 같은 `pick_N` 동작이 되어서 월드·봇·리플레이는 모른다. 그리기는 `ui.gd`가 한다.
+- `src/picker.gd`: 횃불의 강화 카드를 키로 고르기(초점, ← →·A D, Enter·Space, 뜬 뒤 잠깐 받지 않기). 고른 카드는 숫자 키와 같은 `pick_N` 동작이 되어서 월드·봇·리플레이는 모른다. 다시 뽑기 버튼의 자리와 그것이 눌림을 받는 때도 여기서 정한다(`reroll_rect`, `reroll_at`; 눌리면 R 키와 같은 `reroll` 동작). 그리기는 `ui.gd`가 한다.
 - `src/records.gd`: 지난 판의 점수 기록(`user://records.json`). 파일과 날짜를 다루므로 시뮬레이션 밖에 있다.
 - `tools/`: 검사, 규칙 장면 테스트, 리플레이. `./verify`가 입구다.
 
@@ -45,7 +45,7 @@ Godot 내장 물리(`CharacterBody2D`, `move_and_slide`)는 게임 규칙에 쓰
 | C5 | 꼼수를 정당화하는 주석 금지(`hack`, `for now`, `workaround`…) | check C5 |
 | N1 | 튜닝 숫자는 `src/sim/config.gd`의 표에 둔다 | 글. 검사 후보 |
 | A1 | 스프라이트 격자는 줄 너비가 같고 모든 글자가 `PALETTE`에 있다 | `Sprites.problems()` (`./verify`) |
-| A2 | 규칙 데이터가 이름으로 찾는 스프라이트(적 종류마다 `<종류>_a`·`<종류>_b`, 강화마다 `icon_<id>`)는 전부 그려져 있고, 적 종류마다 첫 등장 안내(`Looks.HINTS`)가 있고, 빛 밖에서 보일 것(`glow`, `dark_glow`, `in_dark`)이 있다 | `Looks.problems()` (`./verify`) |
+| A2 | 규칙 데이터가 이름으로 찾는 스프라이트(적 종류마다 `<종류>_a`·`<종류>_b`, 강화와 덤마다 `icon_<id>`)는 전부 그려져 있고, 강화마다 화면이 아는 쪽(`side`)이 있고, 적 종류마다 첫 등장 안내(`Looks.HINTS`)가 있고, 빛 밖에서 보일 것(`glow`, `dark_glow`, `in_dark`)이 있다 | `Looks.problems()` (`./verify`) |
 | A3 | 화면에 쓰는 글자(`src/`의 문자열에서 ASCII가 아닌 것)는 전부 픽셀 폰트(`assets/fonts/`, 한글에 필요한 만큼 잘라 넣음)에 있다. 다른 폰트로 대신 그려지는 글자가 없게 | `ui.gd`의 `font_problems()` (`./verify`의 fonts 줄, 자체 bad/good 포함) |
 | R1 | 적 종류·강화·줍는 것을 더하면 그 규칙을 보여 주는 장면을 `tools/rules_test.gd`에 더한다 | 장면 테스트(`./verify`) + 글 |
 | B1 | `src/`와 `tools/`의 스크립트는 전부 컴파일된다. 리플레이가 부르지 않는 화면 쪽 스크립트도 포함 | check B1 |
