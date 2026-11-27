@@ -76,6 +76,7 @@ static func run() -> Array:
 	out.append_array(_fillers())
 	out.append_array(_rerolls())
 	out.append_array(_slot_tiles())
+	out.append_array(_pause())
 	out.append_array(_only())
 	out.append_array(_needs())
 	out.append_array(_own_rows())
@@ -3292,6 +3293,100 @@ static func _slot_tiles() -> Array:
 			lines += Ui.wrapped(font, part, Ui.CARD_TEXT_WIDTH).count("\n") + 1 if part != "" else 0
 		if lines > Ui.CARD_LINES:
 			out.append("a card's words take %d lines (at most %d fit the offer under the HUD): %s" % [lines, Ui.CARD_LINES, text])
+	return out
+
+
+## Every Label under node, in the order drawn.
+static func _labels(node: Node) -> Array:
+	var out := []
+	for c in node.get_children():
+		if c is Label:
+			out.append(c)
+		out.append_array(_labels(c))
+	return out
+
+
+## The pause box as the real Ui lays it out for w: how big it is, how many of the upgrades held have what they do
+## written in it, and how many of the held ingredients whose combination can still happen say so.
+static func _paused(ui, w) -> Dictionary:
+	ui.set_paused(true, w)
+	var said: Array = _labels(ui.pause_list).map(func(l): return l.text.replace("\n", " "))
+	var held: Array = Painter.held(w)
+	var live: Array = held.filter(func(id): return Ui.combo_hint(w, id) != "")
+	return { "size": ui.pause_box.get_combined_minimum_size(), "held": held.size(), "live": live.size(),
+		"words": held.filter(func(id): return said.has(World.upgrade(id, w.level(id), w.character).text)).size(),
+		"hints": live.filter(func(id): return said.has(Ui.combo_hint(w, id))).size() }
+
+
+## The pause screen says what every upgrade held does, inside the view, for any build a run can reach: over random
+## builds at many nights and the biggest builds there are (every combined upgrade with its ingredients, a side's
+## other slots filled each way, at the first level and the last), for each character. A held ingredient's line also
+## says what it can still combine into, unless the box would then pass the view: then none says it, and what each
+## upgrade does is still there. Laid out by the real Ui in the tree (tools/verify.gd waits a frame for that).
+static func _pause() -> Array:
+	var out := []
+	var ui = Ui.new()
+	(Engine.get_main_loop() as SceneTree).root.add_child(ui)
+	ui.setup(Painter.new(1), null, Node2D.new(), 0, World.new(1))
+	var most := Vector2(Painter.VIEW.x, Painter.VIEW.y - Ui.PAUSE_EDGE)
+	var combos: Array = Config.UPGRADES.keys().filter(func(id): return Config.UPGRADES[id].has("needs"))
+	var parts := []
+	for made in combos:
+		parts.append_array(Config.UPGRADES[made].needs)
+	var per_night: int = 1 + Config.NIGHT.picks_at.size()
+	for who in Config.CHARACTERS:
+		var builds := []
+		for n in [3, 6, 9, 12, 16, 20]:
+			for seed_value in range(1, 11):
+				var w = World.new(seed_value, who)
+				var rng = SimRng.new(seed_value * 100 + n)
+				w.play_offers(per_night * (n - 1) + 1, func(cards: Array) -> int:
+					return rng.index(maxi(1, cards.filter(func(id): return Config.UPGRADES.has(id)).size())))
+				builds.append(w.picks.duplicate())
+		var spare := {}
+		for side in Config.BUILD.slots:
+			spare[side] = _slotted(side, who).filter(func(id): return not parts.has(id))
+			_expect(out, "the combined upgrades' ingredients leave a %s slot over (the pause scene fills it each way)" % side, parts.filter(func(id): return World.side(id) == side).size(), Config.BUILD.slots[side] - 1)
+		var free: Array = Config.UPGRADES.keys().filter(func(id): return not World.takes_slot(id))
+		for torch in spare.torch:
+			for keeper in spare.keeper:
+				for full in [false, true]:
+					for with in [combos, []]:
+						var picks := []
+						for id in parts + [torch, keeper] + free.filter(func(i): return with.has(i) or not combos.has(i)):
+							picks.append_array(_times(id, World.max_level(id) if full else 1))
+						builds.append(picks)
+		var shown := 0
+		var hinted := 0
+		var unhinted := 0
+		for picks in builds:
+			var w = _night(LIT, picks, who)
+			w.night = 20
+			var box := _paused(ui, w)
+			if box.words == box.held and box.size.x <= most.x and box.size.y <= most.y:
+				shown += 1
+			elif out.size() < 12:
+				out.append("%s paused holding %s: the box says what %d of the %d do and is %s (the view leaves it %s)" % [who, Painter.held(w), box.words, box.held, box.size, most])
+			if box.live == 0:
+				continue
+			ui._pause_rows(w, true)
+			var fits: bool = ui.pause_box.get_combined_minimum_size().y <= most.y
+			hinted += 1 if fits else 0
+			unhinted += 0 if fits else 1
+			_expect(out, "%s paused holding %s: the %d ingredients that can still combine say so when that fits the view (%s), and none does when it does not" % [who, Painter.held(w), box.live, fits], box.hints, box.live if fits else 0)
+		_expect(out, "%s: the pause box says what every upgrade held does, inside the view, in each of %d builds" % [who, builds.size()], shown, builds.size())
+		_expect(out, "%s: in those builds the lines that say what can still combine are there, and always fit" % who, [hinted > 0, unhinted], [true, 0])
+		# More than any run can hold: the box passes the view, so the lines about combining go, and none about what an upgrade does.
+		var every: Array = Config.UPGRADES.keys().filter(func(id): return World.open_to(id, who) and not combos.has(id))
+		var crowded := _paused(ui, _night(LIT, every, who))
+		_expect(out, "%s paused holding every upgrade there is but the combined ones: the box is past the view, no line says what could combine, and every line still says what its upgrade does" % who,
+			[crowded.size.y > most.y, crowded.live > 0, crowded.hints, crowded.words], [true, true, 0, every.size()])
+		# The verifier's smallest case: five torch upgrades and a sixth, then the combined one on top.
+		var small := ["slow_burn", "big_logs", "ember_ring", "warm_glow", "woodpile", "bright"]
+		for build in [small, small + ["scorch"]]:
+			var box := _paused(ui, _night(LIT, build, who))
+			_expect(out, "%s paused holding %s: every upgrade says what it does, and every ingredient what it can combine into" % [who, build], [box.words, box.hints, box.live > 0], [build.size(), box.live, true])
+	ui.free()
 	return out
 
 

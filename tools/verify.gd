@@ -34,6 +34,7 @@ class ScriptErrors extends Logger:
 
 
 func _initialize() -> void:
+	await process_frame # the root joins the tree only after _initialize: the scenes that lay out the real Ui need it there
 	var errors := ScriptErrors.new()
 	OS.add_logger(errors)
 	var args := OS.get_cmdline_user_args()

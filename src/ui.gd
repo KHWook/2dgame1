@@ -181,8 +181,9 @@ const INTRO_BLINK := 3.0 # radians per second the button that goes on breathes
 const INTRO_SCRIM := 0.7
 const COACH_ABOVE := 9.0 # pixels above the thing the coaching arrow's tip stays
 const COACH_BOB := 1.5
-const PAUSE_COLUMN := 210.0
-const PAUSE_LINES := 22 # the pause list drops the upgrades' words past this many lines, keeping just the names
+const PAUSE_WIDTH := 456.0 # how wide a line of the pause list is: the box it makes just fits across the view
+const PAUSE_GAP := 4.0 # between a line's icon, name, words and combo_hint, and between one side's lines and the next's
+const PAUSE_EDGE := 4.0 # pixels of the view the pause box leaves free above and below it together
 
 static var _fonts := {} # size -> its pixel font, loaded the first time it is asked for
 
@@ -257,7 +258,8 @@ var end_seed: Label
 
 var pause_box: PanelContainer
 var pause_title: Label
-var pause_columns: HBoxContainer
+var pause_heads: HBoxContainer # a head per side: its name and its slots
+var pause_list: VBoxContainer # a line per upgrade held (_pause_item)
 var pause_seed: Label
 
 var told_box: PanelContainer
@@ -373,9 +375,13 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	pause_title = _label(pause_lines, HUGE, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
 	pause_title.text = "일시정지"
 	pause_keys = _label(pause_lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
-	pause_columns = HBoxContainer.new()
-	pause_columns.add_theme_constant_override("separation", 10)
-	pause_lines.add_child(pause_columns)
+	pause_heads = HBoxContainer.new()
+	pause_heads.add_theme_constant_override("separation", 16)
+	pause_lines.add_child(pause_heads)
+	pause_list = VBoxContainer.new()
+	pause_list.custom_minimum_size = Vector2(PAUSE_WIDTH, 0.0)
+	pause_list.add_theme_constant_override("separation", 1)
+	pause_lines.add_child(pause_list)
 	pause_seed = _seed_label(pause_box)
 	pause_box.visible = false
 
@@ -866,7 +872,7 @@ func _fill_end(w) -> void:
 		for side in Looks.SIDES:
 			for id in ids:
 				if Looks.side(id) == side:
-					held_flow.add_child(_held_item(w, id, false))
+					held_flow.add_child(_held_item(w, id))
 	board.text = _board()
 	board.visible = board.text != ""
 	again.modulate.a = 0.65 + 0.35 * cos(clock_time * 4.0)
@@ -888,8 +894,9 @@ func _write_seed(label: Label, title: Label, w) -> void:
 	label.custom_minimum_size.x = _width(title) + 2.0 * (_width(label) + SEED_GAP)
 
 
-## An upgrade held, as a small row: its icon, its name and level in its side's colour, and (wide) what it does.
-func _held_item(w, id: String, words: bool) -> Control:
+## An upgrade held, as a small row: its icon, then its name and level in its side's colour (and, when last, that a
+## level is the last).
+func _held_item(w, id: String, last := false) -> HBoxContainer:
 	var level: int = w.level(id)
 	var u: Dictionary = World.upgrade(id, level, w.character)
 	var item := HBoxContainer.new()
@@ -897,58 +904,36 @@ func _held_item(w, id: String, words: bool) -> Control:
 	var icon := _icon(item)
 	icon.texture = painter.icon(id, true, w.character)
 	icon.custom_minimum_size = icon.texture.get_size()
-	var lines := VBoxContainer.new()
-	lines.add_theme_constant_override("separation", 0)
-	item.add_child(lines)
-	var name := _label(lines, SMALL, SIDE_COLOUR[Looks.side(id)])
-	name.text = u.name + (LEVEL % level if level > 1 else "") + (" (최대)" if words and level >= World.max_level(id) and World.max_level(id) > 1 else "") + (COMBO_HELD if u.has("needs") else "")
+	var name := _label(item, SMALL, SIDE_COLOUR[Looks.side(id)])
+	name.text = u.name + (LEVEL % level if level > 1 else "") + (" (최대)" if last and level >= World.max_level(id) and level > 1 else "") + (COMBO_HELD if u.has("needs") else "")
 	if id == "vampire": # the kills it wants grow every night: say how far along tonight's count is
 		name.text += "  %d/%d" % [w.blade_kills, w.vamp_need()]
-	if words:
-		var text := _label(lines, SMALL, MUTED)
-		text.remove_theme_constant_override("outline_size")
-		text.text = _wrap(text, u.text, PAUSE_COLUMN - 14.0)
-		if combo_hint(w, id) != "":
-			_label(lines, SMALL, COMBO).text = combo_hint(w, id)
 	return item
 
 
-## The pause screen: the upgrades held, one column per side, with what each does (just the names when there are many),
-## and in the corner the run's seed.
+## The pause screen: a head per side, then the upgrades held, the torch's first, each on a line of its own with what
+## it does. A held ingredient's line also says what it combines into (combo_hint) while the box stays inside the view
+## with those; when it would not, no line says it, and every line still says what its upgrade does. In the corner
+## the run's seed.
 func _fill_pause(w) -> void:
 	_write_seed(pause_seed, pause_title, w)
-	for c in pause_columns.get_children():
-		pause_columns.remove_child(c)
+	_pause_rows(w, true)
+	if pause_box.get_combined_minimum_size().y > Painter.VIEW.y - PAUSE_EDGE:
+		_pause_rows(w, false)
+
+
+## The heads (per side: its name, a pip per slot of Config.BUILD.slots, the filled ones in the side's colour, and how
+## many are filled) and the list under them.
+func _pause_rows(w, hints: bool) -> void:
+	for c in pause_heads.get_children() + pause_list.get_children():
+		c.get_parent().remove_child(c)
 		c.queue_free()
 	var ids := Painter.held(w)
-	var lines := 0
-	for id in ids:
-		lines += 1 + int(ceilf(_text_width(World.upgrade(id, w.level(id), w.character).text) / (PAUSE_COLUMN - 14.0))) + (1 if combo_hint(w, id) != "" else 0)
-	var per_side := {}
 	for side in Looks.SIDES:
-		per_side[side] = ids.filter(func(id): return Looks.side(id) == side)
-	var words := lines <= PAUSE_LINES * 2 and per_side.values().all(func(a): return a.size() <= 6)
-	_pause_rows(w, per_side, words)
-	if words and pause_box.get_combined_minimum_size().y > Painter.VIEW.y - 4.0: # too tall with the words: names only
-		for c in pause_columns.get_children():
-			pause_columns.remove_child(c)
-			c.queue_free()
-		_pause_rows(w, per_side, false)
-
-
-## A column per side: its name, a pip per slot (Config.BUILD.slots; the filled ones in the side's colour) and how
-## many are filled, then what it holds.
-func _pause_rows(w, per_side: Dictionary, words: bool) -> void:
-	for side in Looks.SIDES:
-		var column := VBoxContainer.new()
-		column.custom_minimum_size = Vector2(PAUSE_COLUMN, 0.0)
-		column.add_theme_constant_override("separation", 3)
-		pause_columns.add_child(column)
 		var head := HBoxContainer.new()
 		head.add_theme_constant_override("separation", 2)
-		column.add_child(head)
-		var head_name := _label(head, SMALL, SIDE_COLOUR[side])
-		head_name.text = Looks.side_name(side, w.character) + " "
+		pause_heads.add_child(head)
+		_label(head, SMALL, SIDE_COLOUR[side]).text = Looks.side_name(side, w.character) + " "
 		for n in w.slots(side):
 			var pip := ColorRect.new()
 			pip.custom_minimum_size = SLOT_PIP
@@ -957,10 +942,43 @@ func _pause_rows(w, per_side: Dictionary, words: bool) -> void:
 			pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			head.add_child(pip)
 		_label(head, SMALL, MUTED).text = " " + SLOTS % [w.slots_used(side), w.slots(side)]
-		if per_side[side].is_empty():
-			_label(column, SMALL, MUTED).text = NONE_HELD
-		for id in per_side[side]:
-			column.add_child(_held_item(w, id, words))
+		var mine := ids.filter(func(id): return Looks.side(id) == side)
+		if not mine.is_empty() and pause_list.get_child_count() > 0: # a gap between one side's lines and the next's
+			var gap := Control.new()
+			gap.custom_minimum_size = Vector2(0.0, PAUSE_GAP)
+			pause_list.add_child(gap)
+		for id in mine:
+			_pause_item(w, id, hints)
+	if ids.is_empty():
+		_label(pause_list, SMALL, MUTED).text = NONE_HELD
+
+
+## One upgrade's line in the pause list: _held_item and what it does, broken where the line ends. Its combo_hint
+## (when hints) follows on the same line where there is room, and has a line of its own under the name where there is
+## not.
+func _pause_item(w, id: String, hints: bool) -> void:
+	var item := _held_item(w, id, true)
+	var name: Label = item.get_child(1)
+	item.add_theme_constant_override("separation", int(PAUSE_GAP))
+	pause_list.add_child(item)
+	item.get_child(0).size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	name.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var text := _label(item, SMALL, MUTED)
+	text.remove_theme_constant_override("outline_size")
+	var room: float = PAUSE_WIDTH - item.get_child(0).custom_minimum_size.x - _width(name) - 2.0 * PAUSE_GAP
+	text.text = _wrap(text, World.upgrade(id, w.level(id), w.character).text, room)
+	var hint: String = combo_hint(w, id) if hints else ""
+	if hint == "":
+		return
+	var line := item
+	if text.text.contains("\n") or _width(text) + PAUSE_GAP + _text_width(hint) > room:
+		line = HBoxContainer.new()
+		line.add_theme_constant_override("separation", int(PAUSE_GAP))
+		pause_list.add_child(line)
+		var under_icon := Control.new()
+		under_icon.custom_minimum_size = item.get_child(0).custom_minimum_size
+		line.add_child(under_icon)
+	_label(line, SMALL, COMBO).text = hint
 
 
 ## The icon of what was just taken flies from its card to its HUD tile, which then flashes.
