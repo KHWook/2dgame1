@@ -52,6 +52,7 @@ var pattern := "" # which pattern its row gives it (PATTERNS), "" for none
 var aim := Vector2.ZERO # the way a charger charges or a spitter spits, fixed when it starts to warn
 var run := 0.0 # how far the charge lined up or under way goes: charge.dist, or less where the torch is in the way
 var runs_left := 0 # a charger's charges still to come in this set, the one under way included
+var steps_off := false # a charger whose charge is due but has no line for it by the torch: it walks out from the fire
 var drum = null # the drummer whose beat it last heard, while that beat carries it
 var drum_t := 0.0 # time that beat still carries it
 
@@ -87,7 +88,7 @@ static func row(kind_: String, tier_: int) -> Dictionary:
 	if not _rows.has(key):
 		var up: Dictionary = Config.TIERS[tier_ - 2]
 		var r: Dictionary = base.duplicate()
-		r.hp = ceili(base.hp * up.hp)
+		r.hp = base.hp if base.get("frail", false) else ceili(base.hp * up.hp)
 		r.speed = base.speed * up.speed
 		r.smother = base.get("smother", 1.0) * up.smother
 		r.score = ceili(base.get("score", Config.SCORE.kill) * up.score)
@@ -130,7 +131,7 @@ func step(world) -> void:
 	if at_torch and T.has("burns"): # burning up is no kill: gone, not dead
 		at_torch = false
 		gone = true
-		world.fuel -= T.burns * T.get("smother", 1.0)
+		world.fuel -= T.burns
 		world.events.append({ "kind": "burned", "pos": pos, "enemy": kind, "tier": tier })
 		return
 	var goal: Vector2 = _goal(world)
@@ -314,8 +315,9 @@ func fade(world) -> void:
 ## range: it fixes its line at the player and paws the ground; then it charges along the line for charge.dist (step()
 ## moves it and stops it at the field's edge) and stands dazed for charge.rest, when it is easy to hit.
 ## A charger with charge.count (the boar chief) charges that many times in a row, charge.rest between them and each
-## lined up afresh, and after the last stands winded for charge.winded. Its line stops short of the torch (_run()),
-## and a line the torch leaves too short to be a charge (shorter than lane_half()) is not started.
+## lined up afresh, and after the last stands winded for charge.winded. Its line stops short of the torch (_run()).
+## It starts no charge from the torch's spot (by_torch()), nor one the torch leaves too short to be a charge (shorter
+## than lane_half()): with its charge due it walks straight out from the fire until it has a line (steps_off).
 func _charge(world) -> void:
 	var C: Dictionary = T.charge
 	var p = world.player
@@ -323,7 +325,9 @@ func _charge(world) -> void:
 		"":
 			move_t = maxf(0.0, move_t - Config.STEP)
 			var at: Vector2 = (p.pos - pos).normalized() if p.pos != pos else Vector2.RIGHT
-			if move_t <= 0.0 and not p.dead and pos.distance_to(p.pos) <= C.range and Config.FIELD.has_point(pos) and _run(at) >= lane_half():
+			var due: bool = move_t <= 0.0 and not p.dead and pos.distance_to(p.pos) <= C.range and Config.FIELD.has_point(pos)
+			steps_off = due and (by_torch() or _run(at) < lane_half())
+			if due and not steps_off:
 				if runs_left <= 0:
 					runs_left = C.get("count", 1)
 				move = "warn"
@@ -364,6 +368,12 @@ func _run(dir: Vector2) -> float:
 	if along <= 0.0 or off2 >= keep * keep:
 		return C.dist
 	return clampf(along - sqrt(keep * keep - off2), 0.0, C.dist)
+
+
+## Whether a charger with charge.torch_gap stands where no charge of its may pass: its body within that gap of touching
+## the torch.
+func by_torch() -> bool:
+	return T.charge.has("torch_gap") and pos.distance_to(Config.TORCH.pos) < Config.TORCH.reach + T.radius + T.charge.torch_gap
 
 
 ## The charge is over: it stands for rest_time().
@@ -460,7 +470,7 @@ func charge_end() -> Vector2:
 
 
 ## Where it is heading. A boss that circles the light aims a little ahead of itself on a ring outside it, unless it is
-## rushing the torch. A thief goes for the nearest log, shadows the player when there is none, and once it has
+## rushing the torch. A charger stepping off the fire heads straight out from it. A thief goes for the nearest log, shadows the player when there is none, and once it has
 ## one runs straight away from the torch.
 func _goal(world) -> Vector2:
 	if pattern == "lunge" and move == "":
@@ -472,6 +482,9 @@ func _goal(world) -> Vector2:
 		var aim: Vector2 = Config.TORCH.pos + (out if out != Vector2.ZERO else Vector2.RIGHT).normalized().rotated(E.orbit_lead) * r / cos(E.orbit_lead)
 		var inside := Config.FIELD.grow_individual(-T.radius, -E.orbit_top, -T.radius, -T.radius)
 		return aim.clamp(inside.position, inside.end)
+	if steps_off:
+		var out: Vector2 = pos - Config.TORCH.pos
+		return pos + (out if out != Vector2.ZERO else Vector2.RIGHT).normalized() * Config.FIELD.size.x
 	if T.target == "torch":
 		return Config.TORCH.pos
 	if T.target == "light": # its place on the edge of the light, straight out from the torch through where it stands

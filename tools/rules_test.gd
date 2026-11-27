@@ -83,6 +83,7 @@ static func run() -> Array:
 	out.append_array(_combined_rows())
 	out.append_array(_moth())
 	out.append_array(_spitter())
+	out.append_array(_moth_packs())
 	out.append_array(_drummer())
 	out.append_array(_chief())
 	out.append_array(_boss_order())
@@ -802,11 +803,21 @@ static func _boss_nights() -> Array:
 		w.night = night
 		var king = w._boss("slime_king", w.player.pos + Vector2(60.0, 0.0))
 		hp_on[night] = [king.full_hp, king.hp, king.summons, king.splits]
-	_expect(out, "the first boss night's king is gentle: hp, summons and what it breaks into multiplied by strength.first", hp_on[every], [ceili(K.hp * S.first), ceili(K.hp * S.first), maxi(1, roundi(K.summon.count * S.first)), maxi(1, roundi(K.split_count * S.first))])
+	var gentle: float = S.first * S.opens.slime_king
+	_expect(out, "the first boss night's king is gentle: hp, summons and what it breaks into multiplied by strength.first (and its opens)", hp_on[every], [ceili(K.hp * gentle), ceili(K.hp * gentle), maxi(1, roundi(K.summon.count * gentle)), maxi(1, roundi(K.split_count * gentle))])
 	_expect(out, "a later boss night's king is stronger", hp_on[every * 5][0] > hp_on[every][0], true)
 	w = _night(DARK)
 	w.night = every * 30
-	_expect(out, "boss strength stops at strength.most", w.boss_strength(), S.most)
+	_expect(out, "boss strength stops at strength.most", w.boss_strength("slime_king"), S.most)
+	for kind in Config.BOSS.kinds:
+		var B: Dictionary = Config.ENEMY_TYPES[kind]
+		w = _night(DARK)
+		w.night = every
+		var opener = w._boss(kind, w.player.pos + Vector2(60.0, 0.0))
+		_expect(out, "%s opening a run is strength.first times its own opens strong: hp, summons" % kind, [opener.full_hp, opener.summons],
+			[ceili(B.hp * S.first * S.opens[kind]), maxi(1, roundi(B.summon.count * S.first * S.opens[kind]))])
+		w.night = every * 2
+		_expect(out, "%s on the second boss night is as strong as any boss is then: opens is for the first only" % kind, snappedf(w.boss_strength(kind), 0.001), snappedf(S.first + S.grow, 0.001))
 	w = _night(DARK)
 	w.night = every
 	var king = w._boss("slime_king", w.player.pos + Vector2(22.0, 0.0))
@@ -1481,6 +1492,8 @@ static func _surges() -> Array:
 				_expect(out, "seed %d night %d: pack %d's warning points where surges_coming() does, beyond the field" % [seed_value, night, i], [warned[0][6].has(edge), Config.FIELD.has_point(edge)], [true, false])
 				_expect(out, "seed %d night %d: pack %d comes from the edge its warning pointed at, as many and of the kind it said" % [seed_value, night, i],
 					[came[0][3], came[0][4], came[0][1], warned[0][4], warned[0][1]], [edge, s.size, s.kind, s.size, s.kind])
+				if S.own.get(s.kind, {}).has("apart"): # it comes one by one (_moth_packs)
+					continue
 				_expect(out, "seed %d night %d: pack %d is all of its kind, as many as planned" % [seed_value, night, i], pack.map(func(e): return e.kind), _times(s.kind, s.size))
 				_expect(out, "seed %d night %d: pack %d is of one tier" % [seed_value, night, i], pack.all(func(e): return e.tier == pack[0].tier), true)
 				if pack.is_empty():
@@ -1719,12 +1732,13 @@ static func _tier_stats() -> Array:
 		_expect(out, "%s at tier 1 is its row" % kind, Enemy.row(kind, 1) == base, true)
 		if base.get("boss", false):
 			continue
+		var frail: bool = base.get("frail", false)
 		for t in Config.TIERS.size():
 			var up: Dictionary = Config.TIERS[t]
 			var r: Dictionary = Enemy.row(kind, t + 2)
 			_expect(out, "%s tier %d: hp, speed, smother, score" % [kind, t + 2], [r.hp, snappedf(r.speed, 0.001), snappedf(r.smother, 0.001), r.score],
-				[ceili(base.hp * up.hp), snappedf(base.speed * up.speed, 0.001), snappedf(base.get("smother", 1.0) * up.smother, 0.001), ceili(base.get("score", Config.SCORE.kill) * up.score)])
-		_expect(out, "%s: each tier is tougher than the one below" % kind, base.hp <= Enemy.row(kind, 2).hp and Enemy.row(kind, 2).hp <= Enemy.row(kind, 3).hp and Enemy.row(kind, 3).hp > base.hp, true)
+				[base.hp if frail else ceili(base.hp * up.hp), snappedf(base.speed * up.speed, 0.001), snappedf(base.get("smother", 1.0) * up.smother, 0.001), ceili(base.get("score", Config.SCORE.kill) * up.score)])
+		_expect(out, "%s: each tier is tougher than the one below, unless the kind is frail" % kind, base.hp <= Enemy.row(kind, 2).hp and Enemy.row(kind, 2).hp <= Enemy.row(kind, 3).hp and Enemy.row(kind, 3).hp > base.hp, not frail)
 	var e = Enemy.new("slime", Vector2.ZERO, 3)
 	_expect(out, "an enemy made at a tier has its tier's row and hp", [e.tier, e.hp, is_same(e.T, Enemy.row("slime", 3))], [3, Enemy.row("slime", 3).hp, true])
 	# a kill scores the tier's worth and the event names the tier, so the E1 count can follow it
@@ -3778,6 +3792,87 @@ static func _combined_rows() -> Array:
 	return out
 
 
+## A pack of moths (Config.SURGE.own.moth) holds at most own.most whatever the night's packs hold, so one no one
+## answers takes at most MOTH_PACK_FUEL of the fuel, at every size and tier; it comes out of the warned spot one moth
+## at a time, own.apart apart, so that fuel goes over (size - 1) * apart seconds and never two moths' worth at once.
+## Every night plans its moth packs no bigger than that, and the trickle makes up for what they really hold.
+const MOTH_PACK_FUEL := 30.0
+static func _moth_packs() -> Array:
+	var out := []
+	var S: Dictionary = Config.SURGE
+	var own: Dictionary = S.own.moth
+	var burns: float = Config.ENEMY_TYPES.moth.burns
+	var biggest := 0
+	for r in S.packs:
+		biggest = maxi(biggest, r.most)
+	_expect(out, "the biggest moth pack is smaller than the biggest pack, and takes at most MOTH_PACK_FUEL", [own.most < biggest, own.most * burns <= MOTH_PACK_FUEL], [true, true])
+	var tiers := {}
+	for scene in [[1, 2, 0], [1, 3, 0], [1, 4, 0], [1, 8, 0], [1, 10, 0], [16, 10, 0], [16, 10, 1], [16, 10, 2], [16, 10, 3], [16, 10, 4], [16, 10, 5]]: # [night, the most that night's packs hold, rolls before its tier's]
+		var size: int = World.pack_size("moth", scene[1])
+		var from := Vector2(Config.FIELD.position.x - Config.ENEMY.edge, Config.TORCH.pos.y - 40.0)
+		var plain = _night(Vector2(0.0, 100.0))
+		var w = _night(Vector2(0.0, 100.0))
+		for world in [plain, w]:
+			world.night = scene[0]
+			world.fuel = 1.0e6
+			world.time = 5.0
+		for i in scene[2]:
+			w.rng.next()
+		w.surges_due = [{ "kind": "moth", "at": w.time, "size": size, "from": from }]
+		var came := [] # the night time each moth came out, and where
+		var burned := [] # the night time each burned up
+		var hps := {}
+		var tier := 0
+		var seen := {}
+		for i in int(12.0 / Config.STEP):
+			plain.step(InputFrame.new())
+			w.step(InputFrame.new())
+			for e in w.enemies:
+				if not seen.has(e):
+					seen[e] = true
+					came.append([w.time, e.pos.distance_to(from) < e.T.speed * Config.STEP * 1.5])
+					hps[e.hp] = true
+					tier = e.tier
+			for ev in w.events:
+				if ev.kind == "burned":
+					burned.append(w.time)
+		tiers[tier] = true
+		var name := "a pack of %d moths (of %d a pack, tier %d)" % [size, scene[1], tier]
+		_expect(out, "%s holds min(size, own.most), each of 1 hp" % name, [size, came.size(), hps.keys()], [mini(scene[1], own.most), size, [1]])
+		var even := true
+		for i in range(1, came.size()):
+			even = even and absf(came[i][0] - came[i - 1][0] - own.apart) < 1.5 * Config.STEP
+		_expect(out, "%s comes out of the warned spot one by one, own.apart apart" % name, [came.all(func(c): return c[1]), even], [true, true])
+		_expect(out, "%s, unanswered, takes burns each and at most MOTH_PACK_FUEL" % name, [snappedf(plain.fuel - w.fuel, 0.001), plain.fuel - w.fuel <= MOTH_PACK_FUEL + 0.001, burned.size()], [snappedf(size * burns, 0.001), true, size])
+		if burned.size() == size:
+			var close := INF
+			for i in range(1, size):
+				close = minf(close, burned[i] - burned[i - 1])
+			_expect(out, "%s burns up over (size - 1) * apart seconds, no two moths at once" % name, [snappedf(burned[-1] - burned[0], 0.05), close > own.apart * 0.8], [snappedf((size - 1) * own.apart, 0.05), true])
+	_expect(out, "moth packs of every tier were played", tiers.keys().size(), Config.TIERS.size() + 1)
+	var planned := {}
+	for seed_value in range(1, 41):
+		for night in [3, 8, 12]:
+			var w = _dusk_at(seed_value, night)
+			var most: int = w.surge_packs()[1]
+			var held := 0
+			for s in w.surges_due:
+				held += s.size
+				if s.kind == "moth":
+					planned[s.size] = true
+					if s.size > own.most:
+						_expect(out, "seed %d night %d: a planned moth pack holds no more than own.most" % [seed_value, night], s.size, own.most)
+				elif s.size > most:
+					_expect(out, "seed %d night %d: a planned pack holds no more than the night's most" % [seed_value, night], s.size, most)
+			if held > 0:
+				var bodies: float = w._bodies_tonight()
+				var slow: float = bodies / (bodies - held * S.makes_up)
+				if absf(w.surge_slow - slow) > 0.0001:
+					_expect(out, "seed %d night %d: the trickle makes up for what the packs really hold" % [seed_value, night], w.surge_slow, slow)
+	_expect(out, "moth packs were planned, the biggest of own.most", planned.keys().max(), own.most)
+	return out
+
+
 ## How far an enemy moves in steps.
 static func _went(w, e, steps: int) -> float:
 	var from: Vector2 = e.pos
@@ -3785,8 +3880,8 @@ static func _went(w, e, steps: int) -> float:
 	return e.pos.distance_to(from)
 
 
-## The moth (Config.ENEMY_TYPES.moth): it flies to the flame and burns up there, taking burns of the fuel (more at a
-## tier) and nothing else: it smothers nothing and is no kill. One that dies on the way (to a blow, a spark, the ember
+## The moth (Config.ENEMY_TYPES.moth): it flies to the flame and burns up there, taking burns of the fuel (the same at
+## every tier, and one blow fells it at every tier) and nothing else: it smothers nothing and is no kill. One that dies on the way (to a blow, a spark, the ember
 ## ring's scorch) takes nothing. It hurts no one. Nights 1 and 2 have no moth and no new kind.
 static func _moth() -> Array:
 	var out := []
@@ -3799,9 +3894,9 @@ static func _moth() -> Array:
 		w.enemies.append(moth)
 		_play(plain, steps)
 		var told := _play(w, steps)
-		var took: float = M.burns * (1.0 if tier == 1 else Config.TIERS[tier - 2].smother)
-		_expect(out, "a tier %d moth that reaches the flame burns up and takes its fuel, no more: it smothers nothing" % tier,
-			[moth.gone, moth.dead, w.enemies.size(), snappedf(plain.fuel - w.fuel, 0.001), told.count("burned")], [true, false, 0, snappedf(took, 0.001), 1])
+		_expect(out, "a tier %d moth that reaches the flame burns up and takes burns of the fuel, no more: it smothers nothing" % tier,
+			[moth.gone, moth.dead, w.enemies.size(), snappedf(plain.fuel - w.fuel, 0.001), told.count("burned")], [true, false, 0, snappedf(M.burns, 0.001), 1])
+		_expect(out, "a tier %d moth has 1 hp and is faster than the tier below" % tier, [moth.hp, tier == 1 or moth.T.speed > Enemy.row("moth", tier - 1).speed], [1, true])
 		_expect(out, "a tier %d moth burning up is no kill" % tier, [w.score, told.has("kill")], [0, false])
 	_expect(out, "a moth takes a fifth of a log", M.burns, Config.TORCH.log_fuel / 5.0)
 	var plain = _night(DARK)
@@ -4000,7 +4095,8 @@ static func _drummer() -> Array:
 ## stops between its charges are not the winded one), and after charge.every walking it starts again. A charge hurts a
 ## keeper who stayed in its lane and misses one who left it. Logs on its line slide ahead and aside (none is lost,
 ## none jumps), a keeper it runs down drops the logs it carries (a boar's charge leaves them), and its line stops
-## short of the torch: it never runs through the torch's spot, and does not start a charge that could only go in.
+## short of the torch: it never runs through the torch's spot. With its charge due on the torch's spot, or with no
+## more line than the torch leaves it, it starts none: it walks straight out from the fire first.
 static func _chief() -> Array:
 	var out := []
 	var T: Dictionary = Config.ENEMY_TYPES.boar_chief
@@ -4116,13 +4212,32 @@ static func _chief() -> Array:
 	chief.move_t = 0.0
 	_play(w, 1)
 	_expect(out, "a line that passes clear of the torch runs its whole length", [chief.move, chief.run], ["warn", C.dist])
-	w = _night(Vector2(60.0, 0.0))
-	chief = Enemy.new("boar_chief", Config.TORCH.pos + Vector2(-20.0, 0.0))
-	w.enemies.append(chief)
-	chief.summon_t = NEVER
-	chief.move_t = 0.0
-	told = _play(w, 20)
-	_expect(out, "standing by the torch with the keeper beyond it, the chief does not charge through: it walks", [told.has("warn"), chief.move], [false, ""])
+	for scene in [[Vector2(26.0, 14.0), Vector2(-4.0, 3.0)], [Vector2(0.0, 40.0), Vector2.ZERO], [Vector2(60.0, 0.0), Vector2(-20.0, 0.0)], [Vector2.ZERO, Vector2(-20.0, 0.0)]]: # [the keeper, the chief], from the torch
+		w = _night(scene[0])
+		w.fuel = 1.0e6
+		w.player.hp = 1000
+		chief = Enemy.new("boar_chief", Config.TORCH.pos + scene[1])
+		w.enemies.append(chief)
+		chief.summon_t = NEVER
+		chief.move_t = 0.0
+		var name := "the chief %s from the torch with its charge due, the keeper %s from it" % [scene[1], scene[0]]
+		var off: float = chief.pos.distance_to(Config.TORCH.pos)
+		var inward := false
+		guard = 0
+		while chief.move == "" and guard < 600:
+			guard += 1
+			_play(w, 1)
+			inward = inward or chief.pos.distance_to(Config.TORCH.pos) < off - 0.001
+			off = chief.pos.distance_to(Config.TORCH.pos)
+		_expect(out, "%s: it lines nothing up on the fire, steps straight off it and only then paws, a whole lane's width of line before it" % name,
+			[chief.move, chief.by_torch(), inward, off >= keep, chief.run >= chief.lane_half()], ["warn", false, false, true, true])
+		nearest = INF
+		guard = 0
+		while chief.move in ["warn", "charge"] and guard < 600:
+			guard += 1
+			_play(w, 1)
+			nearest = minf(nearest, chief.pos.distance_to(Config.TORCH.pos))
+		_expect(out, "%s: its charge from there does not cross the torch's spot either" % name, [chief.move, nearest >= keep - C.speed * Config.STEP], ["rest", true])
 	w = _night(DARK)
 	chief = _add(w, "boar_chief", Vector2(60.0, 0.0))
 	chief.move_t = NEVER

@@ -116,7 +116,8 @@ const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82, "min_gap": 0.1 }
 
 ## Stronger tiers of the regular kinds, for later nights. A boss is always tier 1; what a big slime breaks into
 ## is of its tier. One row per tier from 2, applied to the kind's row in ENEMY_TYPES (Enemy.row): hp and score
-## multiplied and rounded up, speed and smother multiplied, heavy (optional) the share of a blow's knockback it takes.
+## multiplied and rounded up (hp not for a frail kind), speed and smother multiplied, heavy (optional) the share of a
+## blow's knockback it takes.
 ## Each tier is the same picture in other colours (TIERS in src/art/sprites.gd) and has a name (looks.gd).
 const TIERS := [
 	{ "hp": 1.5, "speed": 1.1, "smother": 1.25, "score": 1.5 },
@@ -155,10 +156,12 @@ const HARDEN := { "from": 10, "hp_first": 3, "hp_every": 2, "hp_most": 6, "invul
 ## warn: seconds before each comes that the world picks the edge it comes from and says so (the screen points there).
 ## strength: what a boss's hp (and the numbers it summons and breaks into, never under one) is multiplied by on the boss night
 ## numbered n from 1: first, plus grow for each boss night before it, at most most. The first boss is gentle.
+## opens: what first is multiplied by for each kind, on the first boss night only: a kind the bot's runs seldom ended on
+## opens stronger, so whichever boss opens a run, about as many runs end that night (docs/DECISIONS.md).
 const BOSS := {
 	"every": 3, "at": 0.25, "kinds": ["slime_king", "shade_lord", "boar_chief"], "spawn_mult": 1.35, "warn": 2.0, "apart": 6.0,
 	"counts": [{ "from": 3, "count": 1 }, { "from": 12, "count": 2 }, { "from": 21, "count": 3 }],
-	"strength": { "first": 0.5, "grow": 0.2, "most": 1.5 },
+	"strength": { "first": 0.5, "grow": 0.2, "most": 1.5, "opens": { "slime_king": 1.0, "shade_lord": 1.4, "boar_chief": 1.0 } },
 }
 
 ## Each dusk from the night from, the night draws an omen: one row of OMENS, never the one the night before had.
@@ -189,8 +192,12 @@ const OMENS := {
 ## night between its shares at. Together they are share of the enemies the night would bring without them (fewer when
 ## most says so), and the trickle comes further apart to make up for makes_up of them, so the night brings about as
 ## many as before: at most share * (1 - makes_up) more.
+## own: what a kind's pack does differently. most: the most it holds on any night (World.pack_size); apart: it comes
+## out of the one spot one by one, that many seconds apart, not all at once in a row. Moths have both, so a pack no
+## one answers takes own.moth.most * burns of the fuel, over (most - 1) * apart seconds.
 const SURGE := {
 	"from": 2, "share": 0.3, "makes_up": 0.75, "warn": 2.5, "at": [0.3, 0.9], "kinds": ["slime", "bat", "shade", "thief", "boar", "moth"],
+	"own": { "moth": { "most": 6, "apart": 0.5 } },
 	"packs": [{ "from": 2, "count": 1, "most": 3 }, { "from": 3, "count": 1, "most": 4 }, { "from": 4, "count": 2, "most": 8 }, { "from": 8, "count": 3, "most": 10 }],
 }
 
@@ -233,8 +240,9 @@ const ENEMY := {
 ## torch's spot. plough: a log within that many pixels of its body while it charges is pushed along and aside (it
 ## slides, it is not broken). drops_logs: a keeper the charge hurts loses hold of the logs it carries, and they land
 ## beside the lane, on the side away from the keeper.
-## burns (the moth): reaching the flame it burns up and takes that much fuel with it (more at a tier: TIERS' smother);
-## it smothers nothing, and one that dies on the way takes nothing.
+## burns (the moth): reaching the flame it burns up and takes that much fuel with it, the same at every tier; it
+## smothers nothing, and one that dies on the way takes nothing. frail: a tier does not raise its hp (a tier's moth is
+## only faster and worth more), so one blow fells it on any night.
 ## spit (the spitter): it hunts the keeper but stops range pixels off; there, on the field, every seconds after its
 ## last spit it fixes a line at the keeper, puffs up for warn seconds (so a line every every + warn seconds), then
 ## spits a blob that flies speed pixels a second along the line for reach pixels (or to the field's edge). A blob hurts a keeper its radius touches, and a blow destroys it
@@ -250,7 +258,7 @@ const ENEMY_TYPES := {
 	"thief": { "hp": 1, "speed": 40.0, "radius": 6.0, "target": "log", "harmless": true },
 	"boar": { "hp": 3, "speed": 18.0, "radius": 7.0, "target": "player",
 		"charge": { "every": 3.5, "range": 110.0, "warn": 0.8, "speed": 170.0, "dist": 150.0, "rest": 1.2 } },
-	"moth": { "hp": 1, "speed": 36.0, "radius": 4.0, "target": "torch", "harmless": true, "burns": 5.0 },
+	"moth": { "hp": 1, "speed": 36.0, "radius": 4.0, "target": "torch", "harmless": true, "burns": 5.0, "frail": true },
 	"spitter": { "hp": 2, "speed": 20.0, "radius": 6.0, "target": "player",
 		"spit": { "every": 3.2, "range": 72.0, "warn": 0.8, "speed": 75.0, "reach": 130.0, "radius": 3.0 } },
 	"drummer": { "hp": 2, "speed": 22.0, "radius": 6.0, "target": "light",

@@ -29,7 +29,7 @@ const ENEMIES := {
 	"big_slime": { "steps": 18, "anchor": Vector2(12.0, 13.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 2.0), "bits": ["h", "G", "j"], "in_dark": ["W", "h"] },
 	"thief": { "steps": 6, "turns": true, "bits": ["o", "O", "n"], "in_dark": ["W", "y"] },
 	"boar": { "steps": 7, "turns": true, "bits": ["b", "B", "S"], "in_dark": ["i", "i"] },
-	"moth": { "steps": 4, "anchor": Vector2(8.0, 9.0), "shadow": "shadow_small", "shadow_at": Vector2(-4.0, 5.0), "flies": true, "bits": ["w", "c", "d"], "in_dark": ["Y", "F"] },
+	"moth": { "steps": 4, "anchor": Vector2(8.0, 9.0), "shadow": "shadow_small", "shadow_at": Vector2(-4.0, 5.0), "flies": true, "bits": ["w", "c", "d"], "in_dark": ["w", "f"] },
 	"spitter": { "steps": 16, "bits": ["C", "D", "y"], "in_dark": ["e", "e"] },
 	"drummer": { "steps": 15, "anchor": Vector2(8.0, 11.0), "bits": ["F", "O", "w"], "in_dark": ["w", "y"] },
 	"boar_chief": { "steps": 7, "turns": true, "anchor": Vector2(12.0, 12.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 4.0), "bits": ["b", "B", "W"], "in_dark": ["i", "i"] },

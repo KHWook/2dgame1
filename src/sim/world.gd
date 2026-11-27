@@ -1035,9 +1035,13 @@ func _spawns() -> void:
 	while not surges_due.is_empty() and surges_due[0].from != null and time >= surges_due[0].at:
 		var s: Dictionary = surges_due.pop_front()
 		var tier := _tier()
+		var apart: float = Config.SURGE.own.get(s.kind, {}).get("apart", 0.0)
 		enemies.append(Enemy.new(s.kind, s.from, tier))
 		for i in s.size - 1:
-			enemies.append(Enemy.new(s.kind, _beside(s.from, i), tier))
+			if apart > 0.0:
+				later(apart * (i + 1), func(): enemies.append(Enemy.new(s.kind, s.from, tier)))
+			else:
+				enemies.append(Enemy.new(s.kind, _beside(s.from, i), tier))
 		events.append({ "kind": "pack", "enemy": s.kind, "pos": s.from, "count": s.size })
 	if time >= next_wood:
 		next_wood = time + Config.WOOD.every * minf(1.0, Config.WOOD.pace / burn()) * mod("wood_mult", 1.0)
@@ -1140,11 +1144,19 @@ func _plan_surges() -> void:
 	if size < 2:
 		return
 	var part: float = N.length * (S.at[1] - S.at[0]) / count
+	var held := 0
 	for i in count:
 		var kind := _who(kinds)
 		var at: float = N.length * S.at[0] + part * (i + rng.next())
-		surges_due.append({ "kind": kind, "at": at, "size": size, "from": null })
-	surge_slow = bodies / (bodies - size * count * S.makes_up)
+		surges_due.append({ "kind": kind, "at": at, "size": pack_size(kind, size), "from": null })
+		held += pack_size(kind, size)
+	surge_slow = bodies / (bodies - held * S.makes_up)
+
+
+## How many a pack of kind holds on a night whose packs hold size: size, or the kind's own most (Config.SURGE.own)
+## where that is fewer.
+static func pack_size(kind: String, size: int) -> int:
+	return mini(size, Config.SURGE.own.get(kind, {}).get("most", size))
 
 
 ## How many enemies the trickle alone would bring tonight, were there no surges: one every gap from the first,
@@ -1205,18 +1217,19 @@ func bosses_coming() -> Array:
 	return bosses_due.filter(func(b): return b.from != null)
 
 
-## What a boss's hp and summons are multiplied by tonight (Config.BOSS.strength): gentle on the first boss night,
-## stronger on each one after it, up to most.
-func boss_strength() -> float:
+## What a boss of kind's hp and summons are multiplied by tonight (Config.BOSS.strength): gentle on the first boss
+## night (by its kind's opens as well), stronger on each one after it, up to most.
+func boss_strength(kind: String) -> float:
 	var S: Dictionary = Config.BOSS.strength
-	return minf(S.most, S.first + S.grow * (night / Config.BOSS.every - 1))
+	var before: int = night / Config.BOSS.every - 1
+	return minf(S.most, S.first + S.grow * before) * (S.opens[kind] if before == 0 else 1.0)
 
 
-## A boss of kind coming out of the dark at at, as strong as tonight makes it (boss_strength()): its hp rounded up,
+## A boss of kind coming out of the dark at at, as strong as tonight makes it (boss_strength): its hp rounded up,
 ## the enemies it calls and those it breaks into rounded, never under one. Its row, and so its score, stays as it is.
 func _boss(kind: String, at: Vector2):
 	var boss = Enemy.new(kind, at)
-	var k := boss_strength()
+	var k := boss_strength(kind)
 	boss.full_hp = ceili(boss.T.hp * k)
 	boss.hp = boss.full_hp
 	if boss.T.has("summon"):
