@@ -1053,11 +1053,12 @@ func _dash_bar(c: CanvasItem, w) -> void:
 	c.draw_rect(Rect2(bar.position, Vector2(ceilf(bar.size.x * (1.0 - p.dash_wait / every)), bar.size.y)), Sprites.PALETTE[DASH_BAR_COLOUR])
 
 
-## A boss on its way: the edge it will come from glows and an arrow points at it, blinking. Each on its way has its own.
+## A boss or a pack on its way: the edge it will come from glows and an arrow points at it, blinking. Each on its
+## way has its own.
 func _coming(c: CanvasItem, w) -> void:
 	if w.phase != "night":
 		return
-	for b in w.bosses_coming():
+	for b in w.bosses_coming() + w.surges_coming():
 		_coming_at(c, w, b.from)
 
 

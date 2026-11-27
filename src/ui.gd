@@ -52,6 +52,11 @@ const LEVEL := " Lv.%d" # after a name from level 2: Roman numerals read as bars
 const DAWN_SOON_SECONDS := 10.0
 const BOSS_NAME_WIDTH := 70.0 # room for a boss's name left of its bar
 const BOSS_NAME_GAP := 4.0
+const COMING := "다가온다!" # a boss on its way
+const PACK := "%s 떼" # a pack of a kind
+const PACK_COMING := "몰려온다!"
+const OMEN_WORD := "오늘 밤"
+const OMEN_GAP := 6.0 # between the omen's name and the night, in the HUD
 
 ## The offer cards: size, gap, icon enlargement, colours.
 const CARD := Vector2(112.0, 0.0) # as tall as the tallest card's words
@@ -208,12 +213,16 @@ var gain_label: Label
 var clock_word: Label
 var clock: Label
 var fuel_time: Label
-var boss_name: Label # a boss on its way, over the bars
+var boss_name: Label # a boss or a pack on its way, over the bars
+var omen_label: Label # tonight's omen, left of the night
 var boss_names: Array = [] # the name of each boss on the field, left of its bar (Painter.boss_bar)
 
 var box: PanelContainer
 var heading: Label
 var subheading: Label
+var omen_row: HBoxContainer # tonight's omen under the subheading: its name and what it does
+var omen_name: Label
+var omen_text: Label
 var row: Control # the cards, placed by hand so they can move
 var offers: Array = [] # per slot: { card, style, key, tag, icon, name, text, focus }
 var press: Label
@@ -270,6 +279,7 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	hint_box.visible = false
 	add_child(overlay)
 	night_label = _label(self, SMALL, MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
+	omen_label = _label(self, SMALL, WARM, HORIZONTAL_ALIGNMENT_RIGHT)
 	score_word = _label(self, SMALL, MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
 	score_word.text = "점수"
 	score_label = _label(self, BIG, GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
@@ -293,6 +303,13 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	box.add_child(lines)
 	heading = _label(lines, BIG, WARM, HORIZONTAL_ALIGNMENT_CENTER)
 	subheading = _label(lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	omen_row = HBoxContainer.new()
+	omen_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	omen_row.add_theme_constant_override("separation", 5)
+	lines.add_child(omen_row)
+	_label(omen_row, SMALL, MUTED).text = OMEN_WORD
+	omen_name = _label(omen_row, SMALL, GOLD)
+	omen_text = _label(omen_row, SMALL, CREAM)
 	row = Control.new()
 	lines.add_child(row)
 	for i in Config.NIGHT.offer_size:
@@ -475,7 +492,14 @@ func _top(w, delta: float) -> void:
 	var night_w := _width(night_label)
 	night_label.size = Vector2(night_w + 2.0, 12.0)
 	night_label.position = Vector2(right - night_label.size.x, 13.0)
-	painter.score_panel = Vector2(maxf(score_w + 4.0 + word_w, night_w), 25.0)
+	omen_label.visible = w.omen != ""
+	var omen_w := 0.0
+	if omen_label.visible:
+		omen_label.text = Config.OMENS[w.omen].name
+		omen_w = _width(omen_label) + OMEN_GAP
+		omen_label.size = Vector2(omen_w - OMEN_GAP + 2.0, 12.0)
+		omen_label.position = Vector2(night_label.position.x - OMEN_GAP - omen_label.size.x + 2.0, 13.0)
+	painter.score_panel = Vector2(maxf(score_w + 4.0 + word_w, night_w + omen_w), 25.0)
 	gain_label.visible = gain_age >= 0.0 and gain_age < GAIN_TIME
 	if gain_label.visible:
 		gain_age += delta
@@ -523,11 +547,16 @@ func _top(w, delta: float) -> void:
 		if boss_names[i].visible:
 			boss_names[i].text = here[i].T.name
 	var coming: Array = w.bosses_coming()
-	boss_name.visible = night and not coming.is_empty()
-	if boss_name.visible: # the painter points at the edge it comes from
-		var who: String = Config.ENEMY_TYPES[coming[0].kind].name
-		boss_name.text = "%s%s 다가온다!" % [who, Looks.particle(who, "가")]
+	var packs: Array = w.surges_coming()
+	boss_name.visible = night and not (coming.is_empty() and packs.is_empty())
+	if boss_name.visible: # the painter points at the edge it comes from; a boss is named before a pack
+		boss_name.text = coming_line(Config.ENEMY_TYPES[coming[0].kind].name, COMING) if not coming.is_empty() else coming_line(PACK % Looks.kind_name(packs[0].kind), PACK_COMING)
 		boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.boss_bar(here.size()).position.y - 5.0)
+
+
+## The line for what is on its way: who, the particle that who takes, and what it does (COMING, PACK_COMING).
+static func coming_line(who: String, does: String) -> String:
+	return "%s%s %s" % [who, Looks.particle(who, "가"), does]
 
 
 ## The box in the middle: the offer while you pick (and the taken card playing out just after), or how it ended.
@@ -572,13 +601,17 @@ func _offer(w, delta: float) -> void:
 			heading.text = "한밤중"
 			subheading.text = "횃불이 힘을 하나 더 내어 준다"
 	subheading.visible = not ended
+	omen_row.visible = cards_on and not ended and w.omen != ""
+	if omen_row.visible:
+		omen_name.text = Config.OMENS[w.omen].name
+		omen_text.text = Config.OMENS[w.omen].text
 	var fade := 1.0
 	if taken >= 0:
 		fade = 1.0 - smoothstep(0.3, 1.0, take_age / TAKE_TIME)
 	elif not ended:
 		fade = clampf(deal / FADE, 0.0, 1.0)
 	box.self_modulate.a = fade
-	for n in [heading, subheading, press]:
+	for n in [heading, subheading, omen_row, press]:
 		n.modulate.a = fade
 	if row.visible:
 		_cards(w, delta)
