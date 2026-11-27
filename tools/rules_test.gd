@@ -1437,7 +1437,7 @@ static func _surges() -> Array:
 			w.next_spawn = NEVER
 			w.next_wood = NEVER
 			w.next_berry = NEVER
-			var told := [] # [kind of event, enemy, night time, pos, count, who came, where surges_coming() pointed]
+			var told := []
 			while w.time < L - 2.0 * Config.STEP:
 				if w.phase == "pick":
 					w._take(w.offer[0])
@@ -1472,7 +1472,7 @@ static func _surges() -> Array:
 				places.sort()
 				var row := []
 				for k in pack.size():
-					row.append(float(k - (pack.size() - 1) / 2)) # the odd one out stands on the side the first goes to
+					row.append(float(k - (pack.size() - 1) / 2))
 				_expect(out, "seed %d night %d: pack %d stands in a row along its edge, with_gap apart, the warned spot in its middle" % [seed_value, night, i], places, row)
 				_expect(out, "seed %d night %d: pack %d is on its edge's line, out of the field" % [seed_value, night, i],
 					[pack.all(func(e): return absf((e.pos - edge).dot(along.orthogonal())) < 0.001), pack.any(func(e): return Config.FIELD.has_point(e.pos))], [true, false])

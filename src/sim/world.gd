@@ -62,7 +62,7 @@ var events: Array = [] # what happened in the last step; see the top of this fil
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
 var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)
 var _mods_count := -1 # and how many it held then
-var _mods_omen := "" # and the omen of that night
+var _mods_omen := ""
 var _light := 0.0 # light_radius() at _light_fuel
 var _light_fuel := NAN
 
@@ -164,8 +164,6 @@ func later(delay: float, fn: Callable) -> void:
 
 ## The value an upgrade sets for key, at the level you have it, or tonight's omen does, or fallback when neither
 ## sets it. Multipliers from different upgrades, and the omen's, stack by product.
-## Every enemy asks this every step (its light, its speed), so what the picks and the omen set is worked out once per
-## change of either (_mods) and only looked up here; the product is taken in the same order as ever, so it is the same float.
 func mod(key: String, fallback):
 	if not is_same(picks, _mods_for) or picks.size() != _mods_count or omen != _mods_omen:
 		_remod()
@@ -181,7 +179,7 @@ func mod(key: String, fallback):
 
 
 ## For every key a picked upgrade or tonight's omen sets: the values it is set to, in the order of Config.UPGRADES,
-## the omen's last. The light's radius is worked out again after it.
+## the omen's last.
 func _remod() -> void:
 	_mods_for = picks
 	_mods_count = picks.size()
@@ -491,7 +489,7 @@ func _haul() -> void:
 		p.dropped = null
 	if p.carrying and p.pos.distance_to(T.pos) < T.reach + stats.radius:
 		for i in p.held: # every log held goes on the fire, each counted
-			var k: float = mod("log_mult", 1.0) # each part by itself: with no omen the sum is the very float it was
+			var k: float = mod("log_mult", 1.0)
 			fuel = minf(max_fuel(), fuel + T.log_fuel * k + mod("log_bonus", 0.0) * k + stats.log_bonus * k)
 			score += Config.SCORE.log
 			events.append({ "kind": "fed", "pos": T.pos })

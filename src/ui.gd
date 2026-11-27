@@ -52,8 +52,8 @@ const LEVEL := " Lv.%d" # after a name from level 2: Roman numerals read as bars
 const DAWN_SOON_SECONDS := 10.0
 const BOSS_NAME_WIDTH := 70.0 # room for a boss's name left of its bar
 const BOSS_NAME_GAP := 4.0
-const COMING := "다가온다!" # a boss on its way
-const PACK := "%s 떼" # a pack of a kind
+const COMING := "다가온다!"
+const PACK := "%s 떼"
 const PACK_COMING := "몰려온다!"
 const OMEN_WORD := "오늘 밤"
 const OMEN_GAP := 6.0 # between the omen's name and the night, in the HUD
@@ -213,14 +213,14 @@ var gain_label: Label
 var clock_word: Label
 var clock: Label
 var fuel_time: Label
-var boss_name: Label # a boss or a pack on its way, over the bars
-var omen_label: Label # tonight's omen, left of the night
+var boss_name: Label
+var omen_label: Label
 var boss_names: Array = [] # the name of each boss on the field, left of its bar (Painter.boss_bar)
 
 var box: PanelContainer
 var heading: Label
 var subheading: Label
-var omen_row: HBoxContainer # tonight's omen under the subheading: its name and what it does
+var omen_row: HBoxContainer
 var omen_name: Label
 var omen_text: Label
 var row: Control # the cards, placed by hand so they can move
@@ -549,7 +549,7 @@ func _top(w, delta: float) -> void:
 	var coming: Array = w.bosses_coming()
 	var packs: Array = w.surges_coming()
 	boss_name.visible = night and not (coming.is_empty() and packs.is_empty())
-	if boss_name.visible: # the painter points at the edge it comes from; a boss is named before a pack
+	if boss_name.visible:
 		boss_name.text = coming_line(Config.ENEMY_TYPES[coming[0].kind].name, COMING) if not coming.is_empty() else coming_line(PACK % Looks.kind_name(packs[0].kind), PACK_COMING)
 		boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.boss_bar(here.size()).position.y - 5.0)
 
