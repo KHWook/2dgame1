@@ -60,6 +60,7 @@ static func run() -> Array:
 	out.append_array(_mage())
 	out.append_array(_bolt_edges())
 	out.append_array(_character_upgrades())
+	out.append_array(_keeper_words())
 	return out
 
 
@@ -1974,4 +1975,50 @@ static func _attack_fx() -> Array:
 			many._strike(Effects.STRIKES[who], Vector2.ZERO, Vector2.RIGHT)
 		many.step(_night(DARK))
 		_expect(out, "the marks stay within MAX_FLASHES (%s)" % who, many.flashes.size() <= Effects.MAX_FLASHES, true)
+	return out
+
+
+## The words name the keeper being played: a line that speaks of the keeper ({who}, Looks.say) says the chosen
+## character's name, with each particle after it in the form that name takes (을 after 나무꾼, 를 after 기사 and
+## 불씨 술사, ...). No line a woodcutter or a mage is shown says 기사, and no string in src/ writes the knight's name out
+## but its own row in Config.CHARACTERS (a line that wants it says {who}).
+static func _keeper_words() -> Array:
+	var out := []
+	var knight: String = Config.CHARACTERS.knight.name
+	_expect(out, "particles after a vowel", ["를", "가", "는", "와", "로"].map(func(p): return Looks.particle("기사", p)), ["를", "가", "는", "와", "로"])
+	_expect(out, "particles after a final consonant", ["를", "가", "는", "와", "로"].map(func(p): return Looks.particle("나무꾼", p)), ["을", "이", "은", "과", "으로"])
+	_expect(out, "불씨 술사 ends in a vowel", ["를", "가"].map(func(p): return Looks.particle("불씨 술사", p)), ["를", "가"])
+	_expect(out, "로 after ㄹ, 이 after it", [Looks.particle("슬라임 왕", "로"), Looks.particle("슬라임 왕", "가"), Looks.particle("횃불", "로")], ["으로", "이", "로"])
+	_expect(out, "a word not ending in Korean reads as ending in a vowel", [Looks.particle("Bot", "를"), Looks.particle("", "가")], ["를", "가"])
+	_expect(out, "the bat's hint names the woodcutter", Looks.hint("bat", "woodcutter"), "박쥐: 나무꾼을 쫓아온다, 빛 밖에서는 더 빠르다")
+	_expect(out, "the bat's hint names the mage", Looks.hint("bat", "mage"), "박쥐: 불씨 술사를 쫓아온다, 빛 밖에서는 더 빠르다")
+	_expect(out, "the bat's hint names the knight", Looks.hint("bat"), "박쥐: 기사를 쫓아온다, 빛 밖에서는 더 빠르다")
+	_expect(out, "every particle after {who} is put in its form", Looks.say("{who}를 {who}가 {who}는 {who}와 {who}로 {who}의", "woodcutter"), "나무꾼을 나무꾼이 나무꾼은 나무꾼과 나무꾼으로 나무꾼의")
+	_expect(out, "the keeper's side is named for the character", [Looks.side_name("keeper", "woodcutter"), Looks.side_name("keeper", "mage"), Looks.side_name("torch", "mage")], ["나무꾼의 힘", "불씨 술사의 힘", "횃불의 힘"])
+	for who in Config.CHARACTERS:
+		var lines := []
+		for kind in Config.ENEMY_TYPES.keys() + ["berry"]:
+			lines.append(Looks.hint(kind, who))
+			for t in Looks.TIER_NAMES.get(kind, []).size():
+				lines.append(Looks.hint(Looks.thing(kind, t + 2), who))
+		for side in Looks.SIDES:
+			lines.append(Looks.side_name(side, who))
+		for id in Config.UPGRADES:
+			for n in range(1, World.max_level(id) + 1):
+				var u := World.upgrade(id, n, who)
+				lines.append_array([u.name, u.text])
+		for c in Config.CHARACTERS.values():
+			lines.append_array([c.name, c.text, c.trait])
+		for line in lines:
+			if "{" in line or "}" in line:
+				out.append("a line is shown to the %s with a blank in it: %s" % [who, line])
+			if who != "knight" and knight in line and line != knight:
+				out.append("a line shown to the %s says %s: %s" % [who, knight, line])
+	var strings := RegEx.create_from_string("\"(?:[^\"\\\\]|\\\\.)*\"")
+	var found := []
+	for path in Ui._scripts("res://src"):
+		for m in strings.search_all(FileAccess.get_file_as_string(path)):
+			if knight in m.get_string():
+				found.append("%s: %s" % [path.get_file(), m.get_string()])
+	_expect(out, "the knight's name is written out only in its own row (a line about the keeper says {who})", found, ["config.gd: \"%s\"" % knight])
 	return out

@@ -519,7 +519,7 @@ func _top(w, delta: float) -> void:
 	boss_name.visible = night and not coming.is_empty()
 	if boss_name.visible: # the painter points at the edge it comes from
 		var who: String = Config.ENEMY_TYPES[coming[0].kind].name
-		boss_name.text = "%s%s 다가온다!" % [who, _subject(who)]
+		boss_name.text = "%s%s 다가온다!" % [who, Looks.particle(who, "가")]
 		boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.boss_bar(here.size()).position.y - 5.0)
 
 
@@ -890,14 +890,14 @@ func _hints(w) -> void:
 	if not w.berries.is_empty():
 		here.append("berry")
 	for thing in here:
-		if Looks.hint(thing) != "" and not hints_told.has(thing):
+		if Looks.hint(thing, w.character) != "" and not hints_told.has(thing):
 			hints_told[thing] = true
 			hints_waiting.append(thing)
 	if w.phase == "night":
 		hint_steps = maxi(0, hint_steps - 1)
 		if hint_steps == 0 and not hints_waiting.is_empty():
 			var thing: String = hints_waiting.pop_front()
-			var line: String = Looks.hint(thing)
+			var line: String = Looks.hint(thing, w.character)
 			var cut := line.find(": ")
 			hint_name.text = line.substr(0, cut) if cut > 0 else ""
 			hint_text.text = line.substr(cut + 2) if cut > 0 else line
@@ -955,12 +955,6 @@ func _board() -> String:
 static func _day(date: String) -> String:
 	var parts := date.split(" ")[0].split("-")
 	return "%d월 %d일" % [int(parts[1]), int(parts[2])] if parts.size() == 3 else ""
-
-
-## The subject particle that goes after a Korean word: 이 after a final consonant, 가 after a vowel.
-static func _subject(word: String) -> String:
-	var last := word.unicode_at(word.length() - 1)
-	return "이" if last >= 0xAC00 and last <= 0xD7A3 and (last - 0xAC00) % 28 != 0 else "가"
 
 
 ## Seconds as m:ss, rounded up so the clock reads 0:00 only when the time is really out.
