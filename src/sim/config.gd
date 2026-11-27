@@ -153,6 +153,38 @@ const BOSS := {
 	"strength": { "first": 0.5, "grow": 0.2, "most": 1.5 },
 }
 
+## Each dusk from the night from, the night draws an omen: one row of OMENS, never the one the night before had.
+## The first night has none, and nights before from draw nothing from the rng.
+const OMEN := { "from": 2 }
+
+## Omens: what tonight is like, besides its row in NIGHTS. name and text are what the screen says of it; the rest
+## the rules read through World.mod(), as they read a picked upgrade, so an omen's multiplier and an upgrade's make a
+## product. Only multipliers (keys ending in _mult), and kinds: for each enemy kind named, what its share of tonight's
+## who is multiplied by. light_mult: the torch's light; burn_mult: fuel burnt per second; wood_mult, berry_mult:
+## seconds between logs, between berries (and until the night's first berry); gap_mult: seconds between enemies;
+## log_mult: fuel a log gives, bonuses and all. from (optional): the first night it may come, no earlier than the
+## kinds it names do.
+const OMENS := {
+	"fog": { "name": "안개", "text": "빛이 좁아지고 박쥐가 몰려든다", "light_mult": 0.85, "kinds": { "bat": 2.0 }, "from": 3 },
+	"wind": { "name": "바람", "text": "불이 빨리 타지만 장작이 자주 떨어진다", "burn_mult": 1.2, "wood_mult": 0.7, "from": 4 },
+	"still": { "name": "고요", "text": "적이 드물고 열매도 드물다", "gap_mult": 1.1, "berry_mult": 2.0 },
+	"harvest": { "name": "풍년", "text": "장작이 오래 타지만 도둑이 꼬인다", "log_mult": 1.2, "kinds": { "thief": 3.0 } },
+	"dew": { "name": "이슬", "text": "젖은 장작이 덜 타고 열매가 자주 난다", "log_mult": 0.75, "berry_mult": 0.5 },
+	"dark_moon": { "name": "그믐", "text": "빛이 조금 줄고 그림자가 늘어난다", "light_mult": 0.95, "kinds": { "shade": 1.6 }, "from": 4 },
+}
+
+## Surges: from the night from, packs come besides the steady trickle. Each is one kind (drawn over tonight's who
+## among kinds) of one tier, and comes all at once along one edge, ENEMY.with_gap apart; warn seconds before, the
+## world picks the edge and says so (the screen points there). packs: how many come in a night and the most one
+## holds, from the night of a row (until the next row's). They come at random times, one in each equal part of the
+## night between its shares at. Together they are share of the enemies the night would bring without them (fewer when
+## most says so), and the trickle comes further apart to make up for makes_up of them, so the night brings about as
+## many as before: at most share * (1 - makes_up) more.
+const SURGE := {
+	"from": 2, "share": 0.3, "makes_up": 0.75, "warn": 2.5, "at": [0.3, 0.9], "kinds": ["slime", "bat", "shade", "thief", "boar"],
+	"packs": [{ "from": 2, "count": 1, "most": 3 }, { "from": 3, "count": 1, "most": 4 }, { "from": 4, "count": 2, "most": 8 }, { "from": 8, "count": 3, "most": 10 }],
+}
+
 const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 
 const ENEMY := {

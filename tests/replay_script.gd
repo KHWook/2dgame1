@@ -3,14 +3,12 @@
 ## ./verify --update-golden (and add a docs/DECISIONS.md entry).
 extends RefCounted
 
-## Seed 12 with slot 1 passes six dawns and is still standing on the seventh night when the run stops. On the way it
-## meets every usual enemy kind: the slime king's coming is told ahead, it comes, leaps (the bot steps out of the
-## marked landing) and is killed; from the sixth night boars line up, paw and charge 15 times (the bot steps out of
-## every lane) and five are cut down; big slimes split, thieves take logs, blows pass through shades in the dark,
-## bats fly faster out of the light, berries are eaten, logs come faster as the fire burns faster. It takes the
-## sword's upgrades (the long blade and the woodpile to their second level, the wide swing, the fire blade, the
-## vampire blade), the spark twice, the ember ring, the warm glow, quick hands, dry logs and the dash. The shade lord,
-## the spin and the thorn cloak are not in this run; the rules scenes hold them.
+## Seed 12 with slot 1 passes six dawns and is still standing on the seventh night when the run stops. Its nights
+## from the second have the omens harvest, still, dark_moon, still, dew and harvest, and nine packs come, each warned
+## of first: bats, shades, slimes, thieves and boars. Both bosses come, each told ahead: the slime king on the third
+## night, the shade lord (with its decoys) on the sixth. It takes the vampire blade, the spark twice, the thorn cloak
+## twice, the warm glow, the dash twice, the bright fire twice, the wide swing, the slow burn, the spin and the fire
+## blade. What a run does not meet, the rules scenes hold.
 const SEED := 12
 const STEPS := 60 * 400
 const PICK_SLOT := 1

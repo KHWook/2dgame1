@@ -24,16 +24,24 @@ static func run() -> String:
 
 
 ## Steps a bot's run until it ends, the night is no longer only (0: any night) or steps run out. Returns every enemy
-## that came out of the dark, as { night, time, id ("kind tier place") }, and every enemy kind it met at all.
+## that came out of the dark, as { night, time, id ("kind tier place") }, every enemy kind it met at all, the omens
+## its nights had and how many packs (Config.SURGE) came.
 static func _play(w, bot, steps: int, only := 0) -> Dictionary:
 	var seen := {}
 	var arrivals := []
 	var kinds := {}
 	var tiers := 1
+	var omens := {}
+	var packs := 0
 	for s in steps:
 		w.step(bot.frame(w))
 		if w.phase == "out" or w.phase == "dead" or (only > 0 and w.night != only):
 			break
+		if w.omen != "":
+			omens[w.omen] = true
+		for ev in w.events:
+			if ev.kind == "pack":
+				packs += 1
 		for e in w.enemies:
 			if seen.has(e):
 				continue
@@ -42,7 +50,7 @@ static func _play(w, bot, steps: int, only := 0) -> Dictionary:
 			tiers = maxi(tiers, e.tier)
 			if not Config.FIELD.has_point(e.pos):
 				arrivals.append({ "night": w.night, "time": w.time, "id": "%s %d %.1f,%.1f" % [e.kind, e.tier, e.pos.x, e.pos.y] })
-	return { "arrivals": arrivals, "kinds": kinds.keys(), "tiers": tiers, "world": w }
+	return { "arrivals": arrivals, "kinds": kinds.keys(), "tiers": tiers, "omens": omens.keys(), "packs": packs, "world": w }
 
 
 ## How many of b's arrivals a has too: the same enemy from the same place at the same time of the same night.
@@ -115,6 +123,7 @@ static func _pacing() -> String:
 	for n in PACE_NIGHTS:
 		var counts := []
 		var busiest := []
+		var packs := []
 		for seed_value in range(1, PACE_SEEDS + 1):
 			var w = World.new(seed_value)
 			w.begin_at(n, 1)
@@ -127,14 +136,16 @@ static func _pacing() -> String:
 				most = maxi(most, times.filter(func(u): return u >= t and u < t + WINDOW).size())
 			counts.append(times.size())
 			busiest.append(most)
+			packs.append(run.packs)
 		if counts.is_empty():
 			parts.append("night %d: the bot kept none of %d" % [n, PACE_SEEDS])
 			continue
 		counts.sort()
 		busiest.sort()
+		packs.sort()
 		var count: int = counts[counts.size() / 2]
 		var even: float = count * WINDOW / (Config.NIGHT.length - Config.NIGHT.first_spawn)
-		parts.append("night %d: %d arrivals, %d in the busiest %d s (even: %.1f)" % [n, count, busiest[busiest.size() / 2], int(WINDOW), even])
+		parts.append("night %d: %d arrivals (packs: %d), %d in the busiest %d s (even: %.1f)" % [n, count, packs[packs.size() / 2], busiest[busiest.size() / 2], int(WINDOW), even])
 	return "variety: pacing, medians over the nights the bot keeps of %d seeds: %s" % [PACE_SEEDS, "; ".join(parts)]
 
 
@@ -145,6 +156,7 @@ static func _met() -> String:
 	var kinds := []
 	var boss_kinds := []
 	var cards := []
+	var omens := []
 	var stronger := 0
 	for seed_value in range(1, MET_SEEDS + 1):
 		var run := _play(World.new(seed_value), Bot.new(1), MET_STEPS)
@@ -153,10 +165,11 @@ static func _met() -> String:
 		kinds.append(run.kinds.filter(func(k): return not bosses.has(k)).size())
 		boss_kinds.append(run.kinds.filter(func(k): return bosses.has(k)).size())
 		cards.append(w.picks.size())
+		omens.append(run.omens.size())
 		if run.tiers > 1:
 			stronger += 1
-	for list in [nights, kinds, boss_kinds, cards]:
+	for list in [nights, kinds, boss_kinds, cards, omens]:
 		list.sort()
 	var mid: int = MET_SEEDS / 2
-	return "variety: met, medians over %d runs of the bot: falls on night %d, meets %d of %d enemy kinds and %d of %d bosses, takes %d cards; %d of %d runs meet a stronger tier" % [
-		MET_SEEDS, nights[mid], kinds[mid], Config.ENEMY_TYPES.size() - bosses.size(), boss_kinds[mid], bosses.size(), cards[mid], stronger, MET_SEEDS]
+	return "variety: met, medians over %d runs of the bot: falls on night %d, meets %d of %d enemy kinds and %d of %d bosses, has %d of %d omens, takes %d cards; %d of %d runs meet a stronger tier" % [
+		MET_SEEDS, nights[mid], kinds[mid], Config.ENEMY_TYPES.size() - bosses.size(), boss_kinds[mid], bosses.size(), omens[mid], Config.OMENS.size(), cards[mid], stronger, MET_SEEDS]

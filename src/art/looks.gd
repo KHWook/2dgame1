@@ -101,6 +101,11 @@ static func enemy(kind: String) -> Dictionary:
 	return _looks[kind]
 
 
+## What an enemy kind is called: the name its hint opens with.
+static func kind_name(kind: String) -> String:
+	return HINTS[kind].get_slice(":", 0)
+
+
 ## What a first sighting is of: an enemy kind at tier 1 (its HINTS line), or "<kind>~<tier>" for a stronger tier.
 static func thing(kind: String, tier: int) -> String:
 	return kind if tier <= 1 else "%s~%d" % [kind, tier]
