@@ -37,7 +37,7 @@ func _initialize() -> void:
 	OS.add_logger(errors)
 	var args := OS.get_cmdline_user_args()
 	if args.has("--balance"):
-		print(Balance.run())
+		print(Balance.run(args.has("--late")))
 		print("verify: PASS")
 		quit(0)
 		return

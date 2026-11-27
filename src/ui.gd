@@ -47,6 +47,8 @@ const PANEL_EDGE := Color("#4a3d5c")
 const ENDINGS := { "out": "횃불이 꺼졌다", "dead": "쓰러졌다" }
 const LEVEL := " Lv.%d" # after a name from level 2: Roman numerals read as bars ("||") in the pixel font
 const DAWN_SOON_SECONDS := 10.0
+const BOSS_NAME_WIDTH := 70.0 # room for a boss's name left of its bar
+const BOSS_NAME_GAP := 4.0
 
 ## The offer cards: size, gap, icon enlargement, colours.
 const CARD := Vector2(112.0, 0.0) # as tall as the tallest card's words
@@ -184,7 +186,8 @@ var gain_label: Label
 var clock_word: Label
 var clock: Label
 var fuel_time: Label
-var boss_name: Label
+var boss_name: Label # a boss on its way, over the bars
+var boss_names: Array = [] # the name of each boss on the field, left of its bar (Painter.boss_bar)
 
 var box: PanelContainer
 var heading: Label
@@ -251,8 +254,13 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	clock = _label(self, BIG, CREAM)
 	fuel_time = _label(self, SMALL, CREAM)
 	boss_name = _label(self, SMALL, RED, HORIZONTAL_ALIGNMENT_CENTER)
-	boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.BOSS_BAR.position.y - 15.0)
 	boss_name.size = Vector2(Painter.BOSS_BAR.size.x, 12.0)
+	for i in Config.BOSS.counts.map(func(r): return r.count).max():
+		var l := _label(self, SMALL, RED, HORIZONTAL_ALIGNMENT_RIGHT)
+		var bar: Rect2 = Painter.boss_bar(i)
+		l.size = Vector2(BOSS_NAME_WIDTH, 12.0)
+		l.position = Vector2(bar.position.x - BOSS_NAME_GAP - BOSS_NAME_WIDTH, bar.get_center().y - 7.0)
+		boss_names.append(l)
 
 	box = _panel(self, PANEL, 6.0)
 	var lines := VBoxContainer.new()
@@ -329,7 +337,7 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	guide_left_label = guide_left.get_child(0)
 	guide_box.visible = false
 	coach_arrow = TextureRect.new()
-	coach_arrow.texture = Sprites.texture("coach_arrow")
+	coach_arrow.texture = Sprites.alone("coach_arrow")
 	coach_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	coach_arrow.visible = false
 	add_child(coach_arrow)
@@ -464,14 +472,17 @@ func _top(w, delta: float) -> void:
 	fuel_time.add_theme_color_override("font_color", RED if Painter.fuel_low(w) or smothered else CREAM)
 	painter.fuel_text_width = _width(fuel_time) if night else 0.0
 
-	var b = Painter.boss(w)
-	var coming: bool = w.boss_from != null
-	boss_name.visible = (b != null or coming) and night
-	if b != null:
-		boss_name.text = b.T.name
-	elif coming: # the painter points at the edge it comes from
-		var who: String = Config.ENEMY_TYPES[w.boss_kind()].name
+	var here: Array = Painter.bosses(w)
+	for i in boss_names.size():
+		boss_names[i].visible = night and i < here.size()
+		if boss_names[i].visible:
+			boss_names[i].text = here[i].T.name
+	var coming: Array = w.bosses_coming()
+	boss_name.visible = night and not coming.is_empty()
+	if boss_name.visible: # the painter points at the edge it comes from
+		var who: String = Config.ENEMY_TYPES[coming[0].kind].name
 		boss_name.text = "%s%s 다가온다!" % [who, _subject(who)]
+		boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.boss_bar(here.size()).position.y - 5.0)
 
 
 ## The box in the middle: the offer while you pick (and the taken card playing out just after), or how it ended.
@@ -618,7 +629,7 @@ func _fill_cards(w) -> void:
 		var id: String = w.offer[i]
 		var next: int = w.level(id) + 1
 		var u: Dictionary = World.upgrade(id, next)
-		var icon: Texture2D = painter.icon(id)
+		var icon: Texture2D = painter.icon(id, true)
 		o.icon.texture = icon
 		o.icon.custom_minimum_size = icon.get_size() * CARD_ICON
 		o.name.text = u.name + (LEVEL % next if next > 1 else "")
@@ -715,13 +726,15 @@ func _held_item(w, id: String, words: bool) -> Control:
 	var item := HBoxContainer.new()
 	item.add_theme_constant_override("separation", 3)
 	var icon := _icon(item)
-	icon.texture = painter.icon(id)
+	icon.texture = painter.icon(id, true)
 	icon.custom_minimum_size = icon.texture.get_size()
 	var lines := VBoxContainer.new()
 	lines.add_theme_constant_override("separation", 0)
 	item.add_child(lines)
 	var name := _label(lines, SMALL, SIDE_COLOUR[Looks.side(id)])
 	name.text = u.name + (LEVEL % level if level > 1 else "") + (" (최대)" if words and level >= World.max_level(id) and World.max_level(id) > 1 else "")
+	if id == "vampire": # the kills it wants grow every night: say how far along tonight's count is
+		name.text += "  %d/%d" % [w.blade_kills, w.vamp_need()]
 	if words:
 		var text := _label(lines, SMALL, MUTED)
 		text.remove_theme_constant_override("outline_size")
@@ -784,7 +797,7 @@ func _flight(w, delta: float) -> void:
 			var e := t * t * (3.0 - 2.0 * t)
 			var at := fly_from.lerp(to, e) + Vector2(0.0, -FLY_ARC * sin(e * PI))
 			var size := Painter.ICON_SIZE * lerpf(CARD_ICON, 1.0, e)
-			flier.texture = painter.icon(fly_id)
+			flier.texture = painter.icon(fly_id, true)
 			flier.size = Vector2(size, size)
 			flier.position = at - flier.size / 2.0
 	elif fly_id != "":
@@ -805,7 +818,7 @@ func _flight(w, delta: float) -> void:
 func _fill_told(w, id: String) -> void:
 	var level: int = w.level(id)
 	var u: Dictionary = World.upgrade(id, level)
-	told_icon.texture = painter.icon(id)
+	told_icon.texture = painter.icon(id, true)
 	told_icon.custom_minimum_size = told_icon.texture.get_size() * CARD_ICON
 	told_name.text = u.name + (LEVEL % level if level > 1 else "") + ("  얻었다!" if level == 1 else "  강해졌다!")
 	told_text.text = u.text
@@ -828,22 +841,22 @@ func _told(w, delta: float) -> void:
 
 ## Notices each kind of thing the first time it turns up and queues a line about it; counts the showing one down.
 func _hints(w) -> void:
-	var here: Array = w.enemies.map(func(e): return e.kind)
+	var here: Array = w.enemies.map(func(e): return Looks.thing(e.kind, e.tier))
 	if not w.berries.is_empty():
 		here.append("berry")
 	for thing in here:
-		if Looks.HINTS.has(thing) and not hints_told.has(thing):
+		if Looks.hint(thing) != "" and not hints_told.has(thing):
 			hints_told[thing] = true
 			hints_waiting.append(thing)
 	if w.phase == "night":
 		hint_steps = maxi(0, hint_steps - 1)
 		if hint_steps == 0 and not hints_waiting.is_empty():
 			var thing: String = hints_waiting.pop_front()
-			var line: String = Looks.HINTS[thing]
+			var line: String = Looks.hint(thing)
 			var cut := line.find(": ")
 			hint_name.text = line.substr(0, cut) if cut > 0 else ""
 			hint_text.text = line.substr(cut + 2) if cut > 0 else line
-			var tex := Sprites.texture("berry" if thing == "berry" else Looks.FRAMES[0] % thing)
+			var tex := Sprites.alone("berry" if thing == "berry" else Sprites.tiered(Looks.FRAMES[0] % thing.get_slice("~", 0), int(thing.get_slice("~", 1)) if "~" in thing else 1))
 			hint_icon.texture = tex
 			hint_icon.custom_minimum_size = tex.get_size() / (2.0 if tex.get_height() > 24 else 1.0)
 			hint_steps = HINT_STEPS
@@ -860,6 +873,8 @@ func _hint_frame(w, delta: float) -> void:
 	var bottom := Painter.VIEW.y - HINT_BOTTOM
 	if boss_name.visible:
 		bottom = boss_name.position.y - 2.0
+	elif boss_names[0].visible:
+		bottom = minf(bottom, Painter.boss_bar(Painter.bosses(w).size() - 1).position.y - 4.0)
 	var k := minf(hint_age / FADE, 1.0)
 	hint_box.position = Vector2(roundf((Painter.VIEW.x - hint_box.size.x) / 2.0), roundf(bottom - hint_box.size.y + (1.0 - k) * HINT_RISE))
 	var out := minf(1.0, hint_steps / (60.0 * FADE * 2.0))
@@ -986,7 +1001,7 @@ func _guide_row(parent: Node, line: Array) -> void:
 			_label(r, BIG, MUTED).text = sprite
 			continue
 		var picture := _icon(r)
-		var tex := Sprites.texture(sprite)
+		var tex := Sprites.alone(sprite)
 		picture.texture = tex
 		# a row of pictures only shows them at twice their size; beside words, in a 16-pixel square
 		picture.custom_minimum_size = tex.get_size() * 2.0 if line[1] == "" else Vector2(16.0, 16.0)

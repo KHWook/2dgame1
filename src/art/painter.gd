@@ -118,7 +118,8 @@ const SCRIM := Color(0.03, 0.02, 0.07)
 ## The night's progress towards dawn, under the clock that main.gd writes at the top in the middle.
 const NIGHT_BAR := Rect2(195.0, 18.0, 90.0, 3.0)
 const CLOCK_PANEL := Rect2(185.0, 1.0, 110.0, 23.0)
-const BOSS_BAR := Rect2(140.0, 254.0, 200.0, 5.0) # a boss's health, along the bottom; main.gd writes its name above
+const BOSS_BAR := Rect2(140.0, 254.0, 200.0, 5.0) # the first boss's health, along the bottom; the ui writes its name left of it
+const BOSS_BAR_STEP := 10.0 # each next boss's bar is this much higher: they stack up from the bottom
 const BOSS_BAR_COLOUR := "i"
 
 ## The dash: copies of the keeper trail behind while it dashes, fading, this far apart along the dash.
@@ -174,9 +175,17 @@ const MARK_FILL := 0.35 # how solid the ring's inside is the moment it lands
 const MARK_BLINK_STEPS := 4
 const LEAP_HEIGHT := 26.0 # pixels the king rises at the top of its leap
 const RUSH_DASH := 4.0 # pixels per dash of the rush line, and per gap
-## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) with
-## its line drawn to where the charge would end, an arrowhead there; dazed after, stars turn over its head.
-const CHARGE_HEAD := 5.0 # pixels from the arrowhead's tip to its back
+## The shade lord about to split: it flashes inside a red ring, and as many rings of smoke as it will have decoys
+## slide round from it along its ring to where they will appear.
+const SPLIT_SMOKE := "7"
+## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) on a
+## red band laid from itself to where the charge ends, as wide as the charge hurts (charge_band: Enemy.lane_half()
+## each side of its line, round at the ends): outside the band is safe. The band fills from the boar toward its end
+## as the wind-up runs out, and stays, solid, under the charge. Dazed after, stars turn over its head.
+const LANE_FAINT := 0.12 # how solid the band is the moment it is drawn
+const LANE_FULL := 0.45 # how solid the filled part is (and the whole band while it charges)
+const LANE_EDGE := 0.75 # its outline, blinking
+const LANE_ROUND := 8 # points on each round end
 const PAW_STEPS := 3 # simulation steps per shuffle while it paws
 const DAZED_AT := Vector2(-3.0, -13.0) # the stars' top-left, from the charger's position
 const DAZED_STEPS := 8 # simulation steps per turn of the stars
@@ -218,17 +227,39 @@ var ember := 1.0 # how much of the keeper's ember is left, 1 full to 0 cooled
 var ember_flare := 0.0 # seconds left of the flare of an ember that just caught again
 var ember_at_torch := true # whether the keeper touched the torch on the last step
 var score_panel := Vector2.ZERO # set by the ui: the size of the night and score words, top right
+var _kinds := {} # enemy kind -> its pictures, found once (see _kind): a crowd paints hundreds every frame
+## What every pass over the enemies needs to know about each, worked out once per world step (_crowd): its kind's
+## pictures, which walking frame it shows, whether it is drawn mirrored, whether it stands in the light.
+var _crowd_for := []
+var _picture: Array = []
+var _frame := PackedInt32Array()
+var _mirror := PackedInt32Array()
+var _lit := PackedByteArray()
 
 
 ## The ground is laid out from the night's seed with its own generator, so it never draws from world.rng.
 func _init(seed_value: int) -> void:
 	effects = Effects.new(seed_value)
-	clearing = ImageTexture.create_from_image(_clearing_image())
+	# The clearing and the treetops go into the sprites' atlas too, and so do the eyes that show in the dark, so the
+	# whole field is drawn from one texture (src/art/sprites.gd).
+	var pictures := { "clearing": _clearing_image() }
 	for side in HEDGE_SIDES:
 		var img: Image = Sprites.image("hedge")
 		for turn in HEDGE_SIDES[side]:
 			img.rotate_90(CLOCKWISE)
-		hedges[side] = ImageTexture.create_from_image(img)
+		pictures["hedge_" + side] = img
+	Sprites.pack(pictures)
+	clearing = Sprites.picture("clearing")
+	for side in HEDGE_SIDES:
+		hedges[side] = Sprites.picture("hedge_" + side)
+	var eyes := []
+	for kind in Config.ENEMY_TYPES:
+		var look := Looks.enemy(kind)
+		if not look.in_dark.is_empty():
+			for frame in Looks.FRAMES:
+				for flip in [false, true]:
+					eyes.append([frame % kind, look.in_dark[0], flip])
+	Sprites.prepare_only(eyes)
 	var rng := SimRng.new(seed_value)
 	var cells := Vector2i((VIEW / SCENERY_CELL).ceil())
 	for cy in cells.y:
@@ -244,8 +275,8 @@ func _init(seed_value: int) -> void:
 					break
 
 
-func icon(upgrade: String) -> Texture2D:
-	return Sprites.texture(Looks.ICON % upgrade)
+func icon(upgrade: String, alone := false) -> Texture2D:
+	return Sprites.alone(Looks.ICON % upgrade) if alone else Sprites.texture(Looks.ICON % upgrade)
 
 
 ## Call once after each world.step(), so the effects can answer what the step did.
@@ -320,6 +351,7 @@ static func flicker(w) -> float:
 
 
 func paint(c: CanvasItem, w) -> void:
+	_crowd(w)
 	c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"]) # the hedge goes on past the view, for a shake
 	c.draw_rect(Rect2(Vector2.ZERO, VIEW), GROUND)
 	c.draw_texture(clearing, (T.pos + CLEARING_DROP - Vector2(CLEARING) / 2.0).round())
@@ -328,12 +360,12 @@ func paint(c: CanvasItem, w) -> void:
 	_ember_ring(c, w)
 	_shadows(c, w)
 	var standing := _standing(w)
-	standing.sort_custom(func(a, b): return a[0] < b[0])
+	standing.sort()
 	for s in standing:
-		if s[1] == null:
+		if s[2] == null:
 			_sword(c, w)
 		else:
-			c.draw_texture(s[1], s[2], s[3])
+			c.draw_texture(s[2], s[3], s[4])
 	_fliers(c, w)
 	for x in range(0, int(VIEW.x), 16):
 		c.draw_texture(hedges.top, Vector2(x, 0.0))
@@ -344,21 +376,25 @@ func paint(c: CanvasItem, w) -> void:
 
 
 func paint_overlay(c: CanvasItem, w) -> void:
+	_crowd(w)
 	c.draw_set_transform(shake) # what glows in the field shakes with it (main.gd moves the field); the HUD does not
 	_telegraphs(c, w)
 	effects.paint(c)
 	_slash(c, w)
+	var night := 1.0 - daylight(w)
 	for i in w.enemies.size():
 		var e = w.enemies[i]
-		var look := Looks.enemy(e.kind)
+		var k: Dictionary = _picture[i]
+		var look: Dictionary = k.look
 		var at: Vector2 = e.pos + _bob(w, i, look) + _lift(e) - look.anchor
-		if look.glow != "":
-			c.draw_texture(Sprites.texture(look.glow), at.round())
-		if look.dark_glow != "" and not w.in_light(e.pos):
-			_dark_glow(c, e, Sprites.texture(look.dark_glow), at)
-		if not look.in_dark.is_empty() and not w.in_light(e.pos): # its eyes, on the frame and facing it is drawn in
-			var eyes := Sprites.only(Looks.frame(e.kind, w.steps, i), look.in_dark[0], _turned(e, look))
-			c.draw_texture(eyes, (at + _paw(w, e)).round(), Color(Sprites.PALETTE[look.in_dark[1]], 1.0 - daylight(w)))
+		if k.glow != null:
+			c.draw_texture(k.glow, at.round())
+		var dark: bool = _lit[i] == 0
+		if dark and k.dark_glow != null:
+			_dark_glow(c, e, k.dark_glow, at)
+		if dark and not k.eyes.is_empty(): # its eyes, on the frame and facing it is drawn in
+			var eyes: Texture2D = k.eyes[_frame[i]][_mirror[i]]
+			c.draw_texture(eyes, (at + _paw(w, e)).round(), Color(k.eye_colour, night))
 		if e.move == "rest":
 			var stars := Sprites.texture("dazed", (w.steps / DAZED_STEPS) % 2 == 1)
 			c.draw_texture(stars, (e.pos + DAZED_AT).round())
@@ -543,40 +579,47 @@ func _sparks(c: CanvasItem, w) -> void:
 		c.draw_texture(tex, (sp.pos - tex.get_size() / 2.0).round())
 
 
-## The first boss on the field, or null.
-static func boss(w):
-	for e in w.enemies:
-		if e.T.get("boss", false) and not e.dead:
-			return e
-	return null
+## The bosses on the field (not their decoys), in the order they came.
+static func bosses(w) -> Array:
+	return w.enemies.filter(func(e): return e.T.get("boss", false) and not e.dead and not e.decoy)
+
+
+## Where the bar of the i-th boss on the field goes: stacked up from BOSS_BAR.
+static func boss_bar(i: int) -> Rect2:
+	return Rect2(BOSS_BAR.position - Vector2(0.0, BOSS_BAR_STEP * i), BOSS_BAR.size)
 
 
 func _boss_bar(c: CanvasItem, w) -> void:
-	var b = boss(w)
-	if b == null:
-		return
-	c.draw_rect(BOSS_BAR.grow(2.0), HUD_PANEL)
-	c.draw_rect(BOSS_BAR.grow(1.0), Sprites.PALETTE["k"])
-	c.draw_rect(BOSS_BAR, Sprites.PALETTE["K"])
-	c.draw_rect(Rect2(BOSS_BAR.position, Vector2(ceilf(BOSS_BAR.size.x * float(b.hp) / b.T.hp), BOSS_BAR.size.y)), Sprites.PALETTE[BOSS_BAR_COLOUR])
+	var list := bosses(w)
+	for i in list.size():
+		var b = list[i]
+		var bar := boss_bar(i)
+		c.draw_rect(bar.grow(2.0), HUD_PANEL)
+		c.draw_rect(bar.grow(1.0), Sprites.PALETTE["k"])
+		c.draw_rect(bar, Sprites.PALETTE["K"])
+		c.draw_rect(Rect2(bar.position, Vector2(ceilf(bar.size.x * float(b.hp) / b.full_hp), bar.size.y)), Sprites.PALETTE[BOSS_BAR_COLOUR])
 
 
 func _shadows(c: CanvasItem, w) -> void:
+	# Out past CAST_FADE's end of the light (where most of a crowd stands) no long shadow shows: skip the work.
+	var light: float = w.light_radius()
+	var casts: bool = w.fuel > 0.0 and daylight(w) < 1.0
 	for i in w.enemies.size():
 		var e = w.enemies[i]
-		var look := Looks.enemy(e.kind)
-		c.draw_texture(Sprites.texture(look.shadow), (e.pos + look.shadow_at).round())
-		if not look.flies and e.move != "air":
-			_cast(c, w, Looks.frame(e.kind, w.steps, i), _turned(e, look), e.pos, look.anchor)
+		var k: Dictionary = _picture[i]
+		var look: Dictionary = k.look
+		c.draw_texture(k.shadow, (e.pos + look.shadow_at).round())
+		if casts and not look.flies and e.move != "air" and (e.pos - T.pos).length() / light < CAST_FADE[1]:
+			_cast(c, w, k.frames[_frame[i]][_mirror[i]], k.feet[_frame[i]], e.pos, look.anchor)
 	if _keeper_shows(w) and not w.player.dead:
 		c.draw_texture(Sprites.texture("shadow"), (w.player.pos + SHADOW).round())
 		var keeper := _keeper(w)
-		_cast(c, w, keeper[0], keeper[1], w.player.pos, BODY)
+		_cast(c, w, Sprites.texture(keeper[0], keeper[1]), Sprites.foot(keeper[0]), w.player.pos, BODY)
 
 
 ## The long shadow the torch throws behind one standing thing: its sprite, dark, turned to lie away from the torch
 ## with its feet where they are drawn. anchor is the pixel of the sprite that sits on pos.
-func _cast(c: CanvasItem, w, sprite: String, flip: bool, pos: Vector2, anchor: Vector2) -> void:
+func _cast(c: CanvasItem, w, sprite: Texture2D, foot_row: int, pos: Vector2, anchor: Vector2) -> void:
 	var from: Vector2 = pos - T.pos
 	var share: float = from.length() / w.light_radius()
 	var alpha: float = CAST.a * (1.0 - daylight(w)) * (1.0 - smoothstep(CAST_FADE[0], CAST_FADE[1], share))
@@ -584,10 +627,10 @@ func _cast(c: CanvasItem, w, sprite: String, flip: bool, pos: Vector2, anchor: V
 		return
 	var away := from.normalized()
 	var length: float = lerpf(CAST_LENGTH[0], CAST_LENGTH[1], clampf(share, 0.0, 1.0))
-	var foot := float(Sprites.foot(sprite))
+	var foot := float(foot_row)
 	var feet := pos + Vector2(0.0, foot - 1.0 - anchor.y)
 	c.draw_set_transform_matrix(Transform2D(away.rotated(PI / 2.0), -away * length, feet.round()))
-	c.draw_texture(Sprites.texture(sprite, flip), Vector2(-anchor.x, -foot), Color(CAST, alpha))
+	c.draw_texture(sprite, Vector2(-anchor.x, -foot), Color(CAST, alpha))
 	c.draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
@@ -609,8 +652,7 @@ func _warms(w) -> bool:
 
 
 ## How an enemy is tinted: warmed while the warm glow slows it, half there while the dark protects it from blows.
-func _tint(w, e, warms: bool) -> Color:
-	var lit: bool = w.in_light(e.pos)
+func _tint(e, lit: bool, warms: bool) -> Color:
 	var tint := WARMED if warms and lit else Color.WHITE
 	if e.T.get("dark_proof", false) and not lit:
 		tint.a = GHOST
@@ -637,11 +679,13 @@ func _standing(w) -> Array:
 		_put(out, b.y + 2.0, "berry", b + _berry_bob(w, b), BERRY_ANCHOR)
 	for i in w.enemies.size():
 		var e = w.enemies[i]
-		var look := Looks.enemy(e.kind)
+		var k: Dictionary = _picture[i]
+		var look: Dictionary = k.look
 		if look.flies:
 			continue
-		var white: bool = e.flash > 0.0 or (e.move == "warn" and (w.steps / MARK_BLINK_STEPS) % 2 == 0)
-		_put(out, e.pos.y + 4.0, Looks.frame(e.kind, w.steps, i), e.pos + _lift(e) + _paw(w, e), look.anchor, _turned(e, look), white, _tint(w, e, warms))
+		var white: bool = e.flash > 0.0 or (e.move in ["warn", "split"] and (w.steps / MARK_BLINK_STEPS) % 2 == 0)
+		var tex: Texture2D = k.frames[_frame[i]][_mirror[i] + (2 if white else 0)]
+		out.append([e.pos.y + 4.0, out.size(), tex, (e.pos + _lift(e) + _paw(w, e) - look.anchor).round(), _tint(e, _lit[i] == 1, warms)])
 		if e.carrying:
 			_put(out, e.pos.y + 4.1, "log", e.pos + THIEF_CARRY, LOG_ANCHOR)
 	if p.dead:
@@ -659,7 +703,7 @@ func _standing(w) -> Array:
 			_put(out, p.pos.y + 5.1, "log", p.pos + CARRY, LOG_ANCHOR)
 		else:
 			var behind: bool = sin(_blade(w)[1]) < BEHIND
-			out.append([p.pos.y + (4.9 if behind else 5.2), null]) # the sword: paint() draws it at this depth
+			out.append([p.pos.y + (4.9 if behind else 5.2), out.size(), null]) # the sword: paint() draws it at this depth
 	return out
 
 
@@ -673,8 +717,9 @@ static func _turned(e, look: Dictionary) -> bool:
 static func _lift(e) -> Vector2:
 	if e.move != "air":
 		return Vector2.ZERO
-	var k: float = clampf(1.0 - e.move_t / e.T.leap.air, 0.0, 1.0)
-	return Vector2(0.0, -roundf(sin(k * PI) * LEAP_HEIGHT))
+	var air: float = e.hop().air
+	var k: float = clampf(1.0 - e.move_t / air, 0.0, 1.0)
+	return Vector2(0.0, -roundf(sin(k * PI) * LEAP_HEIGHT * air / e.T.leap.air)) # a hop is lower than a leap
 
 
 ## Where a boss is about to strike: the slime king's marked landing, the shade lord's line to the torch.
@@ -683,7 +728,7 @@ func _telegraphs(c: CanvasItem, w) -> void:
 	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
 	for e in w.enemies:
 		if e.T.has("leap") and e.move in ["warn", "air"]:
-			var L: Dictionary = e.T.leap
+			var L: Dictionary = e.hop()
 			var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
 			var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
 			var at: Vector2 = e.move_to.round()
@@ -692,12 +737,37 @@ func _telegraphs(c: CanvasItem, w) -> void:
 			c.draw_arc(at, L.shock * (1.0 - k), 0.0, TAU, 24, Color(colour, 0.8), 1.0) # closes in on the edge as it falls
 		elif e.T.has("lunge") and e.move == "warn":
 			_dashes(c, e.pos, e.move_to, Color(colour, 0.9 if blink else 0.5))
-		elif e.T.has("charge") and e.move == "warn":
-			var end: Vector2 = e.move_to.clamp(Config.FIELD.position, Config.FIELD.end) # it stops at the trees
-			_dashes(c, e.pos + e.aim * e.T.radius, end, Color(colour, 0.9 if blink else 0.5))
-			var side: Vector2 = e.aim.orthogonal() * CHARGE_HEAD * 0.7
-			var back: Vector2 = end - e.aim * CHARGE_HEAD
-			c.draw_colored_polygon(PackedVector2Array([end.round(), (back + side).round(), (back - side).round()]), Color(colour, 1.0 if blink else 0.6))
+		elif e.move == "split": # rings of smoke spread out from it toward where its decoys will stand
+			var k: float = clampf(1.0 - e.split_t / e.T.split.warn, 0.0, 1.0)
+			var smoke: Color = Sprites.PALETTE[SPLIT_SMOKE]
+			for i in e.T.split.count:
+				var at: Vector2 = Config.TORCH.pos + (e.pos - Config.TORCH.pos).rotated(TAU * (i + 1) / (e.T.split.count + 1) * k)
+				c.draw_arc(at.round(), e.T.radius * (0.6 + 0.6 * k), 0.0, TAU, 20, Color(smoke, 0.5 + 0.4 * k), 1.0)
+			c.draw_arc(e.pos.round(), e.T.radius + 4.0 + 4.0 * k, 0.0, TAU, 24, Color(colour, 0.9 if blink else 0.5), 1.0)
+		elif e.T.has("charge") and e.move in ["warn", "charge"]:
+			var band := charge_band(e)
+			var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
+			c.draw_colored_polygon(band, Color(colour, LANE_FAINT))
+			if k > 0.0:
+				c.draw_colored_polygon(charge_band(e, k), Color(colour, LANE_FULL - LANE_FAINT))
+			band.append(band[0])
+			c.draw_polyline(band, Color(colour, LANE_EDGE if blink else LANE_EDGE * 0.5), 1.0)
+
+
+## Where a charger's charge hurts, as a polygon: a band from it to Enemy.charge_end(), Enemy.lane_half() each side
+## of its line, round at both ends (every point within lane_half of the line it runs). share: only the first part of
+## it, from the charger, for the fill that grows as the wind-up runs out.
+static func charge_band(e, share := 1.0) -> PackedVector2Array:
+	var r: float = e.lane_half()
+	var a: Vector2 = e.pos
+	var b: Vector2 = a.lerp(e.charge_end(), share)
+	var along: Vector2 = e.aim
+	var out := PackedVector2Array()
+	for i in LANE_ROUND + 1: # round the far end, from one side to the other
+		out.append(b + along.rotated(-PI / 2.0 + PI * i / LANE_ROUND) * r)
+	for i in LANE_ROUND + 1: # and back round the charger
+		out.append(a + along.rotated(PI / 2.0 + PI * i / LANE_ROUND) * r)
+	return out
 
 
 ## A dashed line from a to b.
@@ -759,11 +829,15 @@ func _dash_bar(c: CanvasItem, w) -> void:
 	c.draw_rect(Rect2(bar.position, Vector2(ceilf(bar.size.x * (1.0 - p.dash_wait / every)), bar.size.y)), Sprites.PALETTE[DASH_BAR_COLOUR])
 
 
-## A boss on its way: the edge it will come from glows and an arrow points at it, blinking.
+## A boss on its way: the edge it will come from glows and an arrow points at it, blinking. Each on its way has its own.
 func _coming(c: CanvasItem, w) -> void:
-	if w.boss_from == null or w.phase != "night":
+	if w.phase != "night":
 		return
-	var f: Vector2 = w.boss_from
+	for b in w.bosses_coming():
+		_coming_at(c, w, b.from)
+
+
+func _coming_at(c: CanvasItem, w, f: Vector2) -> void:
 	var out := Vector2.ZERO # which edge: the one it is past
 	if f.x < Config.FIELD.position.x: out = Vector2.LEFT
 	elif f.x > Config.FIELD.end.x: out = Vector2.RIGHT
@@ -789,10 +863,11 @@ func _fliers(c: CanvasItem, w) -> void:
 	var warms := _warms(w)
 	for i in w.enemies.size():
 		var e = w.enemies[i]
-		var look := Looks.enemy(e.kind)
+		var k: Dictionary = _picture[i]
+		var look: Dictionary = k.look
 		if look.flies:
-			var tex := Sprites.texture(Looks.frame(e.kind, w.steps, i), false, e.flash > 0.0)
-			c.draw_texture(tex, (e.pos + _bob(w, i, look) - look.anchor).round(), _tint(w, e, warms))
+			var tex: Texture2D = k.frames[_frame[i]][2 if e.flash > 0.0 else 0]
+			c.draw_texture(tex, (e.pos + _bob(w, i, look) - look.anchor).round(), _tint(e, _lit[i] == 1, warms))
 
 
 ## How far a flier is lifted off its place on this step; nothing for what stands.
@@ -979,8 +1054,57 @@ func _slash(c: CanvasItem, w) -> void:
 			c.draw_texture(flame, (at + Vector2.from_angle(spot) * (r - 3.0) + rise - Vector2(3.0, 5.0)).round(), fade)
 
 
+## Adds one thing to _standing()'s list. The second field keeps the order things were added in among equal depths, so
+## paint() can sort the list with Array.sort() (no callback per comparison) and never compares the textures.
 func _put(list: Array, depth: float, sprite: String, at: Vector2, anchor: Vector2, flip := false, white := false, tint := Color.WHITE) -> void:
-	list.append([depth, Sprites.texture(sprite, flip, white), (at - anchor).round(), tint])
+	list.append([depth, list.size(), Sprites.texture(sprite, flip, white), (at - anchor).round(), tint])
+
+
+## Fills _picture, _frame, _mirror and _lit for the world as it is; again only once the world has moved on.
+func _crowd(w) -> void:
+	var key := [w.steps, w.time, w.night, w.enemies.size(), w.fuel, w.picks.size()]
+	if key == _crowd_for:
+		return
+	_crowd_for = key
+	var n: int = w.enemies.size()
+	_picture.resize(n)
+	_frame.resize(n)
+	_mirror.resize(n)
+	_lit.resize(n)
+	var light: float = w.light_radius()
+	for i in n:
+		var e = w.enemies[i]
+		var looks_as: String = Looks.DECOYS[e.kind] if e.decoy else e.kind
+		var k := _kind(looks_as, e.tier)
+		_picture[i] = k
+		_frame[i] = Looks.frame_index(looks_as, w.steps, i)
+		_mirror[i] = 1 if _turned(e, k.look) else 0
+		_lit[i] = 1 if e.pos.distance_to(T.pos) <= light else 0 # w.in_light(e.pos)
+
+
+## An enemy kind's pictures at a tier: each walking frame [as is, mirrored, white, mirrored white] in the tier's
+## colours, where its feet are on each frame, its eyes for the dark on each frame [as is, mirrored] and their colour,
+## its shadow and its glows (a tier has its kind's shape, so these are the same at every tier).
+func _kind(kind: String, tier: int = 1) -> Dictionary:
+	var key := Looks.thing(kind, tier)
+	if _kinds.has(key):
+		return _kinds[key]
+	var look := Looks.enemy(kind)
+	var k := { "look": look, "frames": [], "feet": [], "eyes": [], "eye_colour": Color.WHITE,
+		"shadow": Sprites.texture(look.shadow),
+		"glow": Sprites.texture(look.glow) if look.glow != "" else null,
+		"dark_glow": Sprites.texture(look.dark_glow) if look.dark_glow != "" else null }
+	for frame in Looks.FRAMES:
+		var name: String = frame % kind
+		var coloured := Sprites.tiered(name, tier)
+		k.frames.append([Sprites.texture(coloured), Sprites.texture(coloured, true), Sprites.texture(name, false, true), Sprites.texture(name, true, true)])
+		k.feet.append(Sprites.foot(name))
+		if not look.in_dark.is_empty():
+			k.eyes.append([Sprites.only(name, look.in_dark[0]), Sprites.only(name, look.in_dark[0], true)])
+	if not look.in_dark.is_empty():
+		k.eye_colour = Sprites.PALETTE[look.in_dark[1]]
+	_kinds[key] = k
+	return k
 
 
 ## Bare earth with a wobbly edge and a few specks, made from the dirt colours. The same picture every time.

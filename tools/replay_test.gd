@@ -8,6 +8,7 @@ const InputFrame := preload("res://src/sim/input_frame.gd")
 const ReplayScript := preload("res://tests/replay_script.gd")
 const Bot := preload("res://src/bot.gd")
 const Config := preload("res://src/sim/config.gd")
+const Enemy := preload("res://src/sim/enemy.gd")
 const GOLDEN := "res://tests/golden/replay.json"
 
 
@@ -17,7 +18,7 @@ static func digest(w) -> String:
 		p.pos.x, p.pos.y, p.vel.x, p.vel.y, p.hp, p.face.x, p.face.y, p.attack_t, 1.0 if p.carrying else 0.0, 1.0 if p.dropped != null else 0.0, w.enemies.size(), w.logs.size(), w.berries.size(),
 		w.sparks.size(), p.dash_t, w.blade_kills])
 	for e in w.enemies:
-		nums.append_array([e.pos.x, e.pos.y, e.hp, e.knock.x, e.knock.y, 1.0 if e.carrying else 0.0])
+		nums.append_array([e.pos.x, e.pos.y, e.hp, e.knock.x, e.knock.y, 1.0 if e.carrying else 0.0, e.tier])
 	for l in w.logs + w.berries:
 		nums.append_array([l.x, l.y])
 	var ctx := HashingContext.new()
@@ -32,13 +33,13 @@ static func play(seed_value: int = ReplayScript.SEED, pick_slot: int = ReplayScr
 	var bot = Bot.new(pick_slot)
 	var marks := []
 	var told := {} # how many events of each kind the world reported
-	var kill_worth := 0 # what the kills told were worth: most score SCORE.kill, a boss its own score
+	var kill_worth := 0 # what the kills told were worth: most score SCORE.kill, a boss its own score, a tier more
 	for s in steps:
 		w.step(bot.frame(w))
 		for ev in w.events:
 			told[ev.kind] = told.get(ev.kind, 0) + 1
 			if ev.kind == "kill":
-				kill_worth += Config.ENEMY_TYPES[ev.enemy].get("score", Config.SCORE.kill)
+				kill_worth += Enemy.row(ev.enemy, ev.tier).get("score", Config.SCORE.kill)
 		if (s + 1) % 60 == 0:
 			marks.append(digest(w))
 	var p = w.player

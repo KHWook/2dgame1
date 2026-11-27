@@ -62,16 +62,53 @@ const NIGHTS := [
 	{ "burn": 4.65, "spawn": [1.05, 0.7], "who": { "slime": 0.24, "bat": 0.14, "thief": 0.16, "shade": 0.14, "big_slime": 0.1, "boar": 0.22 },
 		"with": { "thief": ["shade", "shade"], "boar": ["bat", "bat"], "big_slime": ["boar"] } },
 ]
-const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82 } # per night past the table: fuel per second added, spawn gap multiplied
+## Per night past the table: fuel per second added, spawn gap multiplied. min_gap: the gap never gets shorter than
+## this (seconds), however late. It first bites at the very end of night 19, so the crowds up to there grow freely;
+## past twenty it keeps the count (and the frame time) from running away.
+const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82, "min_gap": 0.1 }
+
+## Stronger tiers of the regular kinds, for later nights. A boss is always tier 1; what a big slime breaks into
+## is of its tier. One row per tier from 2, applied to the kind's row in ENEMY_TYPES (Enemy.row): hp and score
+## multiplied and rounded up, speed and smother multiplied, heavy (optional) the share of a blow's knockback it takes.
+## Each tier is the same picture in other colours (TIERS in src/art/sprites.gd) and has a name (looks.gd).
+const TIERS := [
+	{ "hp": 1.5, "speed": 1.1, "smother": 1.25, "score": 1.5 },
+	{ "hp": 2.0, "speed": 1.2, "smother": 1.5, "score": 2.0, "heavy": 0.6 },
+]
+## Which tiers come when. From the night of a row (and until the next row's), each enemy that comes out of the dark,
+## with those that come along with it, is of one tier, rolled over shares (tier 1, tier 2, tier 3). Before the
+## first row every enemy is tier 1 and nothing is rolled, so those nights are the same as before tiers.
+const TIER_NIGHTS := [
+	{ "from": 8, "shares": [0.85, 0.15, 0.0] },
+	{ "from": 10, "shares": [0.7, 0.3, 0.0] },
+	{ "from": 12, "shares": [0.5, 0.4, 0.1] },
+	{ "from": 14, "shares": [0.35, 0.45, 0.2] },
+	{ "from": 16, "shares": [0.2, 0.4, 0.4] },
+	{ "from": 18, "shares": [0.1, 0.35, 0.55] },
+]
 
 ## Dawn: the sun clears the field, you rest (heal), and the torch is topped up to at least its starting fuel (its
 ## start_fuel share of the tank, so a big torch is topped up further).
 const DAWN := { "heal": 1 }
 
-## Every few nights a boss comes, partway through the night, besides the usual enemies (which come a little less
-## often that night). kinds take turns: the first boss night brings the first, the next the second, and so on.
-## warn: seconds before it comes that the world picks the edge it comes from and says so (the screen points there).
-const BOSS := { "every": 5, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35, "warn": 2.0 }
+## The keeper hardens as the nights go on, to keep up with crowds that grow faster than a few hearts can take. From
+## the night from: hp_first more hearts that night and one more on every hp_every-th night after it, at most hp_most
+## more; from that night on dawn heals the keeper fully (new hearts too); and after a hit it cannot be
+## hurt for invuln_grow seconds longer per night from from on (counting that night), at most invuln_most in all.
+const HARDEN := { "from": 10, "hp_first": 3, "hp_every": 2, "hp_most": 6, "invuln_grow": 0.15, "invuln_most": 2.4 }
+
+## Every few nights bosses come, partway through the night, besides the usual enemies (which come a little less
+## often that night). counts: how many come, from the night of a row (until the next row's). The first comes at at
+## (a share of the night), each next one apart seconds after the one before. kinds take turns: the first boss night
+## brings the first kind, the next the second, and so on; on a night with several, each next boss is the next kind.
+## warn: seconds before each comes that the world picks the edge it comes from and says so (the screen points there).
+## strength: what a boss's hp (and the numbers it summons and breaks into, never under one) is multiplied by on the boss night
+## numbered n from 1: first, plus grow for each boss night before it, at most most. The first boss is gentle.
+const BOSS := {
+	"every": 3, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35, "warn": 2.0, "apart": 6.0,
+	"counts": [{ "from": 3, "count": 1 }, { "from": 12, "count": 2 }, { "from": 21, "count": 3 }],
+	"strength": { "first": 0.5, "grow": 0.2, "most": 1.5 },
+}
 
 const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 
@@ -93,9 +130,15 @@ const ENEMY := {
 ## leap (the slime king): every so many seconds, when the player is within range, it marks the spot where the player
 ## stands (but never closer to the torch than torch_gap beyond where it would smother it), crouches there for warn
 ## seconds, flies for air seconds and lands on the mark; a player within shock of the
-## mark is hurt. lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
+## mark is hurt. hops: every each-th leap is count short hops in a row instead, each marked and warned the same way
+## with its own warn, air and shock, toward where the player stands but at most reach pixels from the king.
+## lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
 ## every so many seconds it stops for warn seconds, then rushes to the torch at speed, smothers it for stay seconds
-## (in the light, so it can be cut) and walks back out into the dark.
+## (in the light, so it can be cut) and walks back out into the dark. split (the shade lord): every so many seconds
+## while it circles (the first first seconds after it comes) it stops and flickers for warn seconds, then count
+## decoys of it appear round its ring. A decoy
+## has no crown and dull eyes; it hurts no one and smothers nothing, rushes the torch when its lord does and fades
+## there; a blow in the light (where blows reach it) breaks it with no score; it fades after life seconds.
 ## charge (the boar): every so many seconds, on the field with the player within range, it fixes a line at the
 ## player and paws the ground for warn seconds, then charges along it at speed for dist pixels (or to the field's
 ## edge; blows do not stop it) and stands dazed for rest seconds.
@@ -110,12 +153,14 @@ const ENEMY_TYPES := {
 	"slime_king": {
 		"hp": 16, "speed": 9.0, "radius": 13.0, "target": "torch", "smother": 1.2, "split_count": 2, "splits_into": "big_slime",
 		"boss": true, "name": "슬라임 왕", "heavy": 0.15, "summon": { "kind": "slime", "every": 8.0, "count": 2 }, "score": 150,
-		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0, "torch_gap": 24.0 },
+		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0, "torch_gap": 24.0,
+			"hops": { "each": 2, "count": 3, "warn": 0.45, "air": 0.3, "shock": 18.0, "reach": 45.0 } },
 	},
 	"shade_lord": {
 		"hp": 18, "speed": 28.0, "radius": 10.0, "target": "torch", "smother": 2.0, "dark_proof": true,
 		"boss": true, "name": "그림자 군주", "heavy": 0.2, "summon": { "kind": "shade", "every": 7.0, "count": 2 }, "score": 150,
 		"lunge": { "every": 7.0, "warn": 1.0, "speed": 110.0, "stay": 3.5, "ring": 16.0 },
+		"split": { "every": 12.0, "first": 4.0, "warn": 0.9, "count": 2, "life": 9.0 },
 	},
 }
 
@@ -157,8 +202,9 @@ const UPGRADES := {
 	"spark": { "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
 		"levels": [{ "text": "횃불이 1.6초마다 불씨를 쏜다", "spark_every": 1.6 },
 			{ "text": "횃불이 1.2초마다 불씨를 쏜다", "spark_every": 1.2 }] },
-	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1", "vamp_kills": 8,
-		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1", "vamp_kills": 5 }] },
+	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
+		"vamp_kills": 8, "vamp_grow": 1.25, "vamp_from": 4,
+		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다", "vamp_kills": 5 }] },
 	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
 		"levels": [{ "text": "연료 최대치 +60, 새벽에 그만큼 더 채워진다", "fuel_bonus": 60.0 }] },
 }

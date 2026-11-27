@@ -10,6 +10,9 @@ const Config := preload("res://src/sim/config.gd")
 const Ui := preload("res://src/ui.gd")
 const Painter := preload("res://src/art/painter.gd")
 const Coach := preload("res://src/coach.gd")
+const Sprites := preload("res://src/art/sprites.gd")
+const Looks := preload("res://src/art/looks.gd")
+const Bot := preload("res://src/bot.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -33,12 +36,21 @@ static func run() -> Array:
 	out.append_array(_dark())
 	out.append_array(_bosses())
 	out.append_array(_patterns())
+	out.append_array(_boss_nights())
+	out.append_array(_hops())
+	out.append_array(_split())
+	out.append_array(_harden())
 	out.append_array(_charger())
 	out.append_array(_logs())
 	out.append_array(_nights())
 	out.append_array(_company())
 	out.append_array(_setup())
 	out.append_array(_coaching())
+	out.append_array(_crowds())
+	out.append_array(_late_nights())
+	out.append_array(_tier_stats())
+	out.append_array(_tier_nights())
+	out.append_array(_tier_looks())
 	return out
 
 
@@ -340,6 +352,54 @@ static func _new_upgrades() -> Array:
 		bat.T.speed = 0.0
 		healed = _play(w, SWING + 10, "attack").has("healed")
 	_expect(out, "the vampire blade heals after enough sword kills, and says so", [w.player.hp, healed], [4, true])
+	# the kills it wants grow with the night: vamp_kills up to night vamp_from, vamp_grow times as many each night
+	# after it; no rest
+	var V: Dictionary = Config.UPGRADES.vampire
+	_expect(out, "the vampire blade wants vamp_kills on the first night", w.vamp_need(), V.vamp_kills)
+	w.night = V.vamp_from
+	_expect(out, "and up to night vamp_from", w.vamp_need(), V.vamp_kills)
+	w.night = 10
+	var need: int = roundi(V.vamp_kills * pow(V.vamp_grow, 10 - V.vamp_from))
+	_expect(out, "and vamp_grow times as many on each night after (night 10)", [w.vamp_need(), need > V.vamp_kills * 3], [need, true])
+	w.night = 9
+	_expect(out, "one night less wants fewer", w.vamp_need() < need, true)
+	w.night = 10
+	w.player.hp = 3
+	w.blade_kills = 0
+	w.time = 0.0 # each run of kills below fits in one night
+	w.fuel = 1.0e6 # and the torch outlasts them all
+	for i in need:
+		_expect(out, "on night 10 it heals only on its %dth kill" % need, w.player.hp, 3)
+		var bat = _add(w, "bat", NEAR)
+		bat.T = bat.T.duplicate()
+		bat.T.speed = 0.0
+		_play(w, SWING + 10, "attack")
+	_expect(out, "on night 10 it heals after %d sword kills" % need, w.player.hp, 4)
+	w.time = 0.0
+	for i in need: # straight after a heal: kills count at once, there is no rest
+		var bat = _add(w, "bat", NEAR)
+		bat.T = bat.T.duplicate()
+		bat.T.speed = 0.0
+		_play(w, SWING + 10, "attack")
+	_expect(out, "right after a heal the next kills count at once (no rest)", w.player.hp, 5)
+	w.player.hp = w.max_hp()
+	w.blade_kills = 0
+	w.time = 0.0
+	for i in need + 3:
+		var bat = _add(w, "bat", NEAR)
+		bat.T = bat.T.duplicate()
+		bat.T.speed = 0.0
+		_play(w, SWING + 10, "attack")
+	_expect(out, "kills at full health are kept for one heal, no more", w.blade_kills, need)
+	w.night = 1
+	w.picks = ["vampire", "vampire"]
+	var second: int = World.upgrade("vampire", 2).vamp_kills
+	_expect(out, "at level 2 it wants fewer kills, growing by the same share", [w.vamp_need(), second < V.vamp_kills], [second, true])
+	w.night = 10
+	_expect(out, "(level 2, night 10)", w.vamp_need(), roundi(second * pow(V.vamp_grow, 10 - V.vamp_from)))
+	w.night = 1
+	w.picks = []
+	_expect(out, "without the blade it wants nothing", w.vamp_need(), 0)
 	# big torch
 	w = _night(DARK, ["big_torch"])
 	w.fuel = Config.TORCH.max_fuel
@@ -448,7 +508,7 @@ static func _bosses() -> Array:
 	for night in [every - 1, every, every * 2]:
 		var w = _night(DARK)
 		w.night = night
-		w.boss_due = w._boss_night()
+		w.bosses_due = w._plan_bosses()
 		w.time = Config.NIGHT.length * Config.BOSS.at - Config.STEP * 0.5
 		var told := _play(w, 1)
 		var bosses: Array = w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.kind)
@@ -530,6 +590,7 @@ static func _patterns() -> Array:
 	var lord = Enemy.new("shade_lord", Config.TORCH.pos + Vector2(150.0, 0.0))
 	w.enemies.append(lord)
 	lord.summon_t = NEVER
+	lord.split_t = NEVER # this scene is about the rush; _split is about the decoys
 	lord.move_t = R.every
 	var lit_steps := 0
 	var start_angle: float = (lord.pos - Config.TORCH.pos).angle()
@@ -559,7 +620,7 @@ static func _patterns() -> Array:
 	# a boss's coming is told ahead, from the edge it comes from
 	w = _night(DARK)
 	w.night = Config.BOSS.every
-	w.boss_due = true
+	w.bosses_due = w._plan_bosses()
 	w.time = Config.NIGHT.length * Config.BOSS.at - Config.BOSS.warn - Config.STEP * 0.5
 	told = []
 	var coming_at = null
@@ -569,12 +630,302 @@ static func _patterns() -> Array:
 			told.append(ev.kind)
 			if ev.kind == "coming":
 				coming_at = ev.pos
-	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("coming"), told.has("boss"), w.boss_from == coming_at and coming_at != null], [true, false, true])
+	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("coming"), told.has("boss"), w.bosses_coming().map(func(b): return b.from) == [coming_at] and coming_at != null], [true, false, true])
 	told = _play(w, int(Config.BOSS.warn / Config.STEP) - 2)
 	_expect(out, "the boss does not come during its warning", told.has("boss"), false)
 	told = _play(w, 3)
 	var bosses: Array = w.enemies.filter(func(e): return e.T.get("boss", false))
-	_expect(out, "the boss comes where its coming pointed", [told.has("boss"), bosses.size(), bosses.size() > 0 and coming_at != null and bosses[0].pos.distance_to(coming_at) < 2.0, w.boss_from], [true, 1, true, null])
+	_expect(out, "the boss comes where its coming pointed", [told.has("boss"), bosses.size(), bosses.size() > 0 and coming_at != null and bosses[0].pos.distance_to(coming_at) < 2.0, w.bosses_due], [true, 1, true, []])
+	return out
+
+
+## Bosses come every BOSS.every nights, more of them later (BOSS.counts), the kinds taking turns night to night and
+## mixed on a night with several. Each comes BOSS.apart after the one before, each with its own warning from its own
+## edge. The first boss nights' bosses are gentler (BOSS.strength: hp and summons) and later ones stronger, but a kill
+## is worth its row's score all the same. The screen stacks a bar for each boss on the field, and not for decoys.
+static func _boss_nights() -> Array:
+	var out := []
+	var every: int = Config.BOSS.every
+	var kinds: Array = Config.BOSS.kinds
+	for night in range(1, 25):
+		var w = _night(DARK)
+		w.night = night
+		var want := 0
+		if night % every == 0:
+			for r in Config.BOSS.counts:
+				if night >= r.from:
+					want = r.count
+		var got: Array = w.boss_kinds()
+		_expect(out, "night %d brings %d bosses" % [night, want], got.size(), want)
+		if want > 0:
+			_expect(out, "night %d's first boss takes its turn" % night, got[0], kinds[(night / every - 1) % kinds.size()])
+		if want > 1:
+			_expect(out, "night %d's bosses are of mixed kinds" % night, kinds.all(func(k): return got.has(k)), true)
+	_expect(out, "bosses come every third night, one at first, two from night 12, three from night 21", [Config.BOSS.every, Config.BOSS.counts.map(func(r): return [r.from, r.count])], [3, [[3, 1], [12, 2], [21, 3]]])
+	# a night with several: each warned and coming in turn, apart
+	var w = _night(DARK)
+	w.night = 12
+	w.player.hp = 1000
+	w.fuel = 1.0e6
+	w.bosses_due = w._plan_bosses()
+	var at: float = Config.NIGHT.length * Config.BOSS.at
+	w.time = at - Config.BOSS.warn - 1.0
+	var seen := [] # [kind of event, enemy, night time, pos]
+	for i in int((Config.BOSS.warn + Config.BOSS.apart + 2.0) / Config.STEP):
+		w.step(InputFrame.new())
+		for ev in w.events:
+			if ev.kind in ["coming", "boss"]:
+				seen.append([ev.kind, ev.enemy, snappedf(w.time, 0.1), ev.pos])
+	var a: Array = w.boss_kinds() + ["", ""] # (the count is checked above: past it, this scene fails, not errors)
+	_expect(out, "two bosses are each warned BOSS.warn ahead and come BOSS.apart apart, in turn", seen.map(func(x): return [x[0], x[1], x[2]]),
+		[["coming", a[0], snappedf(at - Config.BOSS.warn, 0.1)], ["boss", a[0], snappedf(at, 0.1)],
+		["coming", a[1], snappedf(at + Config.BOSS.apart - Config.BOSS.warn, 0.1)], ["boss", a[1], snappedf(at + Config.BOSS.apart, 0.1)]])
+	if seen.size() == 4:
+		_expect(out, "each boss comes where its own warning pointed", [seen[1][3] == seen[0][3], seen[3][3] == seen[2][3]], [true, true])
+	var list: Array = Painter.bosses(w)
+	_expect(out, "the screen has a bar for each boss on the field", list.size(), 2)
+	var b0: Rect2 = Painter.boss_bar(0)
+	var b1: Rect2 = Painter.boss_bar(1)
+	_expect(out, "the second boss's bar stacks over the first, their panels apart", [b1.position.y < b0.position.y, not b1.grow(2.0).intersects(b0.grow(2.0))], [true, true])
+	# strength: gentle at first, stronger later; the score stays the row's
+	var K: Dictionary = Config.ENEMY_TYPES.slime_king
+	var S: Dictionary = Config.BOSS.strength
+	var hp_on := {}
+	for night in [every, every * 5]:
+		w = _night(DARK)
+		w.night = night
+		var king = w._boss("slime_king", w.player.pos + Vector2(60.0, 0.0))
+		hp_on[night] = [king.full_hp, king.hp, king.summons, king.splits]
+	_expect(out, "the first boss night's king is gentle: hp, summons and what it breaks into multiplied by strength.first", hp_on[every], [ceili(K.hp * S.first), ceili(K.hp * S.first), maxi(1, roundi(K.summon.count * S.first)), maxi(1, roundi(K.split_count * S.first))])
+	_expect(out, "a later boss night's king is stronger", hp_on[every * 5][0] > hp_on[every][0], true)
+	w = _night(DARK)
+	w.night = every * 30
+	_expect(out, "boss strength stops at strength.most", w.boss_strength(), S.most)
+	w = _night(DARK)
+	w.night = every
+	var king = w._boss("slime_king", w.player.pos + Vector2(22.0, 0.0))
+	w.enemies.append(king)
+	king.summon_t = NEVER
+	king.hp = 1
+	w.score = 0
+	_play(w, SWING + 20, "attack")
+	_expect(out, "a gentle king still scores its row's worth, and breaks into as many as it was made to", [king.dead, w.score, w.enemies.filter(func(e): return e.kind == K.splits_into).size()], [true, K.score, maxi(1, roundi(K.split_count * S.first))])
+	return out
+
+
+## The slime king's run of hops: every leap.hops.each-th leap is hops.count short hops instead, each marked and warned
+## before it lands (hops.warn), at most hops.reach toward where you stand then, hurting you only if you stayed in its
+## smaller shock. You can flee them all; standing still, one lands on you. Then it walks and waits leap.every.
+static func _hops() -> Array:
+	var out := []
+	var L: Dictionary = Config.ENEMY_TYPES.slime_king.leap
+	var H: Dictionary = L.hops
+	var one := int(round((H.warn + H.air) / Config.STEP))
+	for flee in [false, true]:
+		var w = _night(Vector2.ZERO)
+		w.fuel = 1.0e6
+		w.player.pos = Vector2(330.0, 40.0)
+		var king = _add(w, "slime_king", Vector2(-80.0, 0.0))
+		king.summon_t = NEVER
+		king.move_t = 0.0
+		king.leaps = H.each - 1
+		var told := []
+		var marks := []
+		var lands := []
+		for i in (one + 2) * H.count + 3:
+			var f := InputFrame.new()
+			if flee:
+				f.held["down"] = true
+			var from: Vector2 = king.pos
+			w.step(f)
+			for ev in w.events:
+				told.append(ev.kind)
+				if ev.kind == "warn":
+					marks.append([i, ev.at, from])
+				if ev.kind == "landed":
+					lands.append([i, ev.pos])
+		_expect(out, "the king hops hops.count times, each warned before it lands (flee %s)" % flee, [told.count("warn"), told.count("landed")], [H.count, H.count])
+		var apart := true
+		var near := true
+		for j in mini(marks.size(), lands.size()):
+			apart = apart and absi(lands[j][0] - marks[j][0] - one) <= 2 and lands[j][1] == marks[j][1]
+			near = near and marks[j][1].distance_to(marks[j][2]) <= H.reach + 0.01
+		_expect(out, "each hop lands on its mark hops.warn + hops.air after it was marked (flee %s)" % flee, apart, true)
+		_expect(out, "each hop goes at most hops.reach (flee %s)" % flee, near, true)
+		_expect(out, "standing still a hop lands on you; fleeing, none does (flee %s)" % flee, w.player.hp, Config.PLAYER.hp - (0 if flee else 1))
+		_expect(out, "after its hops the king walks again (flee %s)" % flee, [king.move, king.hops_left], ["", 0])
+		told = _play(w, int(L.every / Config.STEP) - 5)
+		_expect(out, "after its hops the king waits leap.every (flee %s)" % flee, told.has("warn"), false)
+	# every each-th leap: the leap before is a single one, and the one after
+	var w = _night(Vector2(0.0, 60.0))
+	w.fuel = 1.0e6
+	var king = _add(w, "slime_king", Vector2(-60.0, 0.0))
+	king.summon_t = NEVER
+	var runs := []
+	for n in H.each + 1:
+		king.move_t = 0.0
+		king.pos = w.player.pos + Vector2(-60.0, 0.0)
+		w.player.invuln = 1.0e6
+		var told := _play(w, (one + 2) * H.count + int(L.warn / Config.STEP) + int(L.air / Config.STEP) + 4)
+		runs.append(told.count("landed"))
+	var want := []
+	for n in H.each + 1:
+		want.append(H.count if (n + 1) % H.each == 0 else 1)
+	_expect(out, "every leap.hops.each-th leap is a run of hops, the others single leaps", runs, want)
+	return out
+
+
+## The shade lord's split: circling, it stops and flickers for split.warn (told, nothing yet), then split.count decoys
+## appear round its ring. A decoy hurts no one, smothers nothing, breaks at a blow in the light for no score (in the
+## dark blows pass through it as through its lord), rushes the torch together with its lord and fades there, and fades
+## after split.life or when its lord dies. The bot does not fight a decoy.
+static func _split() -> Array:
+	var out := []
+	var SL: Dictionary = Config.ENEMY_TYPES.shade_lord
+	var S: Dictionary = SL.split
+	var w = _night(Vector2(0.0, 40.0))
+	w.fuel = 50.0
+	var lord = Enemy.new("shade_lord", Config.TORCH.pos + Vector2(110.0, 0.0))
+	w.enemies.append(lord)
+	lord.summon_t = NEVER
+	lord.move_t = 100.0
+	_expect(out, "the shade lord first splits split.first after it comes", lord.split_t, S.first)
+	lord.split_t = Config.STEP * 0.5
+	var told := _play(w, 1)
+	var at: Vector2 = lord.pos
+	_expect(out, "the shade lord flickers before it splits, and says so", [lord.move, told.has("warn"), w.enemies.size()], ["split", true, 1])
+	told = _play(w, int(S.warn / Config.STEP) - 2)
+	_expect(out, "it stands still and has no decoys while it flickers", [lord.move, lord.pos.distance_to(at) < 0.01, w.enemies.size(), told.has("decoy")], ["split", true, 1, false])
+	told = _play(w, 3)
+	var decoys: Array = w.enemies.filter(func(e): return e.decoy)
+	_expect(out, "then split.count decoys appear round its ring, and it walks on", [decoys.size(), told.count("decoy"), lord.move, lord.split_t > S.warn], [S.count, S.count, "", true])
+	var spread := true
+	for d in decoys:
+		spread = spread and absf(d.pos.distance_to(Config.TORCH.pos) - lord.pos.distance_to(Config.TORCH.pos)) < 3.0 and d.pos.distance_to(lord.pos) > SL.radius * 3.0
+	_expect(out, "the decoys stand on its ring, away from it", spread, true)
+	_expect(out, "the decoys rush when it does", decoys.map(func(d): return d.move_t), decoys.map(func(_d): return lord.move_t))
+	_expect(out, "only the real one is a boss on the screen's bars", Painter.bosses(w), [lord])
+	# a decoy hurts no one and smothers nothing
+	var d = decoys[0]
+	d.pos = w.player.pos
+	var hp: int = w.player.hp
+	_play(w, 2)
+	_expect(out, "a decoy on the keeper hurts no one", w.player.hp, hp)
+	d.pos = Config.TORCH.pos + Vector2(Config.TORCH.reach + SL.radius - 1.0, 0.0)
+	var burn_before: float = w.burn_rate()
+	told = _play(w, 1)
+	_expect(out, "a decoy that reaches the torch fades there, smothering nothing", [d.gone, d.at_torch, told.has("faded"), w.burn_rate() <= burn_before], [true, false, true, true])
+	# a blow: in the dark it passes, in the light it breaks the decoy for no score
+	var e = decoys[1]
+	e.pos = Config.TORCH.pos + DARK
+	_damage_once(w, e)
+	_expect(out, "in the dark a blow passes through a decoy", [e.gone, e.dead], [false, false])
+	e.pos = Config.TORCH.pos + LIT
+	w.score = 0
+	w.events = []
+	_damage_once(w, e)
+	_expect(out, "in the light a blow breaks a decoy, for no score and no kill", [e.gone, e.dead, w.score, w.events.map(func(ev): return ev.kind)], [true, false, 0, ["faded"]])
+	# they rush the torch together; and they fade with time or with their lord
+	w = _night(Vector2(0.0, 40.0))
+	w.fuel = 50.0
+	lord = Enemy.new("shade_lord", Config.TORCH.pos + Vector2(110.0, 0.0))
+	w.enemies.append(lord)
+	lord.summon_t = NEVER
+	lord.move_t = 3.0
+	lord.split_t = 0.0
+	_play(w, int(S.warn / Config.STEP) + 3)
+	decoys = w.enemies.filter(func(x): return x.decoy)
+	var together := true
+	for i in int(6.5 / Config.STEP):
+		_play(w, 1)
+		together = together and decoys.all(func(x): return x.gone or x.move == lord.move or (lord.move == "stay"))
+	_expect(out, "the decoys warn and rush the torch with their lord, and fade there", [together, decoys.all(func(x): return x.gone), lord.move], [true, true, "stay"])
+	w = _night(Vector2(0.0, 40.0))
+	lord = Enemy.new("shade_lord", Config.TORCH.pos + Vector2(110.0, 0.0))
+	w.enemies.append(lord)
+	lord.summon_t = NEVER
+	lord.move_t = 1000.0
+	lord.split_t = 0.0
+	_play(w, int(S.warn / Config.STEP) + 3)
+	_play(w, int(S.life / Config.STEP) - 10)
+	_expect(out, "decoys last until split.life", w.enemies.filter(func(x): return x.decoy).size(), S.count)
+	_play(w, 12)
+	_expect(out, "then they fade", w.enemies.filter(func(x): return x.decoy).size(), 0)
+	lord.split_t = 0.0
+	_play(w, int(S.warn / Config.STEP) + 3)
+	lord.dead = true
+	_play(w, 1)
+	_expect(out, "decoys fade when their lord dies", w.enemies.filter(func(x): return x.decoy and not x.gone).size(), 0)
+	# the bot does not swing at a decoy beside it
+	w = _night(LIT)
+	lord = Enemy.new("shade_lord", Config.TORCH.pos + Vector2(-150.0, 0.0))
+	lord.summon_t = NEVER
+	lord.split_t = NEVER
+	lord.move_t = 1000.0
+	w.enemies.append(lord)
+	d = Enemy.new("shade_lord", w.player.pos + NEAR)
+	d.decoy = true
+	d.lord = lord
+	d.life_t = 100.0
+	d.move_t = 1000.0
+	w.enemies.append(d)
+	var swung := false
+	var bot = Bot.new(1)
+	for i in 30:
+		var f = bot.frame(w)
+		swung = swung or f.is_pressed("attack")
+		w.step(f)
+	_expect(out, "the bot does not swing at a decoy", swung, false)
+	return out
+
+
+## The keeper hardens late (Config.HARDEN): three more hearts on night 10, one more on nights 12, 14 and 16, no more
+## after; from night 10 dawn heals fully (and the night's new hearts come full), before it only DAWN.heal; and a hit
+## keeps the next off longer night by night from night 10, up to invuln_most.
+static func _harden() -> Array:
+	var out := []
+	var H: Dictionary = Config.HARDEN
+	var w = _night(LIT)
+	var hearts := []
+	var shield := []
+	for night in [9, 10, 11, 12, 16, 30]:
+		w.night = night
+		hearts.append(w.hardened_hp())
+		shield.append(snappedf(w.keeper_invuln(), 0.001))
+	_expect(out, "the keeper gains hearts on nights 10, 12, 14 and 16 (3, 1, 1, 1)", hearts, [0, 3, 3, 4, 6, 6])
+	_expect(out, "the keeper's shield after a hit grows from night 10, up to invuln_most", shield,
+		[Config.PLAYER.invuln, snappedf(Config.PLAYER.invuln + H.invuln_grow, 0.001), snappedf(Config.PLAYER.invuln + H.invuln_grow * 2, 0.001), snappedf(Config.PLAYER.invuln + H.invuln_grow * 3, 0.001), snappedf(minf(H.invuln_most, Config.PLAYER.invuln + H.invuln_grow * 7), 0.001), H.invuln_most])
+	_expect(out, "the max hp counts the hearts", w.max_hp(), Config.PLAYER.hp + 6)
+	for night in [8, 9, 11]:
+		w = _night(LIT)
+		w.night = night
+		w.player.hp = 2
+		w.time = Config.NIGHT.length - Config.STEP * 0.5
+		_play(w, 1)
+		var want: int = w.max_hp() if night + 1 >= H.from else 2 + Config.DAWN.heal
+		_expect(out, "the dawn after night %d heals the keeper to %d" % [night, want], [w.night, w.player.hp], [night + 1, want])
+	# the longer shield holds off a hit the usual one would let through
+	w = _night(LIT)
+	w.night = 11
+	w.time = Config.NIGHT.length - Config.STEP * 0.5
+	_play(w, 1) # dawn into night 12: tonight's shield is set
+	w.offer = []
+	w.phase = "night"
+	w.next_spawn = NEVER
+	var bat = _add(w, "bat", Vector2(4.0, 0.0))
+	bat.T = bat.T.duplicate()
+	bat.T.speed = 0.0
+	var hp: int = w.player.hp
+	_play(w, 1)
+	_expect(out, "a hit on night 12 shields the keeper for keeper_invuln()", [w.player.hp, snappedf(w.player.invuln, 0.001)], [hp - 1, snappedf(w.keeper_invuln(), 0.001)])
+	bat.pos = w.player.pos + Vector2(4.0, 0.0)
+	_play(w, int((Config.PLAYER.invuln + 0.05) / Config.STEP))
+	bat.pos = w.player.pos + Vector2(4.0, 0.0)
+	_play(w, 1)
+	_expect(out, "past the usual shield, the night's longer one still holds", w.player.hp, hp - 1)
+	w = World.new(3)
+	w.begin_at(12, 1)
+	_expect(out, "a run begun at night 12 has its hearts full and its shield set", [w.player.hp, w.max_hp() >= Config.PLAYER.hp + 4, w.player.invuln_for], [w.max_hp(), true, w.keeper_invuln()])
 	return out
 
 
@@ -639,6 +990,44 @@ static func _charger() -> Array:
 	boar.move_t = 0.0
 	_play(w, 1)
 	_expect(out, "the boar does not charge from beyond the field", boar.move, "")
+	out.append_array(_charge_band())
+	return out
+
+
+## The red band the painter lays under a lined-up boar is where the charge hurts: a keeper standing just inside its
+## edge (Enemy.lane_half() from the line, less a pixel) is hit, one just outside it is not; the painter's band holds
+## the first point and not the second; and the band ends where the charge does, at the field's edge too.
+static func _charge_band() -> Array:
+	var out := []
+	var C: Dictionary = Config.ENEMY_TYPES.boar.charge
+	var warn_steps := int(round(C.warn / Config.STEP))
+	var run_steps := int(round(C.dist / C.speed / Config.STEP))
+	for inside in [true, false]:
+		var w = _night(DARK + Vector2(-20.0, 30.0))
+		w.fuel = 1.0e6
+		var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+		boar.move_t = 0.0
+		_play(w, 1)
+		var half: float = boar.lane_half()
+		var spot: Vector2 = boar.pos + boar.aim * 60.0 + boar.aim.orthogonal() * (half + (-1.0 if inside else 1.0))
+		w.player.pos = spot
+		var drawn: bool = Geometry2D.is_point_in_polygon(spot, Painter.charge_band(boar))
+		_expect(out, "the painter's band holds a point a pixel %s its edge" % ("inside" if inside else "outside"), drawn, inside)
+		var end: Vector2 = boar.charge_end()
+		_play(w, warn_steps + run_steps + 2)
+		_expect(out, "the band ends where the charge does (%s)" % ("hit" if inside else "missed"), [boar.move, boar.pos.distance_to(end) < C.speed * Config.STEP * 1.5], ["rest", true])
+		_expect(out, "the charge hurts a keeper a pixel %s the band's edge" % ("inside" if inside else "outside"), w.player.hp, Config.PLAYER.hp - (1 if inside else 0))
+	_expect(out, "the band is as wide as the charge hurts: the boar's body and the keeper's", Enemy.new("boar", Vector2.ZERO).lane_half(), Config.ENEMY_TYPES.boar.radius + Config.PLAYER.radius)
+	# at the field's edge the band ends where the boar stops
+	var w = _night(Vector2(0.0, 0.0))
+	w.player.pos = Vector2(Config.FIELD.end.x - 20.0, Config.TORCH.pos.y + 7.0)
+	var boar = _add(w, "boar", Vector2(-60.0, -7.0))
+	boar.move_t = 0.0
+	_play(w, 1)
+	var end: Vector2 = boar.charge_end()
+	w.player.pos = Vector2(Config.FIELD.end.x - 20.0, Config.FIELD.position.y + 2.0) # out of the way
+	_play(w, warn_steps + run_steps + 2)
+	_expect(out, "the band ends where a charge into the trees stops", [boar.move, boar.pos.distance_to(end) < C.speed * Config.STEP * 1.5, end.x <= Config.FIELD.end.x + 0.01], ["rest", true, true])
 	return out
 
 
@@ -802,4 +1191,241 @@ static func _coaching() -> Array:
 		_play(w, 1, "attack" if i == 0 else "")
 		c.step(w)
 	_expect(out, "something cut down: all done and off", [c.fight, c.on, c.now(w)], ["done", false, []])
+	return out
+
+
+## What keeps a crowd of hundreds cheap answers exactly what the slow way did. World.mod() is looked up from a table
+## made once per change of picks: for many random sets of picks, taken one by one and also swapped in whole, it gives
+## the very value the old loop over every upgrade gives (the same float: the product is taken in the same order).
+## The light's radius is kept until the fuel changes, and follows it when it does. Dropping the dead keeps the
+## living in their order, and the newly born go after them.
+static func _crowds() -> Array:
+	var out := []
+	var rng := RandomNumberGenerator.new() # check-ok: a test's own layouts, never the world's rng
+	rng.seed = 7
+	var keys := {}
+	for id in Config.UPGRADES:
+		for n in World.max_level(id):
+			for key in World.upgrade(id, n + 1):
+				keys[key] = true
+	var ids: Array = Config.UPGRADES.keys()
+	var wrong := 0
+	for trial in 40:
+		var w = _night(LIT)
+		for i in rng.randi_range(0, 20):
+			var id: String = ids[rng.randi() % ids.size()]
+			if w.level(id) < World.max_level(id):
+				if trial % 2 == 0:
+					w.picks.append(id) # one by one, as the offers do
+				else:
+					w.picks = w.picks + [id] # swapped in whole, as the scenes do
+			for key in keys:
+				var fast = w.mod(key, 1.0)
+				var slow = _mod_the_slow_way(w, key, 1.0)
+				if typeof(fast) != typeof(slow) or fast != slow:
+					wrong += 1
+	_expect(out, "mod() from its table equals the loop over every upgrade, for random picks", wrong, 0)
+	var w = _night(LIT, ["bright"])
+	w.fuel = 10.0
+	var dim: float = w.light_radius()
+	w.fuel = 90.0
+	_expect(out, "the light's radius follows the fuel", [w.light_radius() > dim, is_equal_approx(w.light_radius(), lerpf(Config.TORCH.light_min, Config.TORCH.light_max, 0.9) * 1.3)], [true, true])
+	w.picks = []
+	_expect(out, "and the picks", is_equal_approx(w.light_radius(), lerpf(Config.TORCH.light_min, Config.TORCH.light_max, 0.9)), true)
+	w = _night(DARK)
+	var a = _add(w, "slime", Vector2(0.0, 60.0))
+	var b = _add(w, "big_slime", NEAR)
+	var c = _add(w, "slime", Vector2(0.0, -60.0))
+	b.hp = 1
+	_play(w, SWING, "attack")
+	_expect(out, "a kill leaves the others in their order and its halves after them", w.enemies.map(func(e): return e.kind), ["slime", "slime", "slime", "slime"])
+	_expect(out, "(the same two first)", [is_same(w.enemies[0], a), is_same(w.enemies[1], c)], [true, true])
+	return out
+
+
+## World.mod() as it was before the table: a loop over every upgrade, merging its levels, at every call.
+static func _mod_the_slow_way(w, key: String, fallback):
+	var v = fallback
+	for id in Config.UPGRADES:
+		var n: int = w.picks.count(id)
+		if n == 0:
+			continue
+		var u: Dictionary = World.upgrade(id, n)
+		if not u.has(key):
+			continue
+		v = v * u[key] if key.ends_with("_mult") or key == "glow_slow" else u[key]
+	return v
+
+
+## Nights past the table come closer together night by night (LATER_NIGHTS.spawn), but never closer than
+## LATER_NIGHTS.min_gap, however late; a boss night's still come further apart than that.
+static func _late_nights() -> Array:
+	var out := []
+	var w = _night(DARK)
+	var gaps := []
+	for night in [Config.NIGHTS.size(), Config.NIGHTS.size() + 1, Config.NIGHTS.size() + 2, Config.NIGHTS.size() + 6]:
+		w.night = night
+		w.time = 0.0
+		gaps.append(w.spawn_gap())
+	_expect(out, "each night past the table its enemies come closer together", [gaps[1] < gaps[0] or w._boss_night(), gaps[2] < gaps[1], gaps[3] < gaps[2]], [true, true, true])
+	w.night = 61 # not a boss night
+	w.time = Config.NIGHT.length
+	_expect(out, "however late, they never come closer than min_gap", w.spawn_gap(), Config.LATER_NIGHTS.min_gap)
+	w.night = 18 # the floor is a guard for the nights past twenty, not a cap on the crowds before them
+	_expect(out, "up to night 18 the floor never shortens a gap", w.spawn_gap() > Config.LATER_NIGHTS.min_gap, true)
+	w.night = 60
+	_expect(out, "and a boss night's come further apart than that", is_equal_approx(w.spawn_gap(), Config.LATER_NIGHTS.min_gap * Config.BOSS.spawn_mult), true)
+	return out
+
+
+## Config.TIERS: a stronger tier is its kind's row with hp and score multiplied and rounded up, speed and smother
+## multiplied, and (tier 3) less knockback; a kill of one scores its tier's worth and says which tier it was; the
+## torch is smothered harder; a big slime breaks into halves of its own tier. Tier 1 is the row itself.
+static func _tier_stats() -> Array:
+	var out := []
+	for kind in Config.ENEMY_TYPES:
+		var base: Dictionary = Config.ENEMY_TYPES[kind]
+		_expect(out, "%s at tier 1 is its row" % kind, Enemy.row(kind, 1) == base, true)
+		if base.get("boss", false):
+			continue
+		for t in Config.TIERS.size():
+			var up: Dictionary = Config.TIERS[t]
+			var r: Dictionary = Enemy.row(kind, t + 2)
+			_expect(out, "%s tier %d: hp, speed, smother, score" % [kind, t + 2], [r.hp, snappedf(r.speed, 0.001), snappedf(r.smother, 0.001), r.score],
+				[ceili(base.hp * up.hp), snappedf(base.speed * up.speed, 0.001), snappedf(base.get("smother", 1.0) * up.smother, 0.001), ceili(base.get("score", Config.SCORE.kill) * up.score)])
+		_expect(out, "%s: each tier is tougher than the one below" % kind, base.hp <= Enemy.row(kind, 2).hp and Enemy.row(kind, 2).hp <= Enemy.row(kind, 3).hp and Enemy.row(kind, 3).hp > base.hp, true)
+	var e = Enemy.new("slime", Vector2.ZERO, 3)
+	_expect(out, "an enemy made at a tier has its tier's row and hp", [e.tier, e.hp, is_same(e.T, Enemy.row("slime", 3))], [3, Enemy.row("slime", 3).hp, true])
+	# a kill scores the tier's worth and the event names the tier, so the E1 count can follow it
+	var w = _night(DARK)
+	var red = Enemy.new("slime", w.player.pos + NEAR, 3)
+	red.hp = 1
+	w.enemies.append(red)
+	var before: int = w.score
+	var tiers := []
+	for i in SWING:
+		_play(w, 1, "attack" if i == 0 else "")
+		for ev in w.events:
+			if ev.kind == "kill":
+				tiers.append(ev.tier)
+	_expect(out, "a red slime's kill scores its tier's worth and says its tier", [w.score - before, tiers], [Enemy.row("slime", 3).score, [3]])
+	# smother
+	for t in [1, 3]:
+		w = _night(DARK)
+		var s = Enemy.new("slime", Config.TORCH.pos, t)
+		s.at_torch = true
+		w.enemies.append(s)
+		_expect(out, "a tier %d slime at the torch smothers it by its row's smother" % t, snappedf(w.burn_rate() - w.burn(), 0.001), snappedf(Config.TORCH.smother * Enemy.row("slime", t).get("smother", 1.0), 0.001))
+	# knockback
+	var pushed := []
+	for t in [1, 3]:
+		w = _night(DARK)
+		var s = Enemy.new("slime", w.player.pos + NEAR, t)
+		s.hp = 99
+		w.enemies.append(s)
+		_play(w, SWING, "attack")
+		pushed.append(s.knock.length() + s.vel.length())
+	_expect(out, "a red slime is knocked back less than a green one", pushed[1] < pushed[0] * 0.8, true)
+	# splits
+	w = _night(DARK)
+	var big = Enemy.new("big_slime", w.player.pos + NEAR, 2)
+	big.hp = 1
+	w.enemies.append(big)
+	_play(w, SWING, "attack")
+	_expect(out, "an orange big slime breaks into orange slimes", w.enemies.map(func(h): return [h.kind, h.tier]), [["slime", 2], ["slime", 2]])
+	return out
+
+
+## Config.TIER_NIGHTS: before its first row every enemy is tier 1 and no roll is made for it (the rng moves as it
+## did before tiers, so those nights are the same game); from a row on, the tiers come in its shares, those that
+## come along with an enemy share its tier, the strongest grow commoner night by night, and a boss stays tier 1.
+static func _tier_nights() -> Array:
+	var out := []
+	var first: int = Config.TIER_NIGHTS[0].from
+	for night in range(1, first + 1):
+		var w = _night(DARK)
+		w.night = night
+		var ref := RandomNumberGenerator.new() # check-ok: replays the world's own draws to count them
+		ref.seed = w.seed_value
+		ref.state = w.rng.state()
+		w.next_spawn = 0.0
+		_play(w, 1)
+		var draws := 2 + (1 if night >= first else 0) # the kind, the spot on the edge, and (from the first row) the tier
+		for i in draws:
+			ref.randf()
+		_expect(out, "night %d: a spawn draws %d numbers from the rng" % [night, draws], w.rng.state(), ref.state)
+	var last_strong := -1.0
+	for r in Config.TIER_NIGHTS:
+		var strong: float = r.shares[-1] / r.shares.reduce(func(a, b): return a + b, 0.0)
+		_expect(out, "from night %d the strongest tier is no rarer than before" % r.from, strong >= last_strong, true)
+		last_strong = strong
+	_expect(out, "late on, the strongest tier is the commonest", Config.TIER_NIGHTS[-1].shares.max() == Config.TIER_NIGHTS[-1].shares[-1], true)
+	for night in [first - 1, first, 12, 18]:
+		var w = _night(DARK)
+		w.night = night
+		var seen := {}
+		var mixed := 0
+		var spawns := 400
+		for i in spawns:
+			w.enemies = []
+			w.next_spawn = 0.0
+			_play(w, 1)
+			for e in w.enemies:
+				seen[e.tier] = seen.get(e.tier, 0) + 1
+			if w.enemies.any(func(e): return e.tier != w.enemies[0].tier):
+				mixed += 1
+		var shares: Array = w.tier_shares() if not w.tier_shares().is_empty() else [1.0]
+		var total: float = shares.reduce(func(a, b): return a + b, 0.0)
+		var leads := 0
+		for t in seen:
+			leads += seen[t]
+		for t in range(1, shares.size() + 1):
+			var want: float = shares[t - 1] / total
+			var got: float = float(seen.get(t, 0)) / leads
+			_expect(out, "night %d: tier %d comes about %.0f%% of the time" % [night, t, want * 100.0], absf(got - want) < 0.07 and (want > 0.0) == (got > 0.0), true)
+		_expect(out, "night %d: no tier above the table's" % night, seen.keys().all(func(t): return t <= shares.size()), true)
+		_expect(out, "night %d: an enemy and those that come along with it are of one tier" % night, mixed, 0)
+	var w = _night(DARK)
+	w.night = 21
+	w.bosses_due = w._plan_bosses()
+	w.time = Config.NIGHT.length * Config.BOSS.at + Config.BOSS.apart * 2
+	_play(w, 2)
+	_expect(out, "bosses are tier 1 on a late night", w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.tier), [1, 1, 1])
+	return out
+
+
+## A tier is the same picture in other colours (src/art/sprites.gd TIERS): every pixel is where its frame's is and
+## as see-through, the outline and the eyes keep their colour, and every other pixel takes its tier's colour. The
+## first sighting of a tier has its own line, named by its colour.
+static func _tier_looks() -> Array:
+	var out := []
+	for name in Sprites.tier_names():
+		var frame: String = name.get_slice("~", 0)
+		var a := Sprites.image(frame)
+		var b := Sprites.image(name)
+		var grid := Sprites.rows(frame)
+		var wrong := 0
+		var kept := 0
+		var changed := 0
+		for y in grid.size():
+			for x in grid[y].length():
+				var key: String = grid[y][x]
+				if a.get_pixel(x, y).a != b.get_pixel(x, y).a:
+					wrong += 1
+				elif Sprites.TIER_KEEP.has(key):
+					kept += 0 if a.get_pixel(x, y) == b.get_pixel(x, y) else 1
+				elif a.get_pixel(x, y) != b.get_pixel(x, y) or key in ["e", "i", "l"]: # eyes may keep their colour
+					changed += 1
+				else:
+					wrong += 1
+		_expect(out, "%s: the same shape, outline and whites kept, every other colour swapped" % name, [a.get_size() == b.get_size(), wrong, kept, changed > 0], [true, 0, 0, true])
+		_expect(out, "%s: its feet are where its frame's are" % name, Sprites.foot(name), Sprites.foot(frame))
+	var lines := {}
+	for kind in Looks.TIER_NAMES:
+		for t in Config.TIERS.size():
+			var line := Looks.hint(Looks.thing(kind, t + 2))
+			_expect(out, "%s tier %d has a first-sighting line of its own" % [kind, t + 2], line != "" and not lines.has(line) and line != Looks.hint(kind), true)
+			lines[line] = true
+	_expect(out, "an orange slime is told as one", Looks.hint(Looks.thing("slime", 2)).begins_with("주황 슬라임: "), true)
+	_expect(out, "a tier's bits are in its colours", Looks.bit_colours("slime", 3) != Looks.bit_colours("slime", 1), true)
 	return out

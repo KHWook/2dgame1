@@ -10,6 +10,7 @@ var vel := Vector2.ZERO
 var face := Vector2.DOWN
 var hp: int = P.hp
 var invuln := 0.0
+var invuln_for: float = P.invuln # how long a hit keeps it from the next one tonight (World.keeper_invuln())
 var hurt_t := 0.0
 var dead := false
 var attack_t := -1.0 # time into the swing, or -1 when not swinging
@@ -78,7 +79,7 @@ func hurt(from_pos: Vector2) -> bool:
 	if invuln > 0.0 or dash_t > 0.0 or dead:
 		return false
 	hp -= 1
-	invuln = P.invuln
+	invuln = invuln_for
 	hurt_t = P.hurt_time
 	vel = (pos - from_pos).normalized() * P.hurt_knock # a swing under way goes on: the blow you started still lands
 	if hp <= 0:
