@@ -16,6 +16,15 @@ const TAKE_KEYS := Chooser.START_KEYS
 const NEXT_KEYS := Chooser.NEXT_KEYS
 const BACK_KEYS := Chooser.BACK_KEYS
 
+## The reroll button (the R key's): one under the cards for the mouse and a thumb. It is drawn at reroll_rect() and
+## answers REROLL_PAD past it, once the offer listens (so the tap that drew an offer again is not also the next
+## reroll). It sits in the middle, REROLL_BELOW under the cards' bottom edge with the line of keys between, so a
+## thumb that lands low on a card, or just under one, takes neither.
+const REROLL_KEY := KEY_R
+const REROLL := Vector2(118.0, 16.0)
+const REROLL_BELOW := 14.0
+const REROLL_PAD := 4.0
+
 var open := false
 var cards := 0 # how many cards this offer has
 var focus := 0 # the card in focus, from 0
@@ -25,6 +34,17 @@ var quiet := 0.0 # real seconds until it listens
 ## Whether this key belongs to the offer while it is up (it then never reaches play as a move or a swing).
 static func hears(keycode: int) -> bool:
 	return TAKE_KEYS.has(keycode) or NEXT_KEYS.has(keycode) or BACK_KEYS.has(keycode)
+
+
+## Where the reroll button is, in the frame its cards are in: across is how wide the row of cards is, bottom their
+## bottom edge.
+static func reroll_rect(across: float, bottom: float) -> Rect2:
+	return Rect2(Vector2(roundf((across - REROLL.x) / 2.0), bottom + REROLL_BELOW), REROLL)
+
+
+## Whether a click or a tap at pos (in that frame) is on the reroll button, while it listens.
+func reroll_at(pos: Vector2, across: float, bottom: float) -> bool:
+	return listening() and reroll_rect(across, bottom).grow(REROLL_PAD).has_point(pos)
 
 
 ## A new offer of n cards: the middle one in focus, deaf for WAIT seconds.

@@ -249,66 +249,69 @@ const ENEMY_TYPES := {
 ## (the attack key would put the logs down), turned to the nearest as a pressed attack is (World.aim). With nothing in
 ## reach it does not swing at the air. The key still works as before. chop_ahead, chop_radius: pixels added to a
 ## chop's (Config.CHARACTERS' chop) ahead and radius.
-## from_night (optional): the torch offers it only from that night on (World._offer); before it, the offers are
-## drawn as if the row were not there. A row with one goes last, so the rows before it keep their order.
+## from_night (optional): the torch offers it only from that night on (World.can_offer); before it, the offers are
+## drawn as if the row were not there. A row with one goes last, so the rows before it keep their order, and it
+## takes no slot (BUILD).
+## side: whose power it is, "torch" or "keeper": the side whose slots (BUILD) it takes one of, and the group the
+## screen shows it in. rare (optional): it changes how the keeper plays, and is drawn less often (BUILD.rare_weight).
 const UPGRADES := {
-	"slow_burn": { "name": "느린 불꽃", "text": "연료가 25% 천천히 탄다", "burn_mult": 0.75,
+	"slow_burn": { "side": "torch", "name": "느린 불꽃", "text": "연료가 25% 천천히 탄다", "burn_mult": 0.75,
 		"levels": [{ "text": "연료가 40% 천천히 탄다", "burn_mult": 0.6 }] },
-	"big_logs": { "name": "마른 장작", "text": "장작 하나에 연료 +12", "log_bonus": 12.0,
+	"big_logs": { "side": "torch", "name": "마른 장작", "text": "장작 하나에 연료 +12", "log_bonus": 12.0,
 		"levels": [{ "text": "장작 하나에 연료 +20", "log_bonus": 20.0 }] },
-	"ember_ring": { "name": "불씨 고리", "text": "횃불 곁의 적을 1.5초마다 그을려 체력 1까지 깎고, 덮는 힘을 25% 줄인다",
+	"ember_ring": { "side": "torch", "name": "불씨 고리", "text": "횃불 곁의 적을 1.5초마다 그을려 체력 1까지 깎고, 덮는 힘을 25% 줄인다",
 		"ember_radius": 26.0, "ember_every": 1.5, "smother_mult": 0.75,
 		"levels": [{ "text": "고리가 넓어지고 1.2초마다 그을린다, 덮는 힘 40% 줄임", "ember_radius": 32.0, "ember_every": 1.2, "smother_mult": 0.6 },
 			{ "text": "고리가 더 넓어지고 0.9초마다 그을린다, 덮는 힘 절반", "ember_radius": 38.0, "ember_every": 0.9, "smother_mult": 0.5 }] },
-	"warm_glow": { "name": "따뜻한 빛", "text": "빛 안의 적이 40% 느려진다", "glow_slow": 0.6,
+	"warm_glow": { "side": "torch", "name": "따뜻한 빛", "text": "빛 안의 적이 40% 느려진다", "glow_slow": 0.6,
 		"levels": [{ "text": "빛 안의 적이 55% 느려진다", "glow_slow": 0.45 }] },
-	"woodpile": { "name": "장작더미", "text": "장작이 더 자주, 더 많이 나온다", "wood_mult": 0.65, "wood_extra": 2,
+	"woodpile": { "side": "torch", "name": "장작더미", "text": "장작이 더 자주, 더 많이 나온다", "wood_mult": 0.65, "wood_extra": 2,
 		"levels": [{ "text": "장작이 훨씬 자주, 더 많이 나온다", "wood_mult": 0.5, "wood_extra": 3 }] },
-	"quick_hands": { "name": "날랜 손", "text": "장작을 들어도 느려지지 않는다", "carry_full": true,
+	"quick_hands": { "side": "keeper", "name": "날랜 손", "text": "장작을 들어도 느려지지 않는다", "carry_full": true,
 		"as": { "woodcutter": { "text": "장작을 여럿 들어도 느려지지 않는다" } } },
-	"long_blade": { "name": "긴 칼날", "text": "베기 거리 +8", "reach_bonus": 8.0,
+	"long_blade": { "side": "keeper", "name": "긴 칼날", "text": "베기 거리 +8", "reach_bonus": 8.0,
 		"levels": [{ "text": "베기 거리 +14", "reach_bonus": 14.0 }],
 		"as": { "woodcutter": { "name": "긴 도끼자루", "text": "도끼가 5 더 멀리 찍는다", "chop_ahead": 5.0,
 				"levels": [{ "text": "도끼가 9 더 멀리 찍는다", "chop_ahead": 9.0 }] },
 			"mage": { "name": "먼 불씨", "text": "불씨가 날아가는 거리 +30", "reach_bonus": null, "range_bonus": 30.0,
 				"levels": [{ "text": "불씨가 날아가는 거리 +50", "reach_bonus": null, "range_bonus": 50.0 }] } } },
-	"bright": { "name": "밝은 불", "text": "빛 반경 +30%, 빛 안에서 15% 빨리 걷는다", "light_mult": 1.3, "lit_speed_mult": 1.15,
+	"bright": { "side": "torch", "name": "밝은 불", "text": "빛 반경 +30%, 빛 안에서 15% 빨리 걷는다", "light_mult": 1.3, "lit_speed_mult": 1.15,
 		"levels": [{ "text": "빛 반경 +50%, 빛 안에서 25% 빨리 걷는다", "light_mult": 1.5, "lit_speed_mult": 1.25 }] },
-	"sturdy": { "name": "튼튼한 몸", "text": "최대 체력 +1, 체력 1 회복", "hp_bonus": 1,
+	"sturdy": { "side": "keeper", "name": "튼튼한 몸", "text": "최대 체력 +1, 체력 1 회복", "hp_bonus": 1,
 		"levels": [{ "hp_bonus": 2 }, { "hp_bonus": 3 }] },
-	"thorns": { "name": "가시 망토", "text": "나를 때린 적도 피해 1, 바짝 붙은 적은 1초마다 찔린다", "thorns": 1,
+	"thorns": { "side": "keeper", "name": "가시 망토", "text": "나를 때린 적도 피해 1, 바짝 붙은 적은 1초마다 찔린다", "thorns": 1,
 		"thorn_every": 1.0, "thorn_reach": 6.0,
 		"levels": [{ "text": "나를 때린 적도 피해 2, 바짝 붙은 적은 0.7초마다 찔린다", "thorns": 2, "thorn_every": 0.7 }] },
-	"wide_swing": { "name": "넓은 베기", "text": "베기 범위가 넓어진다", "arc_bonus": -0.5,
+	"wide_swing": { "side": "keeper", "name": "넓은 베기", "text": "베기 범위가 넓어진다", "arc_bonus": -0.5,
 		"levels": [{ "text": "베기 범위가 더 넓어진다", "arc_bonus": -0.8 }],
 		"as": { "woodcutter": { "name": "넓게 찍기", "text": "찍는 자리가 넓어진다 (반경 +3)", "arc_bonus": null, "chop_radius": 3.0,
 				"levels": [{ "text": "찍는 자리가 더 넓어진다 (반경 +5)", "arc_bonus": null, "chop_radius": 5.0 }] },
 			"mage": { "name": "큰 불씨", "text": "불씨가 커져 맞히는 반경 +2", "arc_bonus": null, "bolt_bonus": 2.0,
 				"levels": [{ "text": "불씨가 더 커져 맞히는 반경 +3.5", "arc_bonus": null, "bolt_bonus": 3.5 }] } } },
-	"fire_blade": { "name": "불붙은 칼", "text": "빛 안에서 베면 피해 +1", "lit_damage": 1,
+	"fire_blade": { "side": "keeper", "name": "불붙은 칼", "text": "빛 안에서 베면 피해 +1", "lit_damage": 1,
 		"levels": [{ "text": "빛 안에서 베면 피해 +2", "lit_damage": 2 }],
 		"as": { "woodcutter": { "name": "불붙은 도끼", "text": "빛 안에서 찍으면 피해 +1", "levels": [{ "text": "빛 안에서 찍으면 피해 +2" }] },
 			"mage": { "name": "타오르는 불씨", "text": "빛 안의 적을 맞히면 피해 +1 더", "levels": [{ "text": "빛 안의 적을 맞히면 피해 +2 더" }] } } },
-	"dash": { "name": "돌진", "text": "Shift로 짧게 돌진, 그동안 무적 (1.2초마다)", "dash_every": 1.2,
+	"dash": { "side": "keeper", "rare": true, "name": "돌진", "text": "Shift로 짧게 돌진, 그동안 무적 (1.2초마다)", "dash_every": 1.2,
 		"levels": [{ "text": "돌진을 0.7초마다 쓸 수 있다", "dash_every": 0.7 }] },
-	"spin": { "name": "회전 베기", "text": "세 번째 베기마다 한 바퀴를 벤다", "spin_every": 3,
+	"spin": { "side": "keeper", "rare": true, "name": "회전 베기", "text": "세 번째 베기마다 한 바퀴를 벤다", "spin_every": 3,
 		"levels": [{ "text": "두 번째 베기마다 한 바퀴를 벤다", "spin_every": 2 }],
 		"as": { "woodcutter": { "name": "회전 도끼", "text": "세 번째 도끼질마다 한 바퀴를 휘두른다", "levels": [{ "text": "두 번째 도끼질마다 한 바퀴를 휘두른다" }] },
 			"mage": { "name": "세 갈래 불씨", "text": "세 번째 쏠 때마다 불씨 셋을 부채꼴로 쏜다", "spin_every": null, "spread_every": 3,
 			"levels": [{ "text": "두 번째 쏠 때마다 불씨 셋을 쏜다", "spin_every": null, "spread_every": 2 }] } } },
-	"spark": { "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
+	"spark": { "side": "torch", "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
 		"levels": [{ "text": "횃불이 1.6초마다 불씨를 쏜다", "spark_every": 1.6 },
 			{ "text": "횃불이 1.2초마다 불씨를 쏜다", "spark_every": 1.2 }] },
-	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
+	"vampire": { "side": "keeper", "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
 		"vamp_kills": 8, "vamp_grow": 1.25, "vamp_from": 4,
 		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다", "vamp_kills": 5 }],
 		"as": { "woodcutter": { "name": "흡혈 도끼", "text": "도끼로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
 				"levels": [{ "text": "도끼로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다" }] },
 			"mage": { "name": "흡혈 불씨", "text": "불씨로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
 				"levels": [{ "text": "불씨로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다" }] } } },
-	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
+	"big_torch": { "side": "torch", "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
 		"levels": [{ "text": "연료 최대치 +60, 새벽에 그만큼 더 채워진다", "fuel_bonus": 60.0 }] },
-	"swift": { "name": "빠른 칼놀림", "text": "베기 간격이 30% 짧아진다", "attack_mult": 0.7, "from_night": 10,
+	"swift": { "side": "keeper", "name": "빠른 칼놀림", "text": "베기 간격이 30% 짧아진다", "attack_mult": 0.7, "from_night": 10,
 		"levels": [{ "text": "베기 간격이 45% 짧아진다", "attack_mult": 0.55 },
 			{ "text": "베기 간격 60% 짧게, 최대: 닿는 적을 저절로 벤다", "attack_mult": 0.4, "auto_attack": true }],
 		"as": { "woodcutter": { "name": "빠른 도끼질", "text": "도끼질 간격이 30% 짧아진다",
@@ -316,6 +319,22 @@ const UPGRADES := {
 			"mage": { "name": "잦은 불씨", "text": "불씨를 쏘는 간격이 20% 짧아진다", "attack_mult": 0.8,
 				"levels": [{ "text": "불씨를 쏘는 간격이 35% 짧아진다", "attack_mult": 0.65 },
 					{ "text": "쏘는 간격 절반으로, 최대: 닿는 적에게 저절로 쏜다", "attack_mult": 0.5 }] } } },
+}
+
+## The build: what a keeper can hold. slots: how many different upgrades of each side; once a side is full the torch
+## offers only further levels of what that side holds (an upgrade with from_night takes no slot and is offered all
+## the same). rerolls: how many times in a run an offer can be drawn again (World.step's "reroll"). rare_weight: a
+## rare upgrade's chance of being drawn, against 1 for any other. The torch has the more slots (docs/DECISIONS.md).
+const BUILD := { "slots": { "torch": 6, "keeper": 4 }, "rerolls": 2, "rare_weight": 0.5 }
+
+## What the torch gives when it has fewer upgrades to offer than NIGHT.offer_size: the offer is filled up from these,
+## drawn as upgrades are. Taken, one acts once, now, and is gone: it takes no slot and is not part of the build
+## (World.picks). fuel: fuel added; heal: hearts healed; logs: logs dropped round the torch, log_at pixels from it
+## (where logs fall by themselves: WOOD.keep_away). Small on purpose: they come when a build is done.
+const FILLERS := {
+	"kindling": { "name": "불쏘시개", "text": "지금 연료 +30", "fuel": 30.0 },
+	"rest": { "name": "숨 고르기", "text": "지금 체력 1 회복", "heal": 1 },
+	"spare_log": { "name": "마른 장작 하나", "text": "횃불 곁에 장작 하나가 떨어진다", "logs": 1, "log_at": 48.0 },
 }
 
 ## The keeper's numbers that time its attack (PLAYER): the attack_mult upgrade (swift) shortens them all alike, so a

@@ -3,7 +3,7 @@
 ##
 ## Phases: "pick" (time stands still while you choose a torch upgrade: at every dusk, and at set hours of the
 ## night), "night", and the two endings, "out" (the torch died) and "dead" (you did). Reaching dawn starts the next
-## night. R restarts from an ending.
+## night. R restarts from an ending; while picking, "reroll" draws the offer again (Config.BUILD.rerolls a run).
 ##
 ## events is how the world tells whoever shows it what happened in the last step. The rules only add to it and
 ## never read it. Kinds: "hit" and "kill" { pos, dir (away from the blow), enemy (its kind), tier }; "passed", the same
@@ -11,11 +11,12 @@
 ## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
 ## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "cast" { pos } for an
 ## ember the keeper fired (a character whose attack is "shoot"); "boss" { enemy, pos }
-## for a boss that came out of the dark; "coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
+## for a boss that came out of the dark; "boss_coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
 ## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), "landed" { pos, enemy } for the slime
 ## king coming down from a leap or a hop, "decoy" { pos, enemy } where the shade lord's decoy appears and "faded"
 ## { pos, enemy } where one breaks or fades (src/sim/enemy.gd); "pack_coming" { enemy, pos, count } Config.SURGE.warn
-## seconds before a surge comes, from there, and "pack" { enemy, pos, count } when it does.
+## seconds before a surge comes, from there, and "pack" { enemy, pos, count } when it does; "took" { id } for a card
+## taken from the offer (an upgrade or a filler).
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -41,8 +42,9 @@ var logs: Array = [] # Vector2 positions on the ground
 var berries: Array = [] # Vector2 positions on the ground
 var fuel := 0.0
 var score := 0
-var picks: Array = [] # upgrade ids chosen so far, in order
-var offer: Array = [] # upgrade ids on the table while phase == "pick"
+var picks: Array = [] # upgrade ids chosen so far, in order: the build (a filler taken is not in it)
+var offer: Array = [] # the cards on the table while phase == "pick": ids of Config.UPGRADES, then of Config.FILLERS
+var rerolls := 0 # how many times this run an offer can still be drawn again
 var picks_done := 0 # how many of NIGHT.picks_at have been offered
 var next_spawn := 0.0
 var next_wood := 0.0
@@ -110,6 +112,7 @@ func reset() -> void:
 	fuel = T.start_fuel
 	score = 0
 	picks = []
+	rerolls = Config.BUILD.rerolls
 	picks_done = 0
 	next_spawn = N.first_spawn
 	next_wood = Config.WOOD.first
@@ -128,20 +131,31 @@ func reset() -> void:
 
 ## Start at the dusk of night n instead of the first, as if every night before it had been kept: the offers those
 ## nights would have made are drawn and the one in slot is taken each time (the last slot when fewer are offered),
-## the keeper is rested and the torch topped up. For looking at and measuring late nights (the balance tool's
+## the keeper is rested and the torch at its start share. For looking at and measuring late nights (the balance tool's
 ## --late, main.gd's --night=N); a normal run never calls it.
 func begin_at(n: int, slot: int) -> void:
-	for i in (n - 1) * (1 + N.picks_at.size()):
-		if offer.is_empty():
-			break
-		_take(offer[mini(slot, offer.size()) - 1])
-		night = 1 + (i + 1) / (1 + N.picks_at.size()) # the night this next offer is made on (an upgrade's from_night)
-		_offer()
-	night = n
+	play_offers((n - 1) * (1 + N.picks_at.size()), func(cards: Array) -> int: return mini(slot, cards.size()) - 1)
+	logs = [] # what the fillers taken on the way left lying
 	_dusk()
 	player.invuln_for = keeper_invuln()
 	player.hp = max_hp()
-	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
+	fuel = T.start_fuel * max_fuel() / T.max_fuel
+
+
+## Answers the offer on the table and the count - 1 after it without playing the nights between them, and leaves the
+## next one on the table: each is the offer its dusk or its hour of the night would have made (night and picks_done
+## move on as if every night were kept), and choose (the cards on the table -> which one, from 0) takes a card from
+## it. Nothing else of a night happens: no omen is drawn, nothing comes. For begin_at and the tools that measure
+## builds (tools/variety.gd); a normal run never calls it.
+func play_offers(count: int, choose: Callable) -> void:
+	for i in count:
+		if phase == "pick":
+			_take(offer[clampi(choose.call(offer), 0, offer.size() - 1)])
+		picks_done += 1
+		if picks_done > N.picks_at.size():
+			picks_done = 0
+			night += 1
+		_offer()
 
 
 ## For measuring crowds (main.gd's --crowd=K): bring the field up to k enemies of tonight's kinds, from the edges,
@@ -375,6 +389,11 @@ func step(inp) -> void:
 			reset()
 		return
 	if phase == "pick":
+		if inp.is_pressed("reroll"):
+			if can_reroll():
+				rerolls -= 1
+				_offer(offer)
+			return
 		for i in offer.size():
 			if inp.is_pressed("pick_%d" % (i + 1)):
 				_take(offer[i])
@@ -420,23 +439,98 @@ func _sweep() -> void:
 		born.clear()
 
 
-## Put three upgrades on the table, ones you don't have yet or the next level of ones you do (and that may come
-## tonight: from_night), and stop the clock.
-func _offer() -> void:
-	var pool: Array = Config.UPGRADES.keys().filter(func(id): return level(id) < max_level(id) and offered_on(id, night))
+static func side(id: String) -> String:
+	return Config.UPGRADES[id].side
+
+
+## Whether holding this upgrade uses one of its side's slots (Config.BUILD.slots): one the torch offers only from a
+## later night (from_night) uses none.
+static func takes_slot(id: String) -> bool:
+	return not Config.UPGRADES[id].has("from_night")
+
+
+static func slots(side_id: String) -> int:
+	return Config.BUILD.slots[side_id]
+
+
+func slots_used(side_id: String) -> int:
+	var used := 0
+	for id in Config.UPGRADES:
+		if level(id) > 0 and side(id) == side_id and takes_slot(id):
+			used += 1
+	return used
+
+
+## Whether the torch may put this upgrade on the table now: it has a level left and may come tonight (from_night),
+## and it is held already, takes no slot, or its side has a slot free.
+func can_offer(id: String) -> bool:
+	if level(id) >= max_level(id) or not offered_on(id, night):
+		return false
+	return level(id) > 0 or not takes_slot(id) or slots_used(side(id)) < slots(side(id))
+
+
+## A card's chance of being drawn, against 1: Config.BUILD.rare_weight for a rare upgrade.
+static func weight(id: String) -> float:
+	return Config.BUILD.rare_weight if Config.UPGRADES.get(id, {}).get("rare", false) else 1.0
+
+
+## Takes one card out of pool and returns it: one roll over the cards' weights.
+func _draw(pool: Array) -> String:
+	var total := 0.0
+	for id in pool:
+		total += weight(id)
+	var roll: float = rng.next() * total
+	for i in pool.size():
+		roll -= weight(pool[i])
+		if roll < 0.0:
+			return pool.pop_at(i)
+	return pool.pop_back()
+
+
+## Put Config.NIGHT.offer_size cards on the table and stop the clock: upgrades the torch may offer now (can_offer),
+## drawn by weight, and where those run short, fillers (Config.FILLERS). shown: the cards of the offer this one
+## replaces (a reroll); they come back only where there are not enough others.
+func _offer(shown: Array = []) -> void:
 	offer = []
-	while offer.size() < N.offer_size and not pool.is_empty():
-		offer.append(pool.pop_at(rng.index(pool.size())))
+	for table in [Config.UPGRADES.keys().filter(can_offer), Config.FILLERS.keys()]:
+		for again in [false, true]:
+			var pool: Array = table.filter(func(id): return shown.has(id) == again)
+			while offer.size() < N.offer_size and not pool.is_empty():
+				offer.append(_draw(pool))
 	phase = "pick" if not offer.is_empty() else "night"
 
 
-## Take an offered upgrade. Most only change what mod() answers; hp_bonus also heals by as much as it grew, now.
+## Whether a reroll would do anything now: an offer is up, the run has one left, and a new offer would hold a card
+## this one does not.
+func can_reroll() -> bool:
+	if phase != "pick" or rerolls <= 0:
+		return false
+	var cards: Array = Config.UPGRADES.keys().filter(can_offer)
+	if cards.any(func(id): return not offer.has(id)):
+		return true
+	return cards.size() < N.offer_size and Config.FILLERS.keys().any(func(id): return not offer.has(id))
+
+
+## Take an offered card. An upgrade joins the build: most only change what mod() answers; hp_bonus also heals by as
+## much as it grew, now. A filler (Config.FILLERS) does what it says once and is gone.
 func _take(id: String) -> void:
-	var before: int = upgrade(id, level(id)).get("hp_bonus", 0) if level(id) > 0 else 0
-	picks.append(id)
 	offer = []
 	phase = "night"
+	events.append({ "kind": "took", "id": id })
+	if Config.FILLERS.has(id):
+		_fill(Config.FILLERS[id])
+		return
+	var before: int = upgrade(id, level(id)).get("hp_bonus", 0) if level(id) > 0 else 0
+	picks.append(id)
 	player.hp += upgrade(id, level(id)).get("hp_bonus", 0) - before
+
+
+func _fill(row: Dictionary) -> void:
+	fuel = minf(max_fuel(), fuel + row.get("fuel", 0.0))
+	player.hp = mini(max_hp(), player.hp + row.get("heal", 0))
+	var count: int = row.get("logs", 0)
+	for i in count:
+		logs.append(T.pos + Vector2(row.log_at, 0.0).rotated(TAU * i / count))
 
 
 func _end_or_offer() -> void:
@@ -490,7 +584,7 @@ func _haul() -> void:
 	if p.carrying and p.pos.distance_to(T.pos) < T.reach + stats.radius:
 		for i in p.held: # every log held goes on the fire, each counted
 			var k: float = mod("log_mult", 1.0)
-			fuel = minf(max_fuel(), fuel + T.log_fuel * k + mod("log_bonus", 0.0) * k + stats.log_bonus * k)
+			fuel = minf(max_fuel(), fuel + (T.log_fuel + mod("log_bonus", 0.0) + stats.log_bonus) * k)
 			score += Config.SCORE.log
 			events.append({ "kind": "fed", "pos": T.pos })
 		p.held = 0
@@ -737,7 +831,7 @@ func _spawns() -> void:
 	for b in bosses_due:
 		if b.from == null and time >= b.at - Config.BOSS.warn:
 			b.from = _edge_point()
-			events.append({ "kind": "coming", "enemy": b.kind, "pos": b.from })
+			events.append({ "kind": "boss_coming", "enemy": b.kind, "pos": b.from })
 	while not bosses_due.is_empty() and bosses_due[0].from != null and time >= bosses_due[0].at:
 		var b: Dictionary = bosses_due.pop_front()
 		var boss = _boss(b.kind, b.from)

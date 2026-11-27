@@ -73,8 +73,9 @@ static func _runs() -> String:
 		_shared(a, again), again.size(), _shared(a, other), other.size()]
 
 
-## Takes a random card at every offer up to the dusk of the last of BUILD_NIGHTS, as World.begin_at takes a fixed
-## one, and compares what two keepers hold at the dusk of each of those nights.
+## Takes a random upgrade at every offer (a filler only where the offer holds nothing else) up to the dusk of the
+## last of BUILD_NIGHTS, through World.play_offers as World.begin_at takes a fixed one, and compares what two keepers
+## hold once the dusk card of each of those nights is taken.
 static func _builds() -> String:
 	var per_night: int = 1 + Config.NIGHT.picks_at.size()
 	var held := {}
@@ -83,14 +84,13 @@ static func _builds() -> String:
 	for seed_value in range(1, BUILD_SEEDS + 1):
 		var w = World.new(seed_value)
 		var rng = SimRng.new(seed_value + 1000)
-		for i in per_night * (BUILD_NIGHTS[-1] - 1) + 1:
-			if not w.offer.is_empty():
-				w._take(w.offer[rng.index(w.offer.size())])
-			for n in BUILD_NIGHTS:
-				if i == per_night * (n - 1):
-					held[n].append(w.picks.duplicate())
-			w.night = 1 + (i + 1) / per_night
-			w._offer()
+		var done := 0
+		for n in BUILD_NIGHTS:
+			var upto: int = per_night * (n - 1) + 1
+			w.play_offers(upto - done, func(cards: Array) -> int:
+				return rng.index(maxi(1, cards.filter(func(id): return Config.UPGRADES.has(id)).size())))
+			done = upto
+			held[n].append(w.picks.duplicate())
 	var rng = SimRng.new(7)
 	var parts := []
 	for n in BUILD_NIGHTS:
@@ -113,7 +113,7 @@ static func _builds() -> String:
 		var sizes: Array = runs.map(func(r): return r.size())
 		sizes.sort()
 		parts.append("night %d: %d of %d levels held, two keepers share %.0f%% of them" % [n, sizes[sizes.size() / 2], pool, 100.0 * share / BUILD_PAIRS])
-	return "variety: builds at dusk, a random card at every offer over %d seeds: %s" % [BUILD_SEEDS, "; ".join(parts)]
+	return "variety: builds at dusk, a random upgrade at every offer over %d seeds: %s" % [BUILD_SEEDS, "; ".join(parts)]
 
 
 ## Whole nights the bot keeps, started at their dusk: how many enemies come out of the dark, and how many of them in

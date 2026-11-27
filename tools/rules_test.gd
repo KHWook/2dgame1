@@ -72,6 +72,10 @@ static func run() -> Array:
 	out.append_array(_auto_attack())
 	out.append_array(_seeds())
 	out.append_array(_ground_map())
+	out.append_array(_build())
+	out.append_array(_fillers())
+	out.append_array(_rerolls())
+	out.append_array(_slot_tiles())
 	return out
 
 
@@ -716,9 +720,9 @@ static func _patterns() -> Array:
 		w.step(InputFrame.new())
 		for ev in w.events:
 			told.append(ev.kind)
-			if ev.kind == "coming":
+			if ev.kind == "boss_coming":
 				coming_at = ev.pos
-	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("coming"), told.has("boss"), w.bosses_coming().map(func(b): return b.from) == [coming_at] and coming_at != null], [true, false, true])
+	_expect(out, "a boss's coming is told BOSS.warn seconds ahead, before it comes", [told.has("boss_coming"), told.has("boss"), w.bosses_coming().map(func(b): return b.from) == [coming_at] and coming_at != null], [true, false, true])
 	told = _play(w, int(Config.BOSS.warn / Config.STEP) - 2)
 	_expect(out, "the boss does not come during its warning", told.has("boss"), false)
 	told = _play(w, 3)
@@ -762,12 +766,12 @@ static func _boss_nights() -> Array:
 	for i in int((Config.BOSS.warn + Config.BOSS.apart + 2.0) / Config.STEP):
 		w.step(InputFrame.new())
 		for ev in w.events:
-			if ev.kind in ["coming", "boss"]:
+			if ev.kind in ["boss_coming", "boss"]:
 				seen.append([ev.kind, ev.enemy, snappedf(w.time, 0.1), ev.pos])
 	var a: Array = w.boss_kinds() + ["", ""] # (the count is checked above: past it, this scene fails, not errors)
 	_expect(out, "two bosses are each warned BOSS.warn ahead and come BOSS.apart apart, in turn", seen.map(func(x): return [x[0], x[1], x[2]]),
-		[["coming", a[0], snappedf(at - Config.BOSS.warn, 0.1)], ["boss", a[0], snappedf(at, 0.1)],
-		["coming", a[1], snappedf(at + Config.BOSS.apart - Config.BOSS.warn, 0.1)], ["boss", a[1], snappedf(at + Config.BOSS.apart, 0.1)]])
+		[["boss_coming", a[0], snappedf(at - Config.BOSS.warn, 0.1)], ["boss", a[0], snappedf(at, 0.1)],
+		["boss_coming", a[1], snappedf(at + Config.BOSS.apart - Config.BOSS.warn, 0.1)], ["boss", a[1], snappedf(at + Config.BOSS.apart, 0.1)]])
 	if seen.size() == 4:
 		_expect(out, "each boss comes where its own warning pointed", [seen[1][3] == seen[0][3], seen[3][3] == seen[2][3]], [true, true])
 	var list: Array = Painter.bosses(w)
@@ -1479,7 +1483,7 @@ static func _surges() -> Array:
 	_expect(out, "packs were seen, of more than one kind, and on a late night of more than one tier", [packs_seen >= 40, kinds_seen.size() > 1, tiers_seen.size() > 1], [true, true, true])
 	_expect(out, "the line for a pack on its way", Config.SURGE.kinds.map(func(k): return Ui.coming_line(Ui.PACK % Looks.kind_name(k), Ui.PACK_COMING)),
 		["슬라임 떼가 몰려온다!", "박쥐 떼가 몰려온다!", "그림자 떼가 몰려온다!", "도둑 비버 떼가 몰려온다!", "멧돼지 떼가 몰려온다!"])
-	_expect(out, "the line for a boss on its way reads as before", Config.BOSS.kinds.map(func(k): return Ui.coming_line(Config.ENEMY_TYPES[k].name, Ui.COMING)),
+	_expect(out, "the line for a boss on its way reads as before", Config.BOSS.kinds.map(func(k): return Ui.coming_line(Config.ENEMY_TYPES[k].name, Ui.BOSS_COMING)),
 		["슬라임 왕이 다가온다!", "그림자 군주가 다가온다!"])
 	return out
 
@@ -1510,7 +1514,7 @@ static func _surge_totals() -> Array:
 		var with := 0
 		var without := 0
 		var packed := 0
-		for seed_value in range(1, 9):
+		for seed_value in range(1, 17):
 			var a = _dusk_at(seed_value, night)
 			for s in a.surges_due:
 				packed += s.size
@@ -1520,7 +1524,7 @@ static func _surge_totals() -> Array:
 			b.surge_slow = 1.0
 			without += _arrivals(b)
 		if absf(with - without) > 0.1 * without:
-			out.append("night %d: over 8 seeds %d enemies come with surges and %d without: more than a tenth apart" % [night, with, without])
+			out.append("night %d: over 16 seeds %d enemies come with surges and %d without: more than a tenth apart" % [night, with, without])
 		_expect(out, "night %d: its packs are a real share of it, at most SURGE.share and a little" % night, [packed > 0.1 * without, packed <= (Config.SURGE.share + 0.05) * without], [true, true])
 	return out
 
@@ -2569,16 +2573,17 @@ static func _swift() -> Array:
 		var w = World.new(seed_value)
 		for n in [1, from - 1, from]:
 			w.night = n
-			var rng = SimRng.new(seed_value + 1000)
+			var twin = World.new(seed_value) # draws from a pool that never held swift, on the same rng
+			twin.rng = SimRng.new(seed_value + 1000)
 			w.rng = SimRng.new(seed_value + 1000)
 			w._offer()
-			var pool: Array = Config.UPGRADES.keys().filter(func(id): return id != "swift" and w.level(id) < World.max_level(id))
+			var pool: Array = Config.UPGRADES.keys().filter(func(id): return id != "swift")
 			var want := []
-			while want.size() < Config.NIGHT.offer_size and not pool.is_empty():
-				want.append(pool.pop_at(rng.index(pool.size())))
+			while want.size() < Config.NIGHT.offer_size:
+				want.append(twin._draw(pool))
 			if n < from:
 				before += w.offer.count("swift")
-				same = same and w.offer == want and w.rng.state() == rng.state()
+				same = same and w.offer == want and w.rng.state() == twin.rng.state()
 			else:
 				after += w.offer.count("swift")
 	_expect(out, "swift is never offered before night %d" % from, before, 0)
@@ -2884,4 +2889,350 @@ static func _times(id: String, n: int) -> Array:
 	var out := []
 	for i in n:
 		out.append(id)
+	return out
+
+
+## The upgrades of a side that take one of its slots, in Config's order.
+static func _slotted(side: String) -> Array:
+	return Config.UPGRADES.keys().filter(func(id): return World.side(id) == side and World.takes_slot(id))
+
+
+## A world at its first dusk holding these upgrades (each at level 1), its offer drawn again for them.
+static func _holding(seed_value: int, upgrades: Array, night := 1):
+	var w = World.new(seed_value)
+	w.picks = upgrades.duplicate()
+	w.night = night
+	w._offer()
+	return w
+
+
+## A build with nothing left to offer: every slot of each side filled, each upgrade at its last level, and the
+## upgrades that take no slot too.
+static func _done_build() -> Array:
+	var done := []
+	for side in Config.BUILD.slots:
+		for id in _slotted(side).filter(func(i): return World.max_level(i) > 1).slice(0, Config.BUILD.slots[side]):
+			done.append_array(_times(id, World.max_level(id)))
+	for id in Config.UPGRADES:
+		if not World.takes_slot(id):
+			done.append_array(_times(id, World.max_level(id)))
+	return done
+
+
+## build less the last level of n of its upgrades: those n, and nothing else, can still be offered.
+static func _levels_short(build: Array, n: int) -> Array:
+	var out := build.duplicate()
+	for id in Config.UPGRADES:
+		if n > 0 and out.count(id) > 1:
+			out.erase(id)
+			n -= 1
+	return out
+
+
+## The build (Config.BUILD): a side holds only so many different upgrades. A full side is never offered a new one and
+## is still offered levels of what it holds; an upgrade with from_night takes no slot and is offered to a full side;
+## over whole runs of offers no offer repeats a card, is ever short of a card, or takes a side past its slots; a rare
+## card is drawn as often as its weight says. The table says what the screen and the rules need of it.
+static func _build() -> Array:
+	var out := []
+	var B: Dictionary = Config.BUILD
+	_expect(out, "each side the screen shows has slots, and no other does", B.slots.keys(), Looks.SIDES)
+	var rare: Array = Config.UPGRADES.keys().filter(func(id): return Config.UPGRADES[id].get("rare", false))
+	_expect(out, "some upgrades are rare, most are not", [rare.size() >= 2, rare.size() * 3 < Config.UPGRADES.size()], [true, true])
+	_expect(out, "a rare card is drawn less often than another, but is drawn", B.rare_weight > 0.0 and B.rare_weight < 1.0, true)
+	for id in Config.UPGRADES:
+		_expect(out, "upgrade %s is on a side that has slots" % id, B.slots.has(Config.UPGRADES[id].get("side", "")), true)
+		_expect(out, "the screen groups %s on the side the rules count it on" % id, Looks.side(id), World.side(id))
+		_expect(out, "%s takes a slot unless it comes only from a later night" % id, World.takes_slot(id), not Config.UPGRADES[id].has("from_night"))
+		_expect(out, "%s weighs what its row says" % id, World.weight(id), B.rare_weight if rare.has(id) else 1.0)
+	for side in B.slots:
+		_expect(out, "the %s side has fewer slots than upgrades that want one, so a build is a choice" % side, [B.slots[side] >= 1, B.slots[side] < _slotted(side).size()], [true, true])
+	for path in DirAccess.get_files_at("res://src/sim"):
+		if path.ends_with(".gd"):
+			_expect(out, "the simulation loads nothing from src/art (%s)" % path, FileAccess.get_file_as_string("res://src/sim/" + path).contains("res://src/art"), false)
+
+	# A full side: never a new upgrade of that side, still the next levels of what it holds, and new ones of the other.
+	for side in B.slots:
+		var other: String = B.slots.keys().filter(func(s): return s != side)[0]
+		var full: Array = _slotted(side).filter(func(id): return World.max_level(id) > 1).slice(0, B.slots[side])
+		_expect(out, "the scene can fill the %s side with upgrades that have a next level" % side, full.size(), B.slots[side])
+		var fresh := 0
+		var levels := 0
+		var others := 0
+		for seed_value in range(1, 201):
+			var w = _holding(seed_value, full)
+			_expect(out, "a keeper holding %d %s upgrades has that side full" % [full.size(), side], [w.slots_used(side), w.slots_used(other)], [B.slots[side], 0])
+			for id in w.offer:
+				if Config.FILLERS.has(id):
+					out.append("seed %d: a filler (%s) is offered while upgrades are left" % [seed_value, id])
+				elif World.side(id) == side and not full.has(id):
+					fresh += 1
+				elif World.side(id) == side:
+					levels += 1
+				else:
+					others += 1
+		_expect(out, "a full %s side is never offered a new upgrade (of 600 cards)" % side, fresh, 0)
+		_expect(out, "a full %s side is still offered levels of what it holds, and the other side new upgrades" % side, [levels > 50, others > 50], [true, true])
+		var w = _holding(1, full.slice(1))
+		_expect(out, "one short of full, the %s side can still be offered a new upgrade" % side, _slotted(side).filter(func(id): return not full.has(id)).all(w.can_offer), true)
+
+	# An upgrade that comes from a later night takes no slot: a full side is offered it and is no fuller for it.
+	var late: Array = Config.UPGRADES.keys().filter(func(id): return Config.UPGRADES[id].has("from_night"))
+	_expect(out, "some upgrade comes only from a later night", late.is_empty(), false)
+	for id in late:
+		var side: String = World.side(id)
+		var from: int = Config.UPGRADES[id].from_night
+		var full: Array = _slotted(side).slice(0, B.slots[side])
+		var seen := 0
+		for seed_value in range(1, 101):
+			seen += _holding(seed_value, full, from).offer.count(id)
+		_expect(out, "%s is offered to a full %s side from its night (some of 100 offers)" % [id, side], seen > 5, true)
+		var w = _holding(1, full, from)
+		_expect(out, "%s may be offered to a full side, not before its night" % id, [w.can_offer(id), _holding(1, full, from - 1).can_offer(id)], [true, false])
+		w.offer = [id]
+		_play(w, 1, "pick_1")
+		_expect(out, "%s taken, the %s side holds one more upgrade and no more slots are used" % [id, side], [w.level(id), w.slots_used(side)], [1, B.slots[side]])
+
+	# Whole runs of offers, a random card taken at each: every offer is full, repeats nothing, offers nothing that
+	# cannot be taken, and no side ever holds more than its slots.
+	var offers := 0
+	var filler_offers := 0
+	var per_night: int = 1 + Config.NIGHT.picks_at.size()
+	for seed_value in range(1, 61):
+		var w = World.new(seed_value)
+		var dice = SimRng.new(seed_value + 500)
+		var check := func(cards: Array) -> int:
+			var once := {}
+			for id in cards:
+				once[id] = true
+				if Config.UPGRADES.has(id) and not w.can_offer(id):
+					out.append("seed %d night %d: %s is offered, but cannot be taken (levels %d, slots used %d)" % [seed_value, w.night, id, w.level(id), w.slots_used(World.side(id))])
+			if once.size() != cards.size() or cards.size() != Config.NIGHT.offer_size:
+				out.append("seed %d night %d: an offer holds %d different cards of %d: %s" % [seed_value, w.night, once.size(), Config.NIGHT.offer_size, cards])
+			var fillers: Array = cards.filter(func(id): return Config.FILLERS.has(id))
+			if not fillers.is_empty() and cards.slice(cards.size() - fillers.size()) != fillers:
+				out.append("seed %d night %d: fillers come before upgrades in an offer: %s" % [seed_value, w.night, cards])
+			return dice.index(cards.size()) if seed_value % 2 == 0 else 0 # a random card, or always the first: a build done sooner
+		for i in per_night * 24:
+			w.play_offers(1, check)
+			offers += 1
+			filler_offers += 1 if w.offer.all(func(id): return Config.FILLERS.has(id)) else 0
+			for side in B.slots:
+				if w.slots_used(side) > B.slots[side]:
+					out.append("seed %d night %d: the %s side holds %d upgrades in %d slots" % [seed_value, w.night, side, w.slots_used(side), B.slots[side]])
+			for id in w.picks:
+				if Config.FILLERS.has(id) or w.level(id) > World.max_level(id):
+					out.append("seed %d night %d: the build holds %s %d times" % [seed_value, w.night, id, w.level(id)])
+		_expect(out, "seed %d: 24 nights of offers end on the dusk of night 25" % seed_value, [w.night, w.picks_done, w.phase], [25, 0, "pick"])
+	_expect(out, "the runs of offers reach builds with nothing left to offer", [offers, filler_offers > 0], [60 * per_night * 24, true])
+
+	# A rare card is drawn as often as its weight says: the first card of 4000 first offers, where every upgrade
+	# that may come on the first night is in the pool. Within a fifth of what the weights give (over three standard
+	# deviations of the count); with the weight ignored it comes out near 470.
+	var pool: Array = Config.UPGRADES.keys().filter(func(id): return World.offered_on(id, 1))
+	var weights := 0.0
+	var rare_weights := 0.0
+	for id in pool:
+		weights += B.rare_weight if rare.has(id) else 1.0 # from the table, not from World.weight: this is what holds it
+		rare_weights += B.rare_weight if rare.has(id) else 0.0
+	var draws := 4000
+	var want: float = draws * rare_weights / weights
+	var got := 0
+	var each := {}
+	for seed_value in range(1, draws + 1):
+		var first: String = World.new(seed_value).offer[0]
+		each[first] = each.get(first, 0) + 1
+		got += 1 if rare.has(first) else 0
+	if absf(got - want) > want * 0.2:
+		out.append("a rare card comes first in %d of %d first offers; its weight (%.2f against 1) says %.0f, give or take a fifth" % [got, draws, B.rare_weight, want])
+	_expect(out, "every upgrade of the first night comes first in some first offer", each.size(), pool.size())
+	return out
+
+
+## Fillers (Config.FILLERS): when the torch has fewer upgrades to offer than an offer holds, it fills the offer up
+## with them, after the upgrades; with nothing left the offer is all fillers and a dusk is never empty. A filler
+## taken does what its row says once, and is not part of the build.
+static func _fillers() -> Array:
+	var out := []
+	var known := ["name", "text", "fuel", "heal", "logs", "log_at"]
+	for id in Config.FILLERS:
+		var row: Dictionary = Config.FILLERS[id]
+		_expect(out, "filler %s has a name and a text, and is not also an upgrade" % id, [row.get("name", "") != "", row.get("text", "") != "", Config.UPGRADES.has(id)], [true, true, false])
+		_expect(out, "filler %s sets only keys the rules read" % id, row.keys().all(func(k): return known.has(k)), true)
+		_expect(out, "filler %s gives something" % id, row.get("fuel", 0.0) > 0.0 or row.get("heal", 0) > 0 or row.get("logs", 0) > 0, true)
+		_expect(out, "filler %s has its icon" % id, Sprites.SPRITES.has(Looks.ICON % id), true)
+	_expect(out, "there is a filler, so an offer is never empty", Config.FILLERS.is_empty(), false)
+	var done := _done_build()
+	var fills: int = mini(Config.NIGHT.offer_size, Config.FILLERS.size())
+	for seed_value in range(1, 41):
+		var w = _holding(seed_value, done, 30)
+		var once := {}
+		for id in w.offer:
+			once[id] = true
+		_expect(out, "seed %d: with nothing left to offer, the offer is fillers, each once, and the clock stops for it" % seed_value,
+			[w.offer.all(func(id): return Config.FILLERS.has(id)), w.offer.size(), once.size(), w.phase], [true, fills, fills, "pick"])
+	var w = _holding(1, _levels_short(done, 1), 30)
+	_expect(out, "with one upgrade left, the offer is that upgrade and then fillers", [Config.UPGRADES.has(w.offer[0]), w.can_offer(w.offer[0]), w.offer.size(), w.offer.slice(1).all(func(id): return Config.FILLERS.has(id))], [true, true, Config.NIGHT.offer_size, true])
+	# What each gives, from a hurt keeper and a low torch, and to the brim of a full one.
+	for id in Config.FILLERS:
+		var row: Dictionary = Config.FILLERS[id]
+		w = _holding(1, done, 30)
+		w.fuel = 20.0
+		w.player.hp = 1
+		w.logs = []
+		w.offer = [id]
+		var steps_before: int = w.steps
+		var told := _play(w, 1, "pick_1")
+		_expect(out, "filler %s taken: the night goes on, the build is as it was, and the screen is told" % id, [w.phase, w.picks, w.offer, told.has("took"), w.steps], ["night", done, [], true, steps_before + 1])
+		_expect(out, "filler %s gives the fuel its row says, now" % id, w.fuel, 20.0 + row.get("fuel", 0.0))
+		_expect(out, "filler %s heals the hearts its row says, now" % id, w.player.hp, 1 + row.get("heal", 0))
+		_expect(out, "filler %s drops the logs its row says" % id, w.logs.size(), row.get("logs", 0))
+		for l in w.logs:
+			_expect(out, "filler %s drops each log its log_at from the torch, on the field, out of the torch's reach" % id,
+				[snappedf(l.distance_to(Config.TORCH.pos), 0.001), Config.FIELD.has_point(l), l.distance_to(Config.TORCH.pos) > Config.TORCH.reach + Config.PLAYER.radius + Config.PLAYER.grab], [row.log_at, true, true])
+		if w.logs.size() > 1:
+			_expect(out, "filler %s drops its logs apart" % id, w.logs[0].distance_to(w.logs[1]) > Config.PLAYER.grab * 2.0, true)
+		w = _holding(1, done, 30)
+		w.fuel = w.max_fuel() - 1.0
+		w.player.hp = w.max_hp()
+		w.offer = [id]
+		_play(w, 1, "pick_1")
+		_expect(out, "filler %s fills neither the torch nor the keeper past full" % id, [w.fuel <= w.max_fuel(), w.player.hp], [true, w.max_hp()])
+	# A late start (begin_at) past a done build takes fillers on its way and still starts rested, the torch at its
+	# start share, no logs lying.
+	for slot in [1, 2, 3]:
+		w = World.new(4)
+		w.begin_at(30, slot)
+		_expect(out, "begin_at(30) with slot %d starts at that dusk, rested, the torch at its start share, no filler's logs lying" % slot,
+			[w.night, w.picks_done, w.phase, w.logs, w.player.hp, snappedf(w.fuel, 0.001)], [30, 0, "pick", [], w.max_hp(), snappedf(Config.TORCH.start_fuel * w.max_fuel() / Config.TORCH.max_fuel, 0.001)])
+		_expect(out, "begin_at(30) with slot %d leaves no side past its slots" % slot, Config.BUILD.slots.keys().all(func(side): return w.slots_used(side) <= Config.BUILD.slots[side]), true)
+	return out
+
+
+static func _press(w, action: String) -> void:
+	var f := InputFrame.new()
+	f.pressed[action] = true
+	w.step(f)
+
+
+## Rerolls (Config.BUILD.rerolls a run): "reroll" pressed while an offer is up draws it again, leaving out the cards
+## just shown wherever enough others exist, and uses one up; with none left, or outside the pick phase, it does
+## nothing at all (the rng is not touched); a new run has them all again. The bot never rerolls.
+static func _rerolls() -> Array:
+	var out := []
+	var most: int = Config.BUILD.rerolls
+	_expect(out, "a run has a couple of rerolls", most >= 1 and most <= 3, true)
+	var others_seen := 0
+	for seed_value in range(1, 101):
+		var w = World.new(seed_value)
+		_expect(out, "seed %d: a run starts with every reroll" % seed_value, [w.rerolls, w.can_reroll()], [most, true])
+		for n in most:
+			var shown: Array = w.offer.duplicate()
+			_press(w, "reroll")
+			var again: Array = w.offer.filter(func(id): return shown.has(id))
+			others_seen += w.offer.size() - again.size()
+			if not again.is_empty():
+				out.append("seed %d: reroll %d shows %s again (was %s, now %s), with %d other upgrades to draw" % [seed_value, n + 1, again, shown, w.offer, Config.UPGRADES.size() - shown.size()])
+			_expect(out, "seed %d: reroll %d costs one, keeps the offer up and full, and takes nothing" % [seed_value, n + 1],
+				[w.rerolls, w.phase, w.offer.size(), w.picks, w.steps], [most - n - 1, "pick", Config.NIGHT.offer_size, [], n + 1])
+		var shown: Array = w.offer.duplicate()
+		var state = w.rng.state()
+		_press(w, "reroll")
+		_expect(out, "seed %d: with none left a reroll does nothing: the same cards, the rng untouched" % seed_value, [w.rerolls, w.offer, w.rng.state(), w.can_reroll(), w.phase], [0, shown, state, false, "pick"])
+		_press(w, "pick_1")
+		_expect(out, "seed %d: a rerolled offer is taken like any other" % seed_value, [w.picks, w.phase], [[shown[0]], "night"])
+		state = w.rng.state()
+		w.rerolls = most
+		w.next_spawn = NEVER
+		w.next_wood = NEVER
+		w.next_berry = NEVER
+		w.surges_due = []
+		_press(w, "reroll")
+		_expect(out, "seed %d: outside the pick phase a reroll is ignored" % seed_value, [w.rerolls, w.offer, w.rng.state(), w.phase, w.can_reroll()], [most, [], state, "night", false])
+		w.rerolls = 0
+		w.reset()
+		_expect(out, "seed %d: a new run has every reroll again" % seed_value, w.rerolls, most)
+	_expect(out, "rerolls showed other cards", others_seen, 100 * most * Config.NIGHT.offer_size)
+	# Too few others: the cards just shown come back only to fill the offer, after the others.
+	var size: int = Config.NIGHT.offer_size
+	var w = _holding(1, _levels_short(_done_build(), size + 1), 30)
+	var left: Array = Config.UPGRADES.keys().filter(w.can_offer)
+	var shown: Array = w.offer.duplicate()
+	_expect(out, "the scene has one more upgrade to offer than an offer holds", [left.size(), shown.all(func(id): return left.has(id))], [size + 1, true])
+	_press(w, "reroll")
+	_expect(out, "with one other upgrade to draw, a reroll shows it first and fills the offer with cards just shown, no filler",
+		[shown.has(w.offer[0]), w.offer.size(), w.offer.slice(1).all(func(id): return shown.has(id)), w.rerolls], [false, size, true, most - 1])
+	# No other card at all: a reroll would only shuffle the same cards, so it is not taken and costs nothing.
+	w = _holding(1, _levels_short(_done_build(), size), 30)
+	shown = w.offer.duplicate()
+	_expect(out, "the scene has as many upgrades to offer as an offer holds", shown.all(func(id): return Config.UPGRADES.has(id)), true)
+	_press(w, "reroll")
+	_expect(out, "with no card but those shown, a reroll does nothing and costs nothing", [w.offer, w.rerolls, w.can_reroll()], [shown, most, false])
+	# Fewer upgrades than an offer holds: they stay, and the fillers beside them are others where there are others.
+	w = _holding(1, _levels_short(_done_build(), size - 1), 30)
+	shown = w.offer.duplicate()
+	_press(w, "reroll")
+	var fresh: int = mini(1, Config.FILLERS.size() - 1)
+	_expect(out, "with fewer upgrades than an offer holds, a reroll keeps them and draws other fillers where there are any",
+		[w.offer.slice(0, size - 1).all(func(id): return Config.UPGRADES.has(id) and shown.has(id)), w.offer.slice(size - 1).filter(func(id): return not shown.has(id)).size(), w.rerolls], [true, fresh, most - fresh])
+	# The bot plays its runs without one: the replay, the balance tool and the demo are what they are without rerolls.
+	for slot in [1, 2, 3]:
+		var run = World.new(slot + 20)
+		var bot = Bot.new(slot)
+		var pressed := 0
+		var offers := 0
+		for s in 60 * 150:
+			var f = bot.frame(run)
+			pressed += 1 if f.is_pressed("reroll") else 0
+			offers += 1 if run.phase == "pick" else 0
+			run.step(f)
+			if run.phase in ["out", "dead"]:
+				break
+		_expect(out, "the bot (slot %d) never rerolls: it met offers, pressed no reroll and has them all left" % slot, [offers >= 3, pressed, run.rerolls], [true, 0, most])
+	return out
+
+
+## The HUD's slots (Painter.tiles, Painter.empty_slots): each side's row is as long as its slots, the held upgrades
+## from the left, the rest empty; an upgrade that takes no slot has its tile past the row's last slot; no two overlap.
+static func _slot_tiles() -> Array:
+	var out := []
+	var B: Dictionary = Config.BUILD
+	var free: Array = Config.UPGRADES.keys().filter(func(id): return not World.takes_slot(id))
+	for held in [[], [_slotted("torch")[0]], _slotted("keeper").slice(0, B.slots.keeper) + free, _slotted("torch").slice(0, B.slots.torch) + _slotted("keeper").slice(0, 2) + free]:
+		var w = _night(LIT, held)
+		var tiles: Dictionary = Painter.tiles(w)
+		var empty: Array = Painter.empty_slots(w)
+		_expect(out, "holding %d upgrades, each has a tile" % held.size(), tiles.size(), held.size())
+		var rects := []
+		for row in Looks.SIDES.size():
+			var side: String = Looks.SIDES[row]
+			var filled: Array = held.filter(func(id): return World.side(id) == side and World.takes_slot(id))
+			var hollow: Array = empty.filter(func(s): return s[1] == side)
+			_expect(out, "holding %d upgrades, the %s side shows its slots: the filled and the empty make up all of them" % [held.size(), side], filled.size() + hollow.size(), B.slots[side])
+			var last_slot_end: float = Painter.HUD_PICKS.x + (B.slots[side] - 1) * Painter.TILE_STEP.x + Painter.TILE.x
+			for id in filled:
+				_expect(out, "%s sits in a slot of its row" % id, [tiles[id].x + Painter.TILE.x <= last_slot_end, tiles[id].y], [true, Painter.HUD_PICKS.y + row * Painter.TILE_STEP.y])
+			for s in hollow:
+				_expect(out, "an empty %s slot is in its row, right of the filled ones" % side, [s[0].y, s[0].x + Painter.TILE.x <= last_slot_end, filled.all(func(id): return tiles[id].x < s[0].x)], [Painter.HUD_PICKS.y + row * Painter.TILE_STEP.y, true, true])
+			for id in held.filter(func(i): return World.side(i) == side and not World.takes_slot(i)):
+				_expect(out, "%s, which takes no slot, is past its row's last slot" % id, tiles[id].x > last_slot_end, true)
+		for at in tiles.values() + empty.map(func(s): return s[0]):
+			rects.append(Rect2(at, Painter.TILE))
+		for i in rects.size():
+			for j in range(i + 1, rects.size()):
+				if rects[i].intersects(rects[j]):
+					out.append("holding %d upgrades, two HUD tiles overlap: %s and %s" % [held.size(), rects[i], rects[j]])
+			_expect(out, "holding %d upgrades, the HUD's panel is behind every tile" % held.size(), rects[i].end.y <= Painter.hud_bottom(w) and rects[i].end.x <= Painter.new(1).hud_right(w), true)
+	# The offer's box has the reroll button to fit under its cards and the HUD's two rows of slots above it: no
+	# card's words (any upgrade at any level for any keeper, any filler) take more lines than Ui.CARD_LINES.
+	var font := Ui.font(Ui.SMALL)
+	var texts := Config.FILLERS.values().map(func(row): return row.text)
+	for who in Config.CHARACTERS:
+		for id in Config.UPGRADES:
+			for n in range(1, World.max_level(id) + 1):
+				texts.append(World.upgrade(id, n, who).text)
+	for text in texts:
+		var lines: int = Ui.wrapped(font, text, Ui.CARD_TEXT_WIDTH).count("\n") + 1
+		if lines > Ui.CARD_LINES:
+			out.append("a card's words take %d lines (at most %d fit the offer under the HUD): %s" % [lines, Ui.CARD_LINES, text])
 	return out
