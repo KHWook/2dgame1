@@ -75,14 +75,13 @@ static func _builds() -> String:
 	for seed_value in range(1, BUILD_SEEDS + 1):
 		var w = World.new(seed_value)
 		var rng = SimRng.new(seed_value + 1000)
-		var taken := 0
-		while not w.offer.is_empty() and taken < per_night * BUILD_NIGHTS[-1]:
-			w._take(w.offer[rng.index(w.offer.size())])
-			taken += 1
+		for i in per_night * (BUILD_NIGHTS[-1] - 1) + 1: # every offer up to the last dusk, also once the torch has no card left
+			if not w.offer.is_empty():
+				w._take(w.offer[rng.index(w.offer.size())])
 			for n in BUILD_NIGHTS:
-				if taken == per_night * (n - 1) + 1:
+				if i == per_night * (n - 1):
 					held[n].append(w.picks.duplicate())
-			w.night = 1 + taken / per_night
+			w.night = 1 + (i + 1) / per_night
 			w._offer()
 	var rng = SimRng.new(7)
 	var parts := []
@@ -102,8 +101,10 @@ static func _builds() -> String:
 			var both := 0
 			for id in Config.UPGRADES:
 				both += mini(a.count(id), b.count(id))
-			share += float(both) / a.size()
-		parts.append("night %d: %d of %d levels held, two keepers share %.0f%% of them" % [n, runs[0].size(), pool, 100.0 * share / BUILD_PAIRS])
+			share += float(both) / maxi(1, a.size())
+		var sizes: Array = runs.map(func(r): return r.size())
+		sizes.sort()
+		parts.append("night %d: %d of %d levels held, two keepers share %.0f%% of them" % [n, sizes[sizes.size() / 2], pool, 100.0 * share / BUILD_PAIRS])
 	return "variety: builds at dusk, a random card at every offer over %d seeds: %s" % [BUILD_SEEDS, "; ".join(parts)]
 
 
