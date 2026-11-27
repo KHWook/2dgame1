@@ -3982,6 +3982,15 @@ static func _drummer() -> Array:
 	_expect(out, "a drummer beyond the field does not beat", told.has("beat"), false)
 	told = _play(w, int(Config.ENEMY.edge / T.speed / Config.STEP) + 3 + int(D.beat / Config.STEP))
 	_expect(out, "on the field it beats, and says so", told.has("beat"), true)
+	var gaps := []
+	var since := -1 # steps since the last beat heard here, -1 before the first
+	for i in roundi(D.beat / Config.STEP) * 5:
+		since += 1 if since >= 0 else 0
+		if _play(w, 1).has("beat"):
+			if since >= 0 and not gaps.has(since):
+				gaps.append(since)
+			since = 0
+	_expect(out, "it beats every drum.beat seconds, to the step", gaps, [roundi(D.beat / Config.STEP)])
 	_expect(out, "the drummer is weak itself: no tougher than a slime", T.hp <= Config.ENEMY_TYPES.slime.hp, true)
 	return out
 

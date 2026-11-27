@@ -421,11 +421,12 @@ func _spit(world) -> void:
 			world.events.append({ "kind": "spat", "pos": pos, "enemy": kind })
 
 
-## A drummer's beat, every drum.beat seconds once it is on the field: every other enemy within drum.radius of it
-## (drummers and decoys excepted) hears it, and walks faster until the next beat (step() reads drum).
+## A drummer's beat, every drum.beat seconds once it is on the field (to the nearest step: the count-down's last
+## crumb of a step is not waited for): every other enemy within drum.radius of it (drummers and decoys excepted)
+## hears it, and walks faster until the next beat (step() reads drum).
 func _drum(world) -> void:
 	move_t -= Config.STEP
-	if move_t > 0.0 or not Config.FIELD.has_point(pos):
+	if move_t > Config.STEP * 0.5 or not Config.FIELD.has_point(pos):
 		return
 	move_t = T.drum.beat
 	world.events.append({ "kind": "beat", "pos": pos, "enemy": kind })

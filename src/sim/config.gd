@@ -235,9 +235,9 @@ const ENEMY := {
 ## beside the lane, on the side away from the keeper.
 ## burns (the moth): reaching the flame it burns up and takes that much fuel with it (more at a tier: TIERS' smother);
 ## it smothers nothing, and one that dies on the way takes nothing.
-## spit (the spitter): it hunts the keeper but stops range pixels off; there, on the field, every so many seconds it
-## fixes a line at the keeper, puffs up for warn seconds, then spits a blob that flies speed pixels a second along the
-## line for reach pixels (or to the field's edge). A blob hurts a keeper its radius touches, and a blow destroys it
+## spit (the spitter): it hunts the keeper but stops range pixels off; there, on the field, every seconds after its
+## last spit it fixes a line at the keeper, puffs up for warn seconds (so a line every every + warn seconds), then
+## spits a blob that flies speed pixels a second along the line for reach pixels (or to the field's edge). A blob hurts a keeper its radius touches, and a blow destroys it
 ## (World.blobs).
 ## drum (the drummer; target "light"): it stands gap pixels outside the torch's light and beats every beat seconds;
 ## each beat, every other enemy within radius of it (drummers and decoys excepted) walks speed_mult times as fast
