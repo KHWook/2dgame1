@@ -3,6 +3,7 @@
 # ./verify --check          rules + selftest only (fast; the edit hook runs this)
 # ./verify --update-golden  re-record the golden on purpose, then add a docs/DECISIONS.md entry
 # ./verify --balance        bot over many seeds: how nights end (tuning aid)
+# ./verify --variety        how alike runs, builds and nights are (tuning aid)
 # --hook                    for Claude Code hooks: on failure print to stderr and exit 2
 cd "$(dirname "$0")"
 GODOT="${GODOT:-godot}"

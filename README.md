@@ -126,6 +126,7 @@ python3 -m http.server 8000 --directory build/web   # http://localhost:8000
 ```
 ./verify                  # 규칙 검사 + 자체 테스트 + 리플레이 (통과해야 완료)
 ./verify --balance        # 봇이 시드 20개에서 몇 번째 밤에 지는지 (--late: 10번째 밤부터, --char=ID 또는 --char=all)
+./verify --variety        # 판끼리, 빌드끼리, 밤의 박자가 얼마나 닮았는지
 ./verify --update-golden  # 게임플레이를 일부러 바꿨을 때 골든 리플레이 다시 기록
 ```
 

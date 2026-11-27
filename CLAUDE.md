@@ -8,7 +8,7 @@ left over from an earlier, larger concept (see `docs/DECISIONS.md`).
 Rules are enforced by code, not by this file: `docs/PRINCIPLES.md` explains each rule id that `tools/checks.gd` and the
 replay test report. Hooks run them for you (see `.claude/settings.json`).
 
-- Done = `./verify` passes. Show the output, not a claim. `./verify --balance` shows which night the bot falls on over 20 seeds.
+- Done = `./verify` passes. Show the output, not a claim. `./verify --balance` shows which night the bot falls on over 20 seeds; `./verify --variety` shows how alike runs, builds and nights are.
 - A new enemy kind, upgrade or pickup: a row in `src/sim/config.gd`, its sprites (`<kind>_a`, `<kind>_b` or `icon_<id>`) in `src/art/sprites.gd`, and a scene in `tools/rules_test.gd` that shows the rule doing what it says.
 - A change meant to alter gameplay: `./verify --update-golden`, then add an entry to `docs/DECISIONS.md`. Never make the golden match by editing it.
 - A mistake that happened twice becomes a rule in `tools/checks.gd` (with the fix in its message and a `bad`/`good` selftest pair), not a new line here.
