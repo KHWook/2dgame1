@@ -613,11 +613,11 @@ static func _bosses() -> Array:
 	for night in [every - 1, every, every * 2]:
 		var w = _night(DARK)
 		w.night = night
-		w.bosses_due = w._plan_bosses()
+		w._plan_night()
 		w.time = Config.NIGHT.length * Config.BOSS.at - Config.STEP * 0.5
 		var told := _play(w, 1)
 		var bosses: Array = w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.kind)
-		var want: Array = [] if night % every != 0 else [Config.BOSS.kinds[(night / every - 1) % Config.BOSS.kinds.size()]]
+		var want: Array = [] if night % every != 0 else [w.boss_order[(night / every - 1) % w.boss_order.size()]]
 		_expect(out, "night %d brings its boss partway through, and says so" % night, [bosses, told.has("boss")], [want, not want.is_empty()])
 	var w = _night(DARK)
 	var king = _add(w, "slime_king", Vector2(60.0, 0.0))
@@ -725,7 +725,7 @@ static func _patterns() -> Array:
 	# a boss's coming is told ahead, from the edge it comes from
 	w = _night(DARK)
 	w.night = Config.BOSS.every
-	w.bosses_due = w._plan_bosses()
+	w._plan_night()
 	w.time = Config.NIGHT.length * Config.BOSS.at - Config.BOSS.warn - Config.STEP * 0.5
 	told = []
 	var coming_at = null
@@ -773,7 +773,7 @@ static func _boss_nights() -> Array:
 	w.night = 12
 	w.player.hp = 1000
 	w.fuel = 1.0e6
-	w.bosses_due = w._plan_bosses()
+	w._plan_night()
 	var at: float = Config.NIGHT.length * Config.BOSS.at
 	w.time = at - Config.BOSS.warn - 1.0
 	var seen := [] # [kind of event, enemy, night time, pos]
@@ -1255,7 +1255,7 @@ const OMEN_SAYS := {
 	"dark_moon": { "light_mult": -1, "kinds": { "shade": 1 } },
 	"sultry": { "light_mult": 1, "kinds": { "moth": 1 } },
 }
-const OMEN_NIGHT := 5 # a night whose row has every kind an omen names (what leads out of the dark is counted)
+const OMEN_NIGHT := 5 # a night whose row has every kind an omen names
 const OMEN_SPAWNS := 3000
 
 
@@ -1818,7 +1818,7 @@ static func _tier_nights() -> Array:
 		_expect(out, "night %d: an enemy and those that come along with it are of one tier" % night, mixed, 0)
 	var w = _night(DARK)
 	w.night = 21
-	w.bosses_due = w._plan_bosses()
+	w._plan_night()
 	w.time = Config.NIGHT.length * Config.BOSS.at + Config.BOSS.apart * 2
 	_play(w, 2)
 	_expect(out, "bosses are tier 1 on a late night", w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.tier), [1, 1, 1])
@@ -3778,7 +3778,7 @@ static func _combined_rows() -> Array:
 	return out
 
 
-## Where an enemy is after steps, measured from where it was before them.
+## How far an enemy moves in steps.
 static func _went(w, e, steps: int) -> float:
 	var from: Vector2 = e.pos
 	_play(w, steps)
@@ -3787,7 +3787,7 @@ static func _went(w, e, steps: int) -> float:
 
 ## The moth (Config.ENEMY_TYPES.moth): it flies to the flame and burns up there, taking burns of the fuel (more at a
 ## tier) and nothing else: it smothers nothing and is no kill. One that dies on the way (to a blow, a spark, the ember
-## ring's scorch) takes nothing. It hurts no one. Nights 1 and 2 are as they were: no moth, no new kind.
+## ring's scorch) takes nothing. It hurts no one. Nights 1 and 2 have no moth and no new kind.
 static func _moth() -> Array:
 	var out := []
 	var M: Dictionary = Config.ENEMY_TYPES.moth
@@ -3804,14 +3804,12 @@ static func _moth() -> Array:
 			[moth.gone, moth.dead, w.enemies.size(), snappedf(plain.fuel - w.fuel, 0.001), told.count("burned")], [true, false, 0, snappedf(took, 0.001), 1])
 		_expect(out, "a tier %d moth burning up is no kill" % tier, [w.score, told.has("kill")], [0, false])
 	_expect(out, "a moth takes a fifth of a log", M.burns, Config.TORCH.log_fuel / 5.0)
-	# struck on the way
 	var plain = _night(DARK)
 	var w = _night(DARK)
 	var moth = _add(w, "moth", NEAR)
 	_play(plain, SWING)
 	var told := _play(w, SWING, "attack")
 	_expect(out, "a moth cut down on the way takes nothing, and is a kill", [moth.dead, told.has("burned"), snappedf(plain.fuel - w.fuel, 0.001), w.score], [true, false, 0.0, Config.SCORE.kill])
-	# a spark
 	plain = _night(DARK, ["spark"])
 	w = _night(DARK, ["spark"])
 	moth = Enemy.new("moth", Config.TORCH.pos + Vector2(-60.0, 0.0))
@@ -3819,7 +3817,6 @@ static func _moth() -> Array:
 	_play(plain, 150)
 	told = _play(w, 150)
 	_expect(out, "a moth the torch's spark burns on the way takes nothing", [moth.dead, told.has("burned"), snappedf(plain.fuel - w.fuel, 0.001)], [true, false, 0.0])
-	# the ember ring's scorch
 	var build := ["ember_ring", "warm_glow", "scorch"]
 	plain = _night(DARK, build)
 	w = _night(DARK, build)
@@ -3828,7 +3825,6 @@ static func _moth() -> Array:
 	_play(plain, 30)
 	told = _play(w, 30)
 	_expect(out, "a moth the ring's scorch finishes takes nothing", [moth.dead, told.has("burned"), snappedf(plain.fuel - w.fuel, 0.001)], [true, false, 0.0])
-	# harmless
 	w = _night(DARK)
 	moth = _add(w, "moth", Vector2.ZERO)
 	_play(w, 2)
@@ -3881,7 +3877,6 @@ static func _spitter() -> Array:
 		_expect(out, "the blob is gone (dodge %s)" % dodge, w.blobs.size(), 0)
 		if dodge:
 			_expect(out, "a blob that meets no one flies spit.reach and no further", [furthest <= S.reach + 0.01, furthest > S.reach - S.speed * Config.STEP * 1.5], [true, true])
-	# the field's edge
 	w = _night(Vector2.ZERO)
 	w.player.pos = Vector2(Config.FIELD.end.x - 6.0, Config.TORCH.pos.y)
 	toad = _add(w, "spitter", Vector2(-40.0, 0.0))
@@ -3893,14 +3888,12 @@ static func _spitter() -> Array:
 		for b in w.blobs:
 			past = maxf(past, b.pos.x - Config.FIELD.end.x)
 	_expect(out, "a blob dies at the field's edge", [w.blobs.size(), past <= 0.0], [0, true])
-	# a blow bursts it
 	for who in ["knight", "woodcutter", "mage"]:
 		w = _night(Vector2(-120.0, 60.0), [], who)
 		var at: Vector2 = w.player.pos + (Vector2(60.0, 0.0) if who == "mage" else NEAR)
 		w.blobs.append({ "pos": at, "dir": Vector2.LEFT, "left": 200.0, "radius": S.radius, "speed": 0.0 if who != "mage" else S.speed })
 		var told := _play(w, 40, "attack")
 		_expect(out, "the %s's blow bursts a blob before it hurts" % who, [w.blobs.size(), told.count("splat"), w.player.hp], [0, 1, w.stats.hp])
-	# never from beyond the field, nor from out of range
 	w = _night(Vector2.ZERO)
 	w.player.pos = Vector2(Config.FIELD.position.x + 30.0, Config.TORCH.pos.y)
 	toad = Enemy.new("spitter", Vector2(Config.FIELD.position.x - Config.ENEMY.edge, Config.TORCH.pos.y))
@@ -3916,7 +3909,6 @@ static func _spitter() -> Array:
 	toad.move_t = 0.0
 	_play(w, 1)
 	_expect(out, "the spitter does not spit from out of range", toad.move, "")
-	# killed while it puffs
 	w = _night(Vector2(-120.0, 60.0))
 	toad = _add(w, "spitter", Vector2(S.range - 10.0, 0.0))
 	toad.move_t = 0.0
@@ -3982,7 +3974,6 @@ static func _drummer() -> Array:
 	_expect(out, "a slime within drum.radius walks speed_mult times as fast", snappedf(went[[1, 30.0]] / went[[0, 30.0]], 0.01), snappedf(D.speed_mult, 0.01))
 	_expect(out, "a slime beyond drum.radius walks as it always does", snappedf(went[[1, D.radius + 10.0]] / went[[0, 30.0]], 0.01), 1.0)
 	_expect(out, "two drummers speed it no more than one", snappedf(went[[2, 30.0]] / went[[1, 30.0]], 0.01), 1.0)
-	# beyond the field it does not beat
 	w = _night(Vector2(0.0, 100.0))
 	imp = Enemy.new("drummer", Vector2(Config.FIELD.end.x + Config.ENEMY.edge, Config.TORCH.pos.y))
 	imp.move_t = 0.0
@@ -4055,7 +4046,6 @@ static func _chief() -> Array:
 		_expect(out, "the chief has hurt no one while it paws (dodge %s)" % dodge, [chief.move, w.player.hp], ["warn", Config.PLAYER.hp])
 		_play(w, int(210.0 / C.speed / Config.STEP), "", "up" if dodge else "")
 		_expect(out, "its charge hurts a keeper who stayed in its lane, and misses one who left it (dodge %s)" % dodge, w.player.hp, Config.PLAYER.hp - (0 if dodge else 1))
-	# logs on its line
 	w = _night(Vector2(-150.0, 80.0))
 	w.fuel = 1.0e6
 	w.player.pos = Vector2(Config.FIELD.position.x + 4.0, Config.TORCH.pos.y + 80.0)
@@ -4079,7 +4069,6 @@ static func _chief() -> Array:
 	_expect(out, "a pushed log slides: it never moves further in a step than the charge does", jump <= C.speed * Config.STEP * 1.5, true)
 	_expect(out, "no log stays under the charging chief", close >= T.radius + C.plough - 0.01, true)
 	_expect(out, "every pushed log is still on the field", w.logs.all(func(l): return Config.FIELD.has_point(l)), true)
-	# a carried log
 	for kind in ["boar_chief", "boar"]:
 		w = _night(Vector2(-150.0, 80.0), [], "woodcutter")
 		w.fuel = 1.0e6
@@ -4094,7 +4083,6 @@ static func _chief() -> Array:
 		if dropped:
 			_expect(out, "the logs knocked out of its arms land beside the lane, out of its reach, on the field",
 				w.logs.all(func(l): return absf((l - runner.pos).dot(runner.aim.orthogonal())) >= runner.lane_half() and l.distance_to(w.player.pos) > w.stats.grab and Config.FIELD.has_point(l)), true)
-	# the torch's spot
 	var keep: float = Config.TORCH.reach + T.radius + C.torch_gap
 	w = _night(Vector2(120.0, 0.0))
 	w.fuel = 1.0e6
@@ -4126,7 +4114,6 @@ static func _chief() -> Array:
 	chief.move_t = 0.0
 	told = _play(w, 20)
 	_expect(out, "standing by the torch with the keeper beyond it, the chief does not charge through: it walks", [told.has("warn"), chief.move], [false, ""])
-	# what kind of boss it is
 	w = _night(DARK)
 	chief = _add(w, "boar_chief", Vector2(60.0, 0.0))
 	chief.move_t = NEVER
@@ -4265,7 +4252,7 @@ static func _fair() -> Array:
 
 
 ## The arrow for a boss or a pack on its way (Painter.coming_arrow) is drawn clear of the HUD's panels wherever it
-## comes from: along the top edge it sits under the panel it would have been hidden by, elsewhere where it always was.
+## comes from: along the top edge it sits below the panel that would hide it; elsewhere it stays on its edge.
 static func _coming_arrow() -> Array:
 	var out := []
 	var painter = Painter.new(1)

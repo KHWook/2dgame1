@@ -48,7 +48,7 @@ var move := "" # a pattern: "" (walking), "warn" (about to strike), "air" (the k
 var move_t := 0.0 # time left in this part of the pattern, or, walking, until the next strike
 var move_from := Vector2.ZERO # where the leap took off
 var move_to := Vector2.ZERO # where it lands, or where the rush goes, or where a charge would end
-var pattern := "" # which pattern its row gives it (PATTERNS), "" for none: asked once, not on every step of a crowd
+var pattern := "" # which pattern its row gives it (PATTERNS), "" for none
 var aim := Vector2.ZERO # the way a charger charges or a spitter spits, fixed when it starts to warn
 var run := 0.0 # how far the charge lined up or under way goes: charge.dist, or less where the torch is in the way
 var runs_left := 0 # a charger's charges still to come in this set, the one under way included
@@ -127,7 +127,7 @@ func step(world) -> void:
 	if move == "lunge" and at_torch:
 		move = "stay"
 		move_t = T.lunge.stay
-	if at_torch and T.has("burns"): # a moth in the flame: it is gone (not killed), and so is some of the fuel
+	if at_torch and T.has("burns"): # burning up is no kill: gone, not dead
 		at_torch = false
 		gone = true
 		world.fuel -= T.burns * T.get("smother", 1.0)
@@ -136,7 +136,7 @@ func step(world) -> void:
 	var goal: Vector2 = _goal(world)
 	var to: Vector2 = (goal - pos).normalized()
 	var speed: float = T.speed * (world.mod("glow_slow", 1.0) if world.in_light(pos) else T.get("dark_speed_mult", 1.0))
-	if drum != null: # a drummer's beat carries it until the next one, or until the drummer is gone
+	if drum != null:
 		drum_t -= Config.STEP
 		if drum_t <= 0.0 or drum.dead or drum.gone:
 			drum = null
@@ -150,9 +150,9 @@ func step(world) -> void:
 		knock = Vector2.ZERO
 	# Most smotherers stop at the torch; the shade lord stops only while it warns and while it stays, so it can leave.
 	var halt: bool = move in ["warn", "stay", "rest", "split"] or (at_torch and pattern != "lunge")
-	if pattern == "spit": # a spitter stands off
+	if pattern == "spit":
 		halt = halt or spits_from_here(world)
-	elif pattern == "drum": # a drummer stands at its place on the edge of the light
+	elif pattern == "drum":
 		halt = halt or pos.distance_to(goal) < E.drum_slack
 	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to * speed)
 	knock *= KNOCK_KEEP
@@ -315,7 +315,7 @@ func fade(world) -> void:
 ## moves it and stops it at the field's edge) and stands dazed for charge.rest, when it is easy to hit.
 ## A charger with charge.count (the boar chief) charges that many times in a row, charge.rest between them and each
 ## lined up afresh, and after the last stands winded for charge.winded. Its line stops short of the torch (_run()),
-## and a line the torch leaves too short to be a charge (shorter than its lane is wide) is not started.
+## and a line the torch leaves too short to be a charge (shorter than lane_half()) is not started.
 func _charge(world) -> void:
 	var C: Dictionary = T.charge
 	var p = world.player
@@ -347,7 +347,7 @@ func _charge(world) -> void:
 			move_t -= Config.STEP
 			if move_t <= 0.0:
 				move = ""
-				move_t = C.every if runs_left <= 0 else 0.0 # the next charge of a set is lined up at once
+				move_t = C.every if runs_left <= 0 else 0.0
 
 
 ## How far a charge along dir from here goes: charge.dist, or, for a charger with charge.torch_gap, only up to
@@ -366,7 +366,7 @@ func _run(dir: Vector2) -> float:
 	return clampf(along - sqrt(keep * keep - off2), 0.0, C.dist)
 
 
-## The charge is over. Dazed for charge.rest; after the last of a set, where the row says so, winded for longer.
+## The charge is over: it stands for rest_time().
 func _daze() -> void:
 	runs_left -= 1
 	move = "rest"

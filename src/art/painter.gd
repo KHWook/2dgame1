@@ -238,6 +238,8 @@ const MARK_SHADOW := Color("#0b0814") # the falling king's shadow
 const MARK_SHADOW_MOST := 0.55 # how dark it is as the king lands
 const MARK_SHADOW_FROM := 0.25 # share of the shock the shadow starts at
 const MARK_DASHES := 12 # dashes round the ring
+const DASH := 0.55 # the share of its place on a ring that a dash covers
+const DASH_LINES := 3 # straight lines each dash is drawn as
 const MARK_TURN := 1.5 # radians per second the ring turns
 const MARK_CRACKS := 6 # cracks running out from the middle
 const MARK_CRACK_KINKS := 3 # bends in each
@@ -261,7 +263,7 @@ const LANE_FAINT := 0.06 # how solid the band is the moment it is drawn
 const LANE_FULL := 0.15 # how solid the filled part is (and the whole band while it charges)
 const LANE_EDGE := 0.6 # its outline, blinking down to 0.7 of this
 const LANE_ROUND := 8 # points on each round end
-const LANE_LEAST := 4.0 # a band shorter than this is not drawn: its two round ends run together, which cannot be filled
+const LANE_LEAST := 4.0 # pixels: the shortest band the engine can fill (charge_band)
 const CHEVRON_GAP := 12.0 # pixels between chevrons along the band
 const CHEVRON_SIZE := 3.0 # pixels from a chevron's tip back to its arms
 const CHEVRON_SPEED := [12.0, 70.0] # pixels a second they slide: as the wind-up starts, as it ends
@@ -277,15 +279,14 @@ const PANT_STEPS := 6 # simulation steps per frame of a winded boss's breath (Ef
 ## A spitter about to spit: it flashes, a dashed line runs from it along its line as far as the blob will fly, and
 ## the blob swells at its mouth; then the blob flies, drawn as the disc it hurts with (its radius), a pale middle and
 ## drips behind it. It glows, so the night does not dim it.
-const SPIT := Color("#9be8ff")
-const SPIT_DARK := Color("#3f8fd0")
+const SPIT := Effects.SPIT
+const SPIT_DARK := Effects.SPIT_DARK
 const SPIT_DRIPS := [[3.0, 0.8], [6.0, 0.55], [9.0, 0.3]] # [pixels behind it, how solid]
 ## A drummer: a dashed ring at its drum's reach, bright on each beat and faint between, and a mark hopping over each
 ## enemy that hears it (the "drummed" sprite), so you see whom it drives.
 const DRUM := Color("#ffd84a")
 const DRUM_RING := [0.75, 0.25] # how solid the ring is: on the beat, between beats
 const DRUM_DASHES := 12 # dashes round the ring
-const DRUM_DASH_LINES := 3 # straight lines each dash is drawn as
 const DRUMMED_AT := Vector2(-2.0, -15.0) # the mark's top-left, from the enemy's position
 ## A boss on its way: Config.BOSS.warn seconds ahead, the edge it comes from glows and an arrow there points out at it.
 const COMING_BAND := Vector2(70.0, 4.0) # along the edge, into the field
@@ -510,14 +511,14 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		if dark and not k.eyes.is_empty(): # its eyes, on the frame and facing it is drawn in
 			var eyes: Texture2D = k.eyes[_frame[i]][_mirror[i]]
 			c.draw_texture(eyes, (at + _paw(w, e)).round(), Color(k.eye_colour, night))
-		if e.spent(): # dazed after its charge, or winded after its set of them
+		if e.spent():
 			var stars := Sprites.texture("dazed", (w.steps / DAZED_STEPS) % 2 == 1)
 			var over: Vector2 = e.pos + DAZED_AT * (e.T.radius / Config.ENEMY_TYPES.boar.radius) # higher over a bigger body
-			c.draw_texture(stars, Vector2(over.x, maxf(over.y, 1.0)).round()) # on screen at the top edge too
+			c.draw_texture(stars, Vector2(over.x, maxf(over.y, 1.0)).round())
 			var puff: int = (w.steps / PANT_STEPS) % (Effects.POOF.size() + 2)
-			if e.T.charge.has("winded") and puff < Effects.POOF.size(): # it pants: breath at its snout, which shows in the dark
+			if e.T.charge.has("winded") and puff < Effects.POOF.size():
 				c.draw_texture(Sprites.texture(Effects.POOF[puff]), (e.pos + Vector2(signf(e.aim.x) * (e.T.radius + 5.0), 1.0) - Effects.POOF_ANCHOR).round(), Color(1.0, 1.0, 1.0, 0.7))
-		if e.drum != null: # a drummer drives it: the mark hops on the beat
+		if e.drum != null:
 			c.draw_texture(Sprites.texture("drummed"), (e.pos + DRUMMED_AT + Vector2(0.0, -1.0 if e.drum_t > e.drum.T.drum.beat * 0.5 else 0.0)).round())
 	_dash_bar(c, w)
 	_ember(c, w)
@@ -943,30 +944,26 @@ func _telegraphs(c: CanvasItem, w) -> void:
 				var at: Vector2 = Config.TORCH.pos + (e.pos - Config.TORCH.pos).rotated(TAU * (i + 1) / (e.T.split.count + 1) * k)
 				_wisp(c, w, at, e.T.radius * (0.6 + 0.6 * k), Color(smoke, 0.5 + 0.4 * k), i)
 			_dashed_ring(c, e.pos.round(), e.T.radius + 4.0 + 4.0 * k, w.steps * Config.STEP * MARK_TURN, Color(MARK_RING, 0.9 if blink else 0.55))
-		elif e.T.has("spit") and e.move == "warn": # its line, and the blob swelling at its mouth
+		elif e.T.has("spit") and e.move == "warn":
 			var k: float = clampf(1.0 - e.move_t / e.T.spit.warn, 0.0, 1.0)
 			_dashes(c, e.pos, e.move_to, Color(SPIT, 0.95 if blink else 0.55))
 			c.draw_circle((e.pos + e.aim * e.T.radius).round(), 1.0 + e.T.spit.radius * k, Color(SPIT, 0.9))
-		elif e.T.has("drum") and Config.FIELD.has_point(e.pos): # how far its drum reaches, bright on the beat
+		elif e.T.has("drum") and Config.FIELD.has_point(e.pos):
 			var since: float = 1.0 - clampf(e.move_t / e.T.drum.beat, 0.0, 1.0)
 			var ring := Color(DRUM, lerpf(DRUM_RING[0], DRUM_RING[1], minf(1.0, since * 3.0)))
-			for i in DRUM_DASHES * DRUM_DASH_LINES: # the dashes of every drummer's ring go out as one draw (below)
-				var a: float = TAU * (i / DRUM_DASH_LINES + 0.55 * (i % DRUM_DASH_LINES) / DRUM_DASH_LINES) / DRUM_DASHES
-				var b: float = a + TAU * 0.55 / DRUM_DASH_LINES / DRUM_DASHES
-				drum_lines.append(e.pos.round() + Vector2.from_angle(a) * e.T.drum.radius)
-				drum_lines.append(e.pos.round() + Vector2.from_angle(b) * e.T.drum.radius)
+			drum_lines.append_array(ring_dashes(e.pos.round(), e.T.drum.radius, 0.0, DRUM_DASHES))
+			for i in DRUM_DASHES * DASH_LINES:
 				drum_colours.append(ring)
 		elif e.T.has("charge") and e.move in ["warn", "charge"]:
 			_charge_mark(c, w, e, blink)
-		elif e.T.has("charge") and e.move == "rest" and skid_frame(e) >= 0: # a skid puff where it stopped
+		elif e.T.has("charge") and e.move == "rest" and skid_frame(e) >= 0:
 			c.draw_texture(Sprites.texture(Effects.POOF[skid_frame(e)]), (e.pos + e.aim * 4.0 - Effects.POOF_ANCHOR).round(), Color(1.0, 0.92, 0.8, 0.8))
 	if not drum_lines.is_empty():
 		c.draw_multiline_colors(drum_lines, drum_colours, 1.0)
 
 
 ## Which frame of the skid puff (Effects.POOF) shows where a charger has just stopped: from the first as its stop
-## begins (however long that stop is: a boar's daze, the chief's short stops and its long winded one), -1 once the
-## puff has cleared.
+## begins, -1 once the puff has cleared.
 static func skid_frame(e) -> int:
 	var since: int = roundi((e.rest_time() - e.move_t) / Config.STEP)
 	return since / Effects.POOF_STEPS if since >= 0 and since < Effects.POOF.size() * Effects.POOF_STEPS else -1
@@ -1006,10 +1003,19 @@ func _landing_mark(c: CanvasItem, w, e) -> void:
 
 ## A ring of dashes at radius r round at, turned by turn radians.
 static func _dashed_ring(c: CanvasItem, at: Vector2, r: float, turn: float, colour: Color) -> void:
-	var step := TAU / MARK_DASHES
-	for i in MARK_DASHES:
-		var a0 := turn + i * step
-		c.draw_arc(at, r, a0, a0 + step * 0.55, 4, colour, 1.0)
+	c.draw_multiline(ring_dashes(at, r, turn, MARK_DASHES), colour, 1.0)
+
+
+## The dashes of a ring at radius r round at, turned by turn radians, as the ends of its lines (draw_multiline): each
+## of the dashes covers DASH of its place on the ring, in DASH_LINES straight lines.
+static func ring_dashes(at: Vector2, r: float, turn: float, dashes: int) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var line := TAU / dashes * DASH / DASH_LINES
+	for i in dashes * DASH_LINES:
+		var a := turn + TAU / dashes * (i / DASH_LINES) + line * (i % DASH_LINES)
+		out.append(at + Vector2.from_angle(a) * r)
+		out.append(at + Vector2.from_angle(a + line) * r)
+	return out
 
 
 ## A little turning ring of smoke pixels at at, radius r.
@@ -1025,13 +1031,14 @@ static func _wisp(c: CanvasItem, w, at: Vector2, r: float, colour: Color, i: int
 ## as the wind-up runs out; chevrons sliding along it toward the end; dust at its feet while it paws, and behind it
 ## while it charges.
 func _charge_mark(c: CanvasItem, w, e, blink: bool) -> void:
-	if e.pos.distance_to(e.charge_end()) < LANE_LEAST: # the last steps of a charge: no band left to draw
-		return
 	var band := charge_band(e)
+	if band.is_empty():
+		return
 	var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
 	c.draw_colored_polygon(band, Color(LANE, LANE_FAINT))
-	if k > 0.0:
-		c.draw_colored_polygon(charge_band(e, k), Color(LANE, LANE_FULL - LANE_FAINT))
+	var filled := charge_band(e, k)
+	if not filled.is_empty():
+		c.draw_colored_polygon(filled, Color(LANE, LANE_FULL - LANE_FAINT))
 	band.append(band[0])
 	c.draw_polyline(band, Color(LANE, LANE_EDGE if blink else LANE_EDGE * 0.7), 1.0)
 	var side: Vector2 = e.aim.orthogonal()
@@ -1075,13 +1082,15 @@ static func chevrons(e) -> PackedVector2Array:
 
 ## Where a charger's charge hurts, as a polygon: a band from it to Enemy.charge_end(), Enemy.lane_half() each side
 ## of its line, round at both ends (every point within lane_half of the line it runs). share: only the first part of
-## it, from the charger, for the fill that grows as the wind-up runs out.
+## it, from the charger, for the fill that grows as the wind-up runs out. Empty for a band shorter than LANE_LEAST.
 static func charge_band(e, share := 1.0) -> PackedVector2Array:
 	var r: float = e.lane_half()
 	var a: Vector2 = e.pos
 	var b: Vector2 = a.lerp(e.charge_end(), share)
 	var along: Vector2 = e.aim
 	var out := PackedVector2Array()
+	if a.distance_to(b) < LANE_LEAST:
+		return out
 	for i in LANE_ROUND + 1: # round the far end, from one side to the other
 		out.append(b + along.rotated(-PI / 2.0 + PI * i / LANE_ROUND) * r)
 	for i in LANE_ROUND + 1: # and back round the charger
@@ -1166,7 +1175,7 @@ static func coming_out(f: Vector2) -> Vector2:
 
 ## Where the mark for something coming from f is put: on that edge of the view, or, where a HUD panel (hud_rects)
 ## would lie over its arrow, moved in from the edge to just past that panel, so the arrow, its band and its smoke
-## show clear of the HUD wherever it comes from (the panels lie along the top: a third of what comes, comes there).
+## show clear of the HUD wherever it comes from.
 func coming_spot(w, f: Vector2) -> Vector2:
 	var out := coming_out(f)
 	var spot: Vector2 = f.clamp(Vector2.ZERO, VIEW)

@@ -19,7 +19,7 @@
 ## taken from the offer (an upgrade or a filler); "wave" { pos, radius, ring } for enemies thrown back from pos out to
 ## radius (ring: the ring the screen throws out there, one of Effects.RINGS); "burned" { pos, enemy, tier } for a moth
 ## burning up in the flame, "spat" { pos, enemy } for a spitter letting its blob go and "beat" { pos, enemy } for a
-## drummer's beat (src/sim/enemy.gd); "splat" { pos, hurt } where a blob bursts on the keeper (hurt) or under a blow.
+## drummer's beat (src/sim/enemy.gd); "splat" { pos, hurt } where a blob bursts on the keeper (hurt) or under a blow or an ember.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -433,8 +433,8 @@ func step(inp) -> void:
 			continue
 		e.step(self)
 		if not e.T.get("harmless", false) and e.touches(player) and player.hurt(e.pos):
-			if e.move == "charge" and e.T.charge.has("plough"): # the chief's charge knocks the logs out of its arms:
-				var across: Vector2 = e.aim.orthogonal() # they land beside its lane, on the far side from the keeper
+			if e.move == "charge" and e.T.charge.get("drops_logs", false):
+				var across: Vector2 = e.aim.orthogonal() # beside the lane, on the side away from the keeper
 				if across.dot(player.pos - e.pos) > 0.0:
 					across = -across
 				for i in player.held:
@@ -847,7 +847,7 @@ func melee(p) -> void:
 			_pop(b, false)
 
 
-## A spitter's blob bursts where it is: on the keeper (hurt), or under a blow.
+## A spitter's blob bursts where it is: on the keeper (hurt), or under a blow or an ember.
 func _pop(b: Dictionary, hurt: bool) -> void:
 	b.left = 0.0
 	events.append({ "kind": "splat", "pos": b.pos, "hurt": hurt })
@@ -904,7 +904,7 @@ func _bolts() -> void:
 		var from: Vector2 = b.pos
 		b.pos = from + b.dir * go
 		b.left -= go
-		for s in blobs: # an ember bursts a spitter's blob on its way, and flies on
+		for s in blobs: # bursting a blob does not stop the ember
 			if s.left > 0.0 and in_bolt(from, b.pos, b.radius, s.pos, s.radius):
 				_pop(s, false)
 		for e in enemies:
@@ -1079,7 +1079,7 @@ func _plan_night() -> void:
 	next_berry = Config.BERRY.first * mod("berry_mult", 1.0)
 	if _boss_night() and boss_order.is_empty():
 		boss_order = Config.BOSS.kinds.duplicate()
-		for i in range(boss_order.size() - 1, 0, -1): # a shuffle: each place from the last takes one of those up to it
+		for i in range(boss_order.size() - 1, 0, -1): # Fisher-Yates on the run's rng: Array.shuffle() uses Godot's global one
 			var j: int = rng.index(i + 1)
 			var kind: String = boss_order[i]
 			boss_order[i] = boss_order[j]
@@ -1177,7 +1177,7 @@ func _boss_night() -> bool:
 
 ## Which bosses come tonight, in the order they come ([] on a night without): Config.BOSS.counts of them, the kinds
 ## taking turns from boss night to boss night and, on a night with several, from one boss to the next (so they are
-## different kinds), in this run's order (boss_order; the table's own while that is not drawn yet).
+## different kinds), in this run's order (boss_order).
 func boss_kinds() -> Array:
 	if not _boss_night():
 		return []
@@ -1185,10 +1185,9 @@ func boss_kinds() -> Array:
 	for r in Config.BOSS.counts:
 		if night >= r.from:
 			count = r.count
-	var kinds: Array = boss_order if not boss_order.is_empty() else Config.BOSS.kinds
 	var out := []
 	for i in count:
-		out.append(kinds[(night / Config.BOSS.every - 1 + i) % kinds.size()])
+		out.append(boss_order[(night / Config.BOSS.every - 1 + i) % boss_order.size()])
 	return out
 
 

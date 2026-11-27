@@ -89,8 +89,8 @@ const NIGHT := { "length": 60.0, "picks_at": [0.5], "offer_size": 3, "first_spaw
 ## The nights, one row each. burn: fuel the torch uses per second. spawn: seconds between enemies at dusk and
 ## just before dawn. who: each enemy kind's share of them; a kind first shows up on the night whose row first names
 ## it. with (optional): kinds that come along with a kind, from the same spot on the edge (a thief guarded by a shade,
-## a boar with bats at its side, moths in twos and threes); each must be one the row names. Nights after the last row use it again, each one
-## harder than the one before by LATER_NIGHTS.
+## a boar with bats at its side, moths in twos and threes); each must be one the row names. Nights after the last
+## row use it again, each one harder than the one before by LATER_NIGHTS.
 const NIGHTS := [
 	{ "burn": 2.0, "spawn": [3.0, 2.0], "who": { "slime": 0.8, "bat": 0.2 } },
 	{ "burn": 2.4, "spawn": [2.5, 1.7], "who": { "slime": 0.6, "bat": 0.2, "thief": 0.2 } },
@@ -125,7 +125,7 @@ const TIERS := [
 ## Which tiers come when. From the night of a row (and until the next row's), each enemy that comes out of the dark,
 ## with those that come along with it, is of one tier, rolled over shares (tier 1, tier 2, tier 3). Before the
 ## first row every enemy is tier 1 and nothing is rolled, so those nights are the same as before tiers. The first
-## row is early and small on purpose: most runs end before the eighth night, and should still meet a stronger enemy.
+## row is early and small so a run that ends young still meets a stronger enemy.
 const TIER_NIGHTS := [
 	{ "from": 5, "shares": [0.9, 0.1, 0.0] },
 	{ "from": 8, "shares": [0.85, 0.15, 0.0] },
@@ -202,7 +202,7 @@ const ENEMY := {
 	"with_gap": 10.0, # pixels apart along the edge that a kind and those coming with it (NIGHTS with) appear
 	"orbit_lead": 0.4, # radians ahead on its circle a boss that circles the light aims for: it goes round, not in
 	"orbit_top": 64.0, # it keeps this far below the top of the field, where the HUD would hide it
-	"drum_slack": 2.0, # a drummer this close to its place on the edge of the light stands still
+	"drum_slack": 2.0, # pixels: a drummer this close to its place on the edge of the light stands still
 }
 
 ## Enemy kinds: add a row to add an enemy (and draw <kind>_a and <kind>_b in src/art/sprites.gd).
@@ -231,8 +231,8 @@ const ENEMY := {
 ## rest between them, each lined up afresh; after the last it stands winded for winded seconds, which is when to cut
 ## it. torch_gap: its line stops that far short of where it would touch the torch, so no charge goes through the
 ## torch's spot. plough: a log within that many pixels of its body while it charges is pushed along and aside (it
-## slides, it is not broken), and a keeper the charge hurts loses hold of the logs it carries: they land beside the
-## lane, on its far side.
+## slides, it is not broken). drops_logs: a keeper the charge hurts loses hold of the logs it carries, and they land
+## beside the lane, on the side away from the keeper.
 ## burns (the moth): reaching the flame it burns up and takes that much fuel with it (more at a tier: TIERS' smother);
 ## it smothers nothing, and one that dies on the way takes nothing.
 ## spit (the spitter): it hunts the keeper but stops range pixels off; there, on the field, every so many seconds it
@@ -271,7 +271,7 @@ const ENEMY_TYPES := {
 		"hp": 20, "speed": 20.0, "radius": 11.0, "target": "player",
 		"boss": true, "name": "멧돼지 대장", "heavy": 0.15, "summon": { "kind": "boar", "every": 9.0, "count": 1 }, "score": 150,
 		"charge": { "every": 4.0, "range": 400.0, "warn": 1.1, "speed": 190.0, "dist": 260.0, "rest": 0.5,
-			"count": 3, "winded": 3.5, "torch_gap": 10.0, "plough": 4.0 },
+			"count": 3, "winded": 3.5, "torch_gap": 10.0, "plough": 4.0, "drops_logs": true },
 	},
 }
 

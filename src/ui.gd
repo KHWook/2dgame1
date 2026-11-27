@@ -1092,7 +1092,7 @@ func _behind(w, r: Rect2) -> float:
 	var near := r.grow(BEHIND_MARGIN)
 	if near.has_point(w.player.pos):
 		return BEHIND
-	for b in w.bosses_coming() + w.surges_coming(): # the arrow for what is coming shows through it
+	for b in w.bosses_coming() + w.surges_coming():
 		if near.has_point(painter.coming_arrow(w, b.from)[0]):
 			return BEHIND
 	var solid := 1.0
