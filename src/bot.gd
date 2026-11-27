@@ -1,4 +1,6 @@
 ## A simple deterministic player for the replay test, balance runs and `--bot` demo runs: fights what is close, otherwise hauls logs.
+## It plays every character (Config.CHARACTERS): a swinger stands off and swings; a shooter keeps its distance and
+## shoots; one that can carry several logs picks up more on the way when the torch can wait.
 ## It reads the world and returns the InputFrame a player would produce; it never changes the world.
 extends RefCounted
 
@@ -12,6 +14,12 @@ const KEEP := 2.0 # how far outside a foe's touch the bot stands while it fights
 const DASH_FROM := 60.0 # with the dash upgrade, the bot dashes toward a goal at least this far away
 const HUNGRY := 2 # the bot goes for a berry at this hp or less; above it, hauling logs matters more
 const CLEAR_OF := 6.0 # how far past a marked landing's shock, or a charge's lane, the bot steps to be out of it
+const SHOOT_FROM := 70.0 # a shooter fights what comes this close
+const KITE := 46.0 # and backs off to keep it this far away
+const KITE_HOME := 0.6 # backing off leans this much toward the torch, so it does not back into a corner
+const SHOOT_DROP := 22.0 # a shooter carrying logs drops them to fight only what comes this close
+const STACK_NEAR := 60.0 # one that can carry more goes for another log this close, on its way to the torch
+const STACK_FUEL := 0.45 # while the torch holds at least this share of a full tank
 
 var pick := 1 # which offer slot this bot always takes
 
@@ -35,6 +43,7 @@ func frame(w) -> InputFrame:
 	var landing = _landing(w, p.pos)
 	var lane = _lane(w, p.pos)
 	var rush: bool = real.any(func(e): return e.T.has("lunge") and e.move in ["warn", "lunge"])
+	var shooter: bool = w.stats.attack == "shoot"
 	if landing != null:
 		# a leap is marked on it: step out of the shock sideways to the leap, on the torch's side (not into a fence)
 		var side: Vector2 = (landing.move_to - landing.pos).normalized().orthogonal()
@@ -56,6 +65,8 @@ func frame(w) -> InputFrame:
 			if out.dot(Config.TORCH.pos - p.pos) < 0.0:
 				out = -out
 		goal = on + out.normalized() * (_lane_width(lane) + CLEAR_OF)
+	elif shooter and foe != null and p.pos.distance_to(foe.pos) < (SHOOT_DROP if p.carrying else SHOOT_FROM):
+		goal = _kite(w, p, foe, f)
 	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE and foe.T.get("dark_proof", false) and not w.in_light(foe.pos):
 		pass # blows pass through it out here: walk back to the torch (the goal already) and fight it in the light
 	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE:
@@ -65,13 +76,15 @@ func frame(w) -> InputFrame:
 			f.pressed["attack"] = true # drop the log to fight
 		elif w.steps % SWING_EVERY == 0:
 			f.pressed["attack"] = true
+	elif smotherer != null and shooter and not p.carrying:
+		goal = _kite(w, p, smotherer, f) # shoot it off the torch from a step away
 	elif smotherer != null:
 		goal = smotherer.pos # something is on the torch: that comes before logs and berries
 	elif rush:
 		pass # the shade lord is about to rush the torch, where it can be cut: be there (the goal already)
 	elif not p.carrying and p.hp <= HUNGRY and not w.berries.is_empty():
 		goal = _nearest_point(p.pos, w.berries)
-	elif not p.carrying and not w.logs.is_empty():
+	elif p.held < w.stats.carry and not w.logs.is_empty() and (not p.carrying or _stack_more(w, p)):
 		goal = _nearest_point(p.pos, w.logs)
 		if goal == p.dropped:
 			goal += Vector2(Config.PLAYER.grab * 2.0, 0.0) # still standing on the log it put down: step off, then come back for it
@@ -86,6 +99,23 @@ func frame(w) -> InputFrame:
 	if d.y > DEADZONE: f.held["down"] = true
 	if d.y < -DEADZONE: f.held["up"] = true
 	return f
+
+
+## A shooter's fight with foe: shoot at it (World.aim turns the shot to the nearest), dropping what it carries first,
+## and keep KITE away, backing off toward the torch. Returns where to go.
+static func _kite(w, p, foe, f: InputFrame) -> Vector2:
+	var away: Vector2 = p.pos - foe.pos
+	var d := away.length()
+	f.pressed["attack"] = true # pressed while a shot is under way, it does nothing
+	if d >= KITE:
+		return p.pos if not p.carrying else Config.TORCH.pos
+	var home: Vector2 = (Config.TORCH.pos - p.pos).normalized() * KITE_HOME
+	return p.pos + ((away / maxf(d, 0.01)) + home).normalized() * (KITE - d + CLEAR_OF)
+
+
+## Whether one already carrying a log should pick up another (a nearby one, while the torch can wait).
+static func _stack_more(w, p) -> bool:
+	return p.pos.distance_to(_nearest_point(p.pos, w.logs)) < STACK_NEAR and w.fuel >= STACK_FUEL * w.max_fuel()
 
 
 ## A boss's marked landing (a leap's or a hop's) whose shock would reach the bot where it stands, or null.

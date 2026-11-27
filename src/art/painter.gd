@@ -42,19 +42,18 @@ const HEDGE_SIDES := { "top": 0, "right": 1, "bottom": 2, "left": 3 } # quarter 
 const HEDGE_DEPTH := 9
 
 ## The sword. The swing sweeps the arc the simulation hits (world.swing_half()), always turning the same way, and the
-## picture runs through four stages, as shares of Config.PLAYER.attack_time: it winds up past the start of the arc,
+## picture runs through four stages, as shares of the keeper's attack_time (World.stats): it winds up past the start of the arc,
 ## strikes across it (the blow starts landing at PLAYER.attack_hit_at, in the middle of this), holds at the end while
 ## the trail fades, and goes back to rest in the hand. The trail shows until the blow stops landing
-## (PLAYER.attack_hit_until), so while it is on screen, whatever it covers is struck.
+## (attack_hit_until: _hold()), so while it is on screen, whatever it covers is struck. The woodcutter's axe swings
+## the same way (Looks.CHARACTERS says which weapon a character holds); the mage holds none and shoots embers.
 const SWING_WIND := 0.18
 const SWING_STRIKE := 0.46
-const SWING_HOLD: float = Config.PLAYER.attack_hit_until / Config.PLAYER.attack_time
 const WIND_BACK := 0.5 # radians the blade is pulled back past the start of the arc
 const OVERSHOOT := 0.25 # radians it flies past the end before it settles
 const LUNGE := 1.0 # pixels the keeper leans into the blow while it strikes and holds
 const SHOULDER := Vector2(0.0, 0.5) # the sword hand turns around this point of the keeper
 const ARM := 5.0 # pixels from the shoulder to the hand while swinging
-const GRIP := Vector2(1.5, 2.5) # the pixel of the sword sprite held in the hand: the middle of the fist
 ## At rest the sword hangs from the hand on the side the swing starts from, pointing down and a little ahead.
 const REST_HAND := Vector2(3.5, 1.0) # where that hand is, along the side and down from it
 const REST_DROP := Vector2(0.0, 2.5)
@@ -70,7 +69,7 @@ const SLASH := [[1.0, "W"], [0.7, "a"], [0.4, "A"]]
 const SLASH_FIRE := [[1.0, "f"], [0.85, "F"], [0.65, "F"], [0.45, "x"], [0.25, "X"]]
 const SLASH_GLEAM := [0.6, "l"] # the outermost line, at the reach, with the long blade
 const WIDE_LINE := 2.0 # pixels per trail line with the wide swing
-const SWORD := "sword%s%s" # + "_long" with the long blade, + "_fire" while the fire blade burns
+const SWORD := "%s%s%s" # the weapon + "_long" with the long blade, + "_fire" while the fire blade burns
 const SWORD_FLAMES := 4 # flames shed along the trail of a burning blade
 const FLAME_RISE := 7.0 # pixels they rise while the swing holds
 const FLAME_STEPS_FAST := 3 # simulation steps per frame of the flames on the blade
@@ -127,6 +126,12 @@ const DASH_GHOSTS := 3
 const DASH_GHOST_GAP := 6.0
 const DASH_GHOST := Color(0.65, 0.85, 1.0, 0.45)
 const SPARK_TAIL := [[0.012, "F"], [0.024, "x"], [0.036, "X"]] # pixels behind a spark: [seconds back along its flight, colour]
+## The keeper's embers (a shooter's bolts): a disc as big as what it hits (World.bolt_radius, World.in_bolt), brighter
+## in the torch's light where it burns harder, with its core and a tail of [pixels back along its flight, colour].
+const BOLT_DISC := Color("#f58230")
+const BOLT_DISC_LIT := Color("#ffc94a")
+const BOLT_TAIL := [[3.0, "F"], [6.0, "x"], [9.0, "X"]]
+const STACK_STEP := Vector2(0.0, -3.0) # each more log a keeper carries sits this far above the one under it
 
 ## An enemy faster in the dark (looks.gd's dark_glow) streaks its burning eyes behind it: this many copies, this many
 ## pixels apart, the nearest this solid.
@@ -275,8 +280,9 @@ func _init(seed_value: int) -> void:
 					break
 
 
-func icon(upgrade: String, alone := false) -> Texture2D:
-	return Sprites.alone(Looks.ICON % upgrade) if alone else Sprites.texture(Looks.ICON % upgrade)
+func icon(upgrade: String, alone := false, who := "knight") -> Texture2D:
+	var name := Looks.icon(upgrade, who)
+	return Sprites.alone(name) if alone else Sprites.texture(name)
 
 
 ## Call once after each world.step(), so the effects can answer what the step did.
@@ -421,6 +427,7 @@ func paint_overlay(c: CanvasItem, w) -> void:
 	for id in tiles:
 		_tile(c, w, id, tiles[id])
 	_sparks(c, w)
+	_bolts(c, w)
 	_coming(c, w)
 	_boss_bar(c, w)
 	_night_bar(c, w)
@@ -480,7 +487,7 @@ func _tile(c: CanvasItem, w, id: String, at: Vector2) -> void:
 	c.draw_rect(Rect2(at, TILE), Sprites.PALETTE[TILE_FULL] if level >= most else TILE_EDGE[side])
 	c.draw_rect(Rect2(at + Vector2.ONE, TILE - Vector2(2.0, 2.0)), TILE_BACK[side])
 	if id != hidden_pick:
-		c.draw_texture(icon(id), at + TILE_ICON)
+		c.draw_texture(icon(id, false, w.character), at + TILE_ICON)
 		if id == "dash" and w.player.dash_wait > 0.0: # shaded over the share of the wait still to go
 			var left: float = w.player.dash_wait / w.mod("dash_every", 1.0)
 			c.draw_rect(Rect2(at + TILE_ICON, Vector2(ICON_SIZE, ceilf(ICON_SIZE * left))), ICON_WAIT)
@@ -577,6 +584,25 @@ func _sparks(c: CanvasItem, w) -> void:
 		for t in SPARK_TAIL:
 			c.draw_rect(Rect2((sp.pos - sp.vel * t[0]).round(), Vector2.ONE), Sprites.PALETTE[t[1]])
 		c.draw_texture(tex, (sp.pos - tex.get_size() / 2.0).round())
+
+
+## The keeper's embers right now, as [middle, radius, lit]: the disc each is drawn as, the same as what it hits.
+static func bolt_discs(w) -> Array:
+	return w.bolts.map(func(b): return [b.pos, b.radius, w.in_light(b.pos)])
+
+
+## The keeper's embers glow: a disc of what they hit, a bright core and a short tail, where the night does not dim them.
+func _bolts(c: CanvasItem, w) -> void:
+	c.draw_set_transform(shake)
+	var core := Sprites.texture("bolt")
+	for i in w.bolts.size():
+		var b: Dictionary = w.bolts[i]
+		var disc: Array = bolt_discs(w)[i]
+		for t in BOLT_TAIL:
+			c.draw_rect(Rect2((b.pos - b.dir * t[0]).round(), Vector2.ONE), Sprites.PALETTE[t[1]])
+		c.draw_circle(disc[0], disc[1], Color(BOLT_DISC_LIT if disc[2] else BOLT_DISC, 0.75))
+		c.draw_texture(core, (b.pos - core.get_size() / 2.0).round())
+	c.draw_set_transform(Vector2.ZERO)
 
 
 ## The bosses on the field (not their decoys), in the order they came.
@@ -688,8 +714,9 @@ func _standing(w) -> Array:
 		out.append([e.pos.y + 4.0, out.size(), tex, (e.pos + _lift(e) + _paw(w, e) - look.anchor).round(), _tint(e, _lit[i] == 1, warms)])
 		if e.carrying:
 			_put(out, e.pos.y + 4.1, "log", e.pos + THIEF_CARRY, LOG_ANCHOR)
+	var me: Dictionary = Looks.character(w.character)
 	if p.dead:
-		_put(out, p.pos.y + 5.0, "keeper_dead", p.pos, BODY)
+		_put(out, p.pos.y + 5.0, me.sprite + "_dead", p.pos, BODY)
 	elif _keeper_shows(w):
 		var look := _keeper(w)
 		for g in DASH_GHOSTS if p.dash_t > 0.0 else 0:
@@ -697,11 +724,12 @@ func _standing(w) -> Array:
 			ghost.a *= 1.0 - float(g) / DASH_GHOSTS
 			_put(out, p.pos.y + 4.8, look[0], p.pos - p.dash_dir * DASH_GHOST_GAP * (g + 1), BODY, look[1], true, ghost)
 		_put(out, p.pos.y + 5.0, look[0], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
-		if w.mod("thorns", 0) > 0: # the thorn cloak: behind the keeper, except seen from behind
+		if w.mod("thorns", 0) > 0 and me.cloak: # the thorn cloak: behind the keeper, except seen from behind
 			_put(out, p.pos.y + (5.05 if look[2] == "up" else 4.95), "thorns_%s" % look[2], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
-		if p.carrying:
-			_put(out, p.pos.y + 5.1, "log", p.pos + CARRY, LOG_ANCHOR)
-		else:
+		if p.carrying: # held overhead, a stack one on another
+			for i in p.held:
+				_put(out, p.pos.y + 5.1 + i * 0.001, "log", p.pos + CARRY + STACK_STEP * i, LOG_ANCHOR)
+		elif me.weapon != "":
 			var behind: bool = sin(_blade(w)[1]) < BEHIND
 			out.append([p.pos.y + (4.9 if behind else 5.2), out.size(), null]) # the sword: paint() draws it at this depth
 	return out
@@ -897,13 +925,14 @@ func _keeper(w) -> Array:
 		dir = "side"
 	elif p.face.y < 0.0:
 		dir = "up"
+	var sprite: String = Looks.character(w.character).sprite
 	if _swinging(w):
-		return ["keeper_%s_atk" % dir, dir == "side" and p.face.x < 0.0, dir]
+		return ["%s_%s_atk" % [sprite, dir], dir == "side" and p.face.x < 0.0, dir]
 	var walking: bool = p.vel.length() > 1.0 and p.hurt_t <= 0.0
 	var beat: int = (w.steps / WALK_STEPS) % 4 if walking else 0 # stand, step, stand, other step
 	var frame := "b" if beat % 2 == 1 else "a"
 	var flip: bool = p.face.x < 0.0 if dir == "side" else beat == 3
-	return ["keeper_%s%s_%s" % [dir, "_lift" if p.carrying else "", frame], flip, dir]
+	return ["%s_%s%s_%s" % [sprite, dir, "_lift" if p.carrying else "", frame], flip, dir]
 
 
 func _swinging(w) -> bool:
@@ -912,7 +941,21 @@ func _swinging(w) -> bool:
 
 ## How far into the swing it is, 0 to 1, or -1 when the keeper is not swinging.
 func _swing_share(w) -> float:
-	return clampf(w.player.attack_t / Config.PLAYER.attack_time, 0.0, 1.0) if _swinging(w) else -1.0
+	return clampf(w.player.attack_t / w.stat("attack_time"), 0.0, 1.0) if _swinging(w) else -1.0
+
+
+## The share of the swing at which the blow stops landing: the trail is gone by then.
+static func _hold(w) -> float:
+	return w.stat("attack_hit_until") / w.stat("attack_time")
+
+
+## The weapon the keeper swings ("sword", "axe"), and the pixel of its sprite held in the fist.
+static func _weapon(w) -> String:
+	return Looks.character(w.character).weapon
+
+
+static func _grip(w) -> Vector2:
+	return Looks.WEAPONS[_weapon(w)].grip
 
 
 ## Where along a stage of the swing k is, 0 to 1.
@@ -923,7 +966,7 @@ func _stage(k: float, from: float, to: float) -> float:
 ## How far the keeper leans into the blow: a pixel toward the facing while the swing strikes and holds.
 func _lean(w) -> Vector2:
 	var k := _swing_share(w)
-	if k < SWING_WIND or k >= SWING_HOLD:
+	if k < SWING_WIND or k >= _hold(w) or _weapon(w) == "":
 		return Vector2.ZERO
 	return (w.player.face * LUNGE).round()
 
@@ -962,11 +1005,11 @@ func _blade(w) -> Array:
 		a = lerpf(rest[1], arc[2], out)
 	elif k < SWING_STRIKE:
 		a = lerpf(arc[2], arc[1] - OVERSHOOT, smoothstep(0.0, 1.0, _stage(k, SWING_WIND, SWING_STRIKE)))
-	elif k < SWING_HOLD:
-		a = lerpf(arc[1] - OVERSHOOT, arc[1], ease(_stage(k, SWING_STRIKE, SWING_HOLD), 0.5))
+	elif k < _hold(w):
+		a = lerpf(arc[1] - OVERSHOOT, arc[1], ease(_stage(k, SWING_STRIKE, _hold(w)), 0.5))
 	else:
 		var rest := _rest(w, arc[1])
-		out = 1.0 - smoothstep(0.0, 1.0, _stage(k, SWING_HOLD, 1.0))
+		out = 1.0 - smoothstep(0.0, 1.0, _stage(k, _hold(w), 1.0))
 		a = lerpf(rest[1], arc[1], out)
 	var rest_hand: Vector2 = _rest(w, a)[0]
 	return [rest_hand.lerp(shoulder + Vector2.from_angle(a) * ARM, out), a, out]
@@ -978,14 +1021,15 @@ func _burning(w) -> bool:
 
 
 func _sword_texture(w) -> Texture2D:
-	return Sprites.texture(SWORD % ["_long" if w.mod("reach_bonus", 0.0) > 0.0 else "", "_fire" if _burning(w) else ""])
+	return Sprites.texture(SWORD % [_weapon(w), "_long" if w.mod("reach_bonus", 0.0) > 0.0 else "", "_fire" if _burning(w) else ""])
 
 
-## How much the sword sprite is stretched along its length, so that at full length its tip reaches as far past the
-## base sword's as world.reach() goes past the base reach, and it looks shorter at rest.
+## How much the weapon sprite is stretched along its length, so that at full length its tip reaches as far past the
+## base weapon's as world.reach() goes past the keeper's base reach, and it looks shorter at rest.
 func _stretch(w, sword: Texture2D, out: float) -> float:
-	var base := Sprites.texture("sword").get_width() - GRIP.x
-	var stretch: float = (w.reach() - Config.PLAYER.reach + base) / (sword.get_width() - GRIP.x)
+	var grip := _grip(w)
+	var base := Sprites.texture(_weapon(w)).get_width() - grip.x
+	var stretch: float = (w.reach() - w.stat("reach") + base) / (sword.get_width() - grip.x)
 	return stretch * lerpf(REST_LENGTH, 1.0, out)
 
 
@@ -993,7 +1037,7 @@ func _sword(c: CanvasItem, w) -> void:
 	var blade := _blade(w)
 	var sword := _sword_texture(w)
 	c.draw_set_transform(blade[0].round(), blade[1], Vector2(_stretch(w, sword, blade[2]), 1.0))
-	c.draw_texture(sword, -GRIP)
+	c.draw_texture(sword, -_grip(w))
 	c.draw_set_transform(Vector2.ZERO)
 
 
@@ -1006,15 +1050,15 @@ func _sword(c: CanvasItem, w) -> void:
 func slash_lines(w) -> Array:
 	var p = w.player
 	var k := _swing_share(w)
-	if p.dead or p.carrying or k < SWING_WIND or k >= SWING_HOLD:
+	if p.dead or p.carrying or _weapon(w) == "" or k < SWING_WIND or k >= _hold(w):
 		return []
 	var arc := _arc(w)
 	var a: float = clampf(_blade(w)[1], arc[1], arc[0])
-	var hold := _stage(k, SWING_STRIKE, SWING_HOLD)
+	var hold := _stage(k, SWING_STRIKE, _hold(w))
 	var lines: Array = (SLASH_FIRE if _burning(w) else SLASH).duplicate()
 	if w.mod("reach_bonus", 0.0) > 0.0:
 		lines.push_front(SLASH_GLEAM)
-	var width: float = WIDE_LINE if w.mod("arc_bonus", 0.0) < 0.0 else 1.0
+	var width: float = WIDE_LINE if w.mod("arc_bonus", 0.0) < 0.0 or Looks.character(w.character).heavy else 1.0
 	var out := []
 	for i in lines.size():
 		var tail: float = clampf(lerpf(a, arc[2], lines[i][0] * (1.0 - hold)), arc[1], arc[0])
@@ -1025,16 +1069,16 @@ func slash_lines(w) -> Array:
 
 func _slash(c: CanvasItem, w) -> void:
 	var p = w.player
-	if p.dead or p.carrying:
+	if p.dead or p.carrying or _weapon(w) == "":
 		return
 	var burning := _burning(w)
 	var blade := _blade(w)
 	if burning: # a flame licks the tip whenever the blade burns, swinging or not
 		var sword := _sword_texture(w)
-		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - GRIP.x - 1.0) * _stretch(w, sword, blade[2])
+		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - _grip(w).x - 1.0) * _stretch(w, sword, blade[2])
 		var lick := Sprites.texture("flame_s_%s" % ("a" if (w.steps / FLAME_STEPS_FAST) % 2 == 0 else "b"))
 		c.draw_texture(lick, (tip - Vector2(3.0, 5.0)).round())
-	var hold := _stage(_swing_share(w), SWING_STRIKE, SWING_HOLD)
+	var hold := _stage(_swing_share(w), SWING_STRIKE, _hold(w))
 	var fade := Color(1.0, 1.0, 1.0, 1.0 - hold * hold)
 	var at: Vector2 = p.pos.round()
 	var lines := slash_lines(w)

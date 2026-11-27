@@ -368,7 +368,8 @@ func _goal(world) -> Vector2:
 	return world.player.pos
 
 
-## A thief takes a log it reaches, or the one the player is carrying, and is gone once it is off the field with it.
+## A thief takes a log it reaches, or one of those the player is carrying (one only: a woodcutter's stack loses its
+## top log), and is gone once it is off the field with it.
 func _thieve(world) -> void:
 	if carrying:
 		gone = not Config.FIELD.grow(E.edge).has_point(pos)
@@ -380,7 +381,7 @@ func _thieve(world) -> void:
 			return
 	var p = world.player
 	if p.carrying and not p.dead and touches(p):
-		p.carrying = false
+		p.lose_log()
 		carrying = true
 
 
@@ -391,9 +392,9 @@ func touches(p) -> bool:
 	return pos.distance_to(p.pos) < T.radius + Config.PLAYER.radius
 
 
-func hit(dmg: int, from_pos: Vector2) -> void:
+func hit(dmg: int, from_pos: Vector2, push := 1.0) -> void:
 	hp -= dmg
 	flash = E.flash
-	knock = (pos - from_pos).normalized() * E.knock * T.get("heavy", 1.0)
+	knock = (pos - from_pos).normalized() * E.knock * T.get("heavy", 1.0) * push
 	if hp <= 0:
 		dead = true

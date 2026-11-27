@@ -28,8 +28,8 @@ static func digest(w) -> String:
 	return ctx.finish().hex_encode().substr(0, 16)
 
 
-static func play(seed_value: int = ReplayScript.SEED, pick_slot: int = ReplayScript.PICK_SLOT, steps: int = ReplayScript.STEPS) -> Dictionary:
-	var w = World.new(seed_value)
+static func play(seed_value: int = ReplayScript.SEED, pick_slot: int = ReplayScript.PICK_SLOT, steps: int = ReplayScript.STEPS, character: String = "knight") -> Dictionary:
+	var w = World.new(seed_value, character)
 	var bot = Bot.new(pick_slot)
 	var marks := []
 	var told := {} # how many events of each kind the world reported
