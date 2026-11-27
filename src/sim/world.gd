@@ -490,11 +490,10 @@ func can_offer(id: String) -> bool:
 	return level(id) > 0 or not takes_slot(id) or slots_used(side(id)) < slots(side(id))
 
 
-## Whether the torch may put this filler on the table now: it would give something. Fuel and logs always do (a full
-## torch burns down, a log lies until it is fetched); hearts only to a keeper who is hurt.
+## Whether the torch may put this filler on the table now: it would give something (Config.FILLERS).
 func can_fill(id: String) -> bool:
 	var row: Dictionary = Config.FILLERS[id]
-	return row.has("fuel") or row.has("logs") or player.hp < max_hp()
+	return row.has("fuel") or row.has("logs") or row.has("score") or player.hp < max_hp()
 
 
 ## A card's chance of being drawn, against 1: Config.BUILD.combo_weight for a combined upgrade, rare_weight for a
@@ -578,6 +577,7 @@ func _end_or_offer() -> void:
 		picks_done += 1
 		_offer()
 
+	score += row.get("score", 0)
 
 ## The night is over. The sun clears the field, you rest (fully, from Config.HARDEN.from: with the hearts that night
 ## gives), the torch is topped up, and the next night begins with the torch's offer.

@@ -1001,6 +1001,17 @@ const SPRITES := {
 		".........",
 		".........",
 	],
+	"icon_tale": [
+		"....Y....",
+		"....Y....",
+		"...YfY...",
+		"YYYfffYYY",
+		".YfffffY.",
+		"..YfffY..",
+		".YffYffY.",
+		".YY...YY.",
+		".........",
+	],
 	"icon_spin": [
 		"..aaaaa..",
 		".a.....a.",

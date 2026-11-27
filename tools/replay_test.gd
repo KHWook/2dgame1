@@ -34,28 +34,32 @@ static func play(seed_value: int = ReplayScript.SEED, pick_slot: int = ReplayScr
 	var marks := []
 	var told := {} # how many events of each kind the world reported
 	var kill_worth := 0 # what the kills told were worth: most score SCORE.kill, a boss its own score, a tier more
+	var gifts := 0 # the score the cards told as taken gave by themselves (a filler's score)
 	for s in steps:
 		w.step(bot.frame(w))
 		for ev in w.events:
 			told[ev.kind] = told.get(ev.kind, 0) + 1
 			if ev.kind == "kill":
 				kill_worth += Enemy.row(ev.enemy, ev.tier).get("score", Config.SCORE.kill)
+			if ev.kind == "took":
+				gifts += Config.FILLERS.get(ev.id, {}).get("score", 0)
 		if (s + 1) % 60 == 0:
 			marks.append(digest(w))
 	var p = w.player
-	return { "seed": seed_value, "steps": steps, "summary": { "phase": w.phase, "night": w.night, "time": snappedf(w.time, 0.01), "score": w.score, "hp": p.hp, "fuel": roundi(w.fuel), "picks": w.picks }, "events": told, "kill_worth": kill_worth, "marks": marks }
+	return { "seed": seed_value, "steps": steps, "summary": { "phase": w.phase, "night": w.night, "time": snappedf(w.time, 0.01), "score": w.score, "hp": p.hp, "fuel": roundi(w.fuel), "picks": w.picks }, "events": told, "kill_worth": kill_worth, "gifts": gifts, "marks": marks }
 
 
-## E1: what is wrong with the events of a run, or "" when they are complete. The score counts kills, logs fed and
-## dawns on its own, so the events must add up to it; if they don't, an effect (or later a sound) would go missing.
+## E1: what is wrong with the events of a run, or "" when they are complete. The score counts kills, logs fed,
+## dawns and the score a filler gives on its own, so the events must add up to it; if they don't, an effect (or later
+## a sound) would go missing.
 static func untold(run: Dictionary) -> String:
 	var kills: int = run.events.get("kill", 0)
 	var fed: int = run.events.get("fed", 0)
 	var dawns: int = run.events.get("dawn", 0)
-	var worth: int = run.kill_worth + fed * Config.SCORE.log + dawns * Config.SCORE.dawn
+	var worth: int = run.kill_worth + fed * Config.SCORE.log + dawns * Config.SCORE.dawn + run.gifts
 	if worth == run.summary.score:
 		return ""
-	return "events: world.events told of %d kills, %d logs fed and %d dawns, worth %d, but the score is %d. Fix: append to world.events wherever a kill, a fed log or a dawn is scored (E1); if the score now counts something new, count its event here too." % [kills, fed, dawns, worth, run.summary.score]
+	return "events: world.events told of %d kills, %d logs fed, %d dawns and %d from cards taken, worth %d, but the score is %d. Fix: append to world.events wherever a kill, a fed log, a dawn or a card's score is scored (E1); if the score now counts something new, count its event here too." % [kills, fed, dawns, run.gifts, worth, run.summary.score]
 
 
 ## Returns [ok: bool, message: String].

@@ -365,13 +365,15 @@ const BUILD := { "slots": { "torch": 6, "keeper": 4 }, "rerolls": 2, "rare_weigh
 ## What the torch gives when it has fewer upgrades to offer than NIGHT.offer_size: the offer is filled up from these,
 ## drawn as upgrades are. Taken, one acts once, now, and is gone: it takes no slot and is not part of the build
 ## (World.picks). fuel: fuel added; heal: hearts healed; logs: logs dropped round the torch, log_at pixels from it
-## (where logs fall by themselves: WOOD.keep_away). Small on purpose: they come when a build is done. One that only
-## heals is left out while the keeper is unhurt (World.can_fill); one that gives fuel or logs can always come.
+## (where logs fall by themselves: WOOD.keep_away); score: points added. Small on purpose: they come when a build is
+## done. One that only heals is left out while the keeper is unhurt (World.can_fill); the others can always come, and
+## there are NIGHT.offer_size of those, so an offer is never short of a card.
 const FILLERS := {
 	"kindling": { "name": "불쏘시개", "text": "지금 연료 +30 (가득 차면 거기까지)", "fuel": 30.0 },
 	"rest": { "name": "숨 고르기", "text": "지금 체력 1 회복", "heal": 1 },
 	"spare_log": { "name": "마른 장작 하나", "text": "횃불 곁에 장작 하나가 떨어진다", "logs": 1, "log_at": 48.0 },
 }
+	"tale": { "name": "밤의 이야기", "text": "지금 점수 +50", "score": 50 },
 
 ## The keeper's numbers that time its attack (PLAYER): the attack_mult upgrade (swift) shortens them all alike, so a
 ## faster swing lands at the same share of it (World.stat); so does haste_attack, for a while after a kill.

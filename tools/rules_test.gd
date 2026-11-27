@@ -3061,12 +3061,12 @@ static func _build() -> Array:
 ## taken does what its row says once, and is not part of the build.
 static func _fillers() -> Array:
 	var out := []
-	var known := ["name", "text", "fuel", "heal", "logs", "log_at"]
+	var known := ["name", "text", "fuel", "heal", "logs", "log_at", "score"]
 	for id in Config.FILLERS:
 		var row: Dictionary = Config.FILLERS[id]
 		_expect(out, "filler %s has a name and a text, and is not also an upgrade" % id, [row.get("name", "") != "", row.get("text", "") != "", Config.UPGRADES.has(id)], [true, true, false])
 		_expect(out, "filler %s sets only keys the rules read" % id, row.keys().all(func(k): return known.has(k)), true)
-		_expect(out, "filler %s gives something" % id, row.get("fuel", 0.0) > 0.0 or row.get("heal", 0) > 0 or row.get("logs", 0) > 0, true)
+		_expect(out, "filler %s gives something" % id, row.get("fuel", 0.0) > 0.0 or row.get("heal", 0) > 0 or row.get("logs", 0) > 0 or row.get("score", 0) > 0, true)
 		_expect(out, "filler %s has its icon" % id, Sprites.SPRITES.has(Looks.ICON % id), true)
 	_expect(out, "there is a filler, so an offer is never empty", Config.FILLERS.is_empty(), false)
 	var done := _done_build()
@@ -3095,6 +3095,7 @@ static func _fillers() -> Array:
 		_expect(out, "filler %s heals the hearts its row says, now" % id, w.player.hp, 1 + row.get("heal", 0))
 		_expect(out, "filler %s drops the logs its row says" % id, w.logs.size(), row.get("logs", 0))
 		for l in w.logs:
+		_expect(out, "filler %s adds the score its row says, now" % id, w.score, row.get("score", 0))
 			_expect(out, "filler %s drops each log its log_at from the torch, on the field, out of the torch's reach" % id,
 				[snappedf(l.distance_to(Config.TORCH.pos), 0.001), Config.FIELD.has_point(l), l.distance_to(Config.TORCH.pos) > Config.TORCH.reach + Config.PLAYER.radius + Config.PLAYER.grab], [row.log_at, true, true])
 		if w.logs.size() > 1:
@@ -3105,10 +3106,10 @@ static func _fillers() -> Array:
 		w.offer = [id]
 		_play(w, 1, "pick_1")
 		_expect(out, "filler %s fills neither the torch nor the keeper past full" % id, [w.fuel <= w.max_fuel(), w.player.hp], [true, w.max_hp()])
-	# A filler that would give nothing is not offered: hearts to an unhurt keeper. Fuel and logs may always come, so
-	# an offer is never empty.
-	var healers: Array = Config.FILLERS.keys().filter(func(id): return not (Config.FILLERS[id].has("fuel") or Config.FILLERS[id].has("logs")))
-	_expect(out, "some filler only heals, and others can always come", [healers.is_empty(), healers.size() < Config.FILLERS.size()], [false, true])
+	# A filler that would give nothing is not offered: hearts to an unhurt keeper. The others may always come, and
+	# there are enough of them to fill an offer, so an offer is never short of a card.
+	var healers: Array = Config.FILLERS.keys().filter(func(id): return Config.FILLERS[id].keys().all(func(key): return ["name", "text", "heal"].has(key)))
+	_expect(out, "some filler only heals, and the others, which can always come, fill an offer", [healers.is_empty(), Config.FILLERS.size() - healers.size() >= Config.NIGHT.offer_size], [false, true])
 	var unhurt := 0
 	var hurt := 0
 	for seed_value in range(1, 101):
@@ -3117,8 +3118,11 @@ static func _fillers() -> Array:
 		w.fuel = w.max_fuel()
 		w._offer()
 		unhurt += w.offer.filter(func(id): return healers.has(id)).size()
-		_expect(out, "seed %d: an unhurt keeper by a full torch is still offered every other filler, each once" % seed_value,
-			[w.offer.size(), w.phase, w.offer.all(func(id): return Config.FILLERS.has(id) and w.can_fill(id))], [mini(Config.NIGHT.offer_size, Config.FILLERS.size() - healers.size()), "pick", true])
+		var each := {}
+		for id in w.offer:
+			each[id] = true
+		_expect(out, "seed %d: an unhurt keeper by a full torch, its build done, is still offered a full offer: fillers that give something, each once" % seed_value,
+			[w.offer.size(), each.size(), w.phase, w.offer.all(func(id): return Config.FILLERS.has(id) and w.can_fill(id))], [Config.NIGHT.offer_size, Config.NIGHT.offer_size, "pick", true])
 		_press(w, "reroll")
 		unhurt += w.offer.filter(func(id): return healers.has(id)).size()
 		w.player.hp -= 1
