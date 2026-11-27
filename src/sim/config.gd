@@ -257,18 +257,19 @@ const ENEMY_TYPES := {
 ## only (optional): a character (CHARACTERS); the torch offers the row to that character and to no other.
 ## needs (optional): two upgrades; a combined upgrade, offered only while both are held. It takes no slot and is
 ## drawn more often than another card (BUILD.combo_weight), so whoever holds the pair soon sees it.
-## What the rows with only or needs set: guard_invuln, guard_reach, guard_push, guard_damage: a hit the keeper takes
-## keeps it from the next one that many seconds longer and throws back every enemy within reach of it (push: share of
-## a blow's knockback), doing them that damage; haste, haste_time, haste_attack: after a kill the keeper walks haste times as fast for that many seconds, and its
-## attack's times (ATTACK_TIMES) are multiplied by haste_attack meanwhile;
-## log_chance: an enemy the keeper's own blow kills leaves a log, that often; carry_bonus: logs carried besides the
-## character's carry; pierce_bonus: enemies an ember goes through besides bolt.pierce, and pierce_burst: it bursts
-## (bolt.splash) on each of them too, not only where it stops; kindle_reach: an enemy an
-## ember kills throws a spark (SPARK) at the nearest other enemy whose body is within that many pixels of it;
-## ember_kills: the ember ring also burns away an enemy's last point; mark_haste: an enemy the keeper's blow hits in
-## the light and leaves alive is what the torch's sparks go for, and the next spark comes within that share of
-## spark_every; dash_damage: a dash does that to each enemy it touches, once; feed_reach, feed_push: logs put on the
-## fire throw back every enemy within reach of the torch.
+## What the keys of the rows with only or needs mean: guard_invuln, guard_reach, guard_push, guard_damage: a hit the
+## keeper takes keeps it from the next one that many seconds longer and throws back every enemy within reach of it
+## (push: share of a blow's knockback), doing them that damage; haste, haste_time, haste_attack: after a kill the
+## keeper walks haste times as fast for that many seconds, and its attack's times (ATTACK_TIMES) are multiplied by
+## haste_attack meanwhile; log_chance: an enemy the keeper's own blow kills leaves a log, that often; carry_bonus:
+## logs carried besides the character's carry; pierce_bonus: enemies an ember goes through besides bolt.pierce, and
+## pierce_burst: it bursts (bolt.splash) on each of them too, not only where it stops; kindle_reach: an enemy an ember
+## kills throws a spark (SPARK) at the nearest other enemy whose body is within that many pixels of it; scorch_every:
+## every that many seconds the ember ring burns away the last point of each enemy in it that is down to one, bosses
+## excepted; beacon_every: the keeper's own blow that lands on an enemy in the torch's light makes the torch fire a
+## spark at once, at that enemy if it still lives and else at the nearest enemy in the light, at most once in that
+## many seconds, besides the sparks spark_every brings; dash_damage: a dash does that to each enemy it touches, once;
+## feed_reach, feed_push: logs put on the fire throw back every enemy within reach of the torch.
 const UPGRADES := {
 	"slow_burn": { "side": "torch", "name": "느린 불꽃", "text": "연료가 25% 천천히 탄다", "burn_mult": 0.75,
 		"levels": [{ "text": "연료가 40% 천천히 탄다", "burn_mult": 0.6 }] },
@@ -339,10 +340,10 @@ const UPGRADES := {
 		"levels": [{ "text": "불씨가 적 둘을 더 꿰뚫고, 꿰뚫는 적마다 터진다", "pierce_bonus": 2 }] },
 	"kindle": { "side": "keeper", "only": "mage", "name": "불씨 옮기기", "text": "불씨로 처치한 적이 가까운 적에게 작은 불씨를 튀긴다", "kindle_reach": 40.0,
 		"levels": [{ "text": "불씨로 처치한 적이 더 먼 적에게도 작은 불씨를 튀긴다", "kindle_reach": 64.0 }] },
-	"scorch": { "side": "torch", "needs": ["ember_ring", "warm_glow"], "name": "화염 고리", "text": "불씨 고리가 적의 마지막 체력까지 태운다", "ember_kills": true },
-	"beacon": { "side": "torch", "needs": ["spark", "fire_blade"], "name": "불 표적", "text": "빛 안에서 벤 적을 횃불의 불씨가 노리고, 불씨가 두 배 자주 나온다", "mark_haste": 0.5,
-		"as": { "woodcutter": { "text": "빛 안에서 찍은 적을 횃불의 불씨가 노리고, 불씨가 두 배 자주 나온다" },
-			"mage": { "text": "빛 안에서 맞힌 적을 횃불의 불씨가 노리고, 불씨가 두 배 자주 나온다" } } },
+	"scorch": { "side": "torch", "needs": ["ember_ring", "warm_glow"], "name": "화염 고리", "text": "불씨 고리가 4초마다 체력 1인 적을 마저 태운다 (보스는 빼고)", "scorch_every": 4.0 },
+	"beacon": { "side": "torch", "needs": ["spark", "fire_blade"], "name": "불 표적", "text": "빛 안의 적을 베면 횃불이 그 적이나 가까운 적에게 불씨를 쏜다 (1초에 한 번)", "beacon_every": 1.0,
+		"as": { "woodcutter": { "text": "빛 안의 적을 찍으면 횃불이 그 적이나 가까운 적에게 불씨를 쏜다 (1초에 한 번)" },
+			"mage": { "text": "빛 안의 적을 맞히면 횃불이 그 적이나 가까운 적에게 불씨를 쏜다 (1초에 한 번)" } } },
 	"bramble": { "side": "keeper", "needs": ["dash", "thorns"], "name": "가시 돌진", "text": "돌진으로 스친 적에게 피해 2", "dash_damage": 2 },
 	"blast": { "side": "torch", "needs": ["big_logs", "woodpile"], "name": "장작 폭발", "text": "장작을 넣으면 횃불 곁의 적이 밀려난다", "feed_reach": 40.0, "feed_push": 1.5 },
 	"swift": { "side": "keeper", "name": "빠른 칼놀림", "text": "베기 간격이 30% 짧아진다", "attack_mult": 0.7, "from_night": 10,
@@ -372,8 +373,8 @@ const FILLERS := {
 	"kindling": { "name": "불쏘시개", "text": "지금 연료 +30 (가득 차면 거기까지)", "fuel": 30.0 },
 	"rest": { "name": "숨 고르기", "text": "지금 체력 1 회복", "heal": 1 },
 	"spare_log": { "name": "마른 장작 하나", "text": "횃불 곁에 장작 하나가 떨어진다", "logs": 1, "log_at": 48.0 },
-}
 	"tale": { "name": "밤의 이야기", "text": "지금 점수 +50", "score": 50 },
+}
 
 ## The keeper's numbers that time its attack (PLAYER): the attack_mult upgrade (swift) shortens them all alike, so a
 ## faster swing lands at the same share of it (World.stat); so does haste_attack, for a while after a kill.

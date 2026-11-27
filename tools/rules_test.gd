@@ -3095,8 +3095,8 @@ static func _fillers() -> Array:
 		_expect(out, "filler %s gives the fuel its row says, now" % id, w.fuel, 20.0 + row.get("fuel", 0.0))
 		_expect(out, "filler %s heals the hearts its row says, now" % id, w.player.hp, 1 + row.get("heal", 0))
 		_expect(out, "filler %s drops the logs its row says" % id, w.logs.size(), row.get("logs", 0))
-		for l in w.logs:
 		_expect(out, "filler %s adds the score its row says, now" % id, w.score, row.get("score", 0))
+		for l in w.logs:
 			_expect(out, "filler %s drops each log its log_at from the torch, on the field, out of the torch's reach" % id,
 				[snappedf(l.distance_to(Config.TORCH.pos), 0.001), Config.FIELD.has_point(l), l.distance_to(Config.TORCH.pos) > Config.TORCH.reach + Config.PLAYER.radius + Config.PLAYER.grab], [row.log_at, true, true])
 		if w.logs.size() > 1:
@@ -3484,6 +3484,26 @@ static func _needs() -> Array:
 					Ui.COMBO_HINT % [World.upgrade_row(needs[1 - i], who).name, World.upgrade_row(made, who).name])
 			keeper.picks = [made]
 			_expect(out, "once %s holds %s its ingredients say nothing of it" % [who, made], [Ui.combo_hint(keeper, needs[0]), Ui.combo_hint(keeper, needs[1])], ["", ""])
+			for i in 2:
+				var part: String = needs[i]
+				var other: String = needs[1 - i]
+				var most: int = Config.BUILD.slots[World.side(other)]
+				var rest: Array = _slotted(World.side(other), who).filter(func(id): return not needs.has(id))
+				var room: int = most - (1 if World.side(part) == World.side(other) else 0)
+				keeper.picks = [part] + rest.slice(0, room)
+				_expect(out, "%s holding %s with no slot left for %s: %s can no longer happen, and %s's line says nothing of it" % [who, part, other, made, part],
+					[keeper.slots_used(World.side(other)), keeper.can_combine(made), Ui.combo_hint(keeper, part)], [most, false, ""])
+				keeper.picks = [part] + rest.slice(0, room - 1)
+				_expect(out, "%s holding %s with a slot left for %s: %s can still happen, and %s's line says so" % [who, part, other, made, part],
+					[keeper.can_combine(made), Ui.combo_hint(keeper, part)], [true, Ui.COMBO_HINT % [World.upgrade_row(other, who).name, World.upgrade_row(made, who).name]])
+				keeper.picks = [part, other] + rest.slice(0, room - 1)
+				_expect(out, "%s holding both %s and %s on full sides: %s can still happen" % [who, part, other, made], [keeper.slots_used(World.side(other)), keeper.can_combine(made)], [most, true])
+			if World.side(needs[0]) == World.side(needs[1]):
+				var rest: Array = _slotted(side, who).filter(func(id): return not needs.has(id))
+				keeper.picks = rest.slice(0, Config.BUILD.slots[side] - 1)
+				_expect(out, "%s holding neither of %s with one %s slot left: %s cannot happen" % [who, needs, side, made], [keeper.can_combine(made), Ui.combo_hint(keeper, needs[0])], [false, ""])
+				keeper.picks = rest.slice(0, Config.BUILD.slots[side] - 2)
+				_expect(out, "%s holding neither of %s with two %s slots left: %s can happen" % [who, needs, side, made], keeper.can_combine(made), true)
 		var full: Array = needs.duplicate()
 		for id in _slotted(side):
 			if not full.has(id) and full.filter(func(x): return World.side(x) == side).size() < Config.BUILD.slots[side]:
@@ -3579,26 +3599,6 @@ static func _own_rows() -> Array:
 		var told := _play(w, 1)
 		_expect(out, "big_pack at level %d: every log carried goes on the fire" % n, [told.count("fed"), w.player.held, w.score], [carry + n, 0, (carry + n) * Config.SCORE.log])
 	var B: Dictionary = World.character_stats("mage").bolt
-			for i in 2:
-				var part: String = needs[i]
-				var other: String = needs[1 - i]
-				var most: int = Config.BUILD.slots[World.side(other)]
-				var rest: Array = _slotted(World.side(other), who).filter(func(id): return not needs.has(id))
-				var room: int = most - (1 if World.side(part) == World.side(other) else 0)
-				keeper.picks = [part] + rest.slice(0, room)
-				_expect(out, "%s holding %s with no slot left for %s: %s can no longer happen, and %s's line says nothing of it" % [who, part, other, made, part],
-					[keeper.slots_used(World.side(other)), keeper.can_combine(made), Ui.combo_hint(keeper, part)], [most, false, ""])
-				keeper.picks = [part] + rest.slice(0, room - 1)
-				_expect(out, "%s holding %s with a slot left for %s: %s can still happen, and %s's line says so" % [who, part, other, made, part],
-					[keeper.can_combine(made), Ui.combo_hint(keeper, part)], [true, Ui.COMBO_HINT % [World.upgrade_row(other, who).name, World.upgrade_row(made, who).name]])
-				keeper.picks = [part, other] + rest.slice(0, room - 1)
-				_expect(out, "%s holding both %s and %s on full sides: %s can still happen" % [who, part, other, made], [keeper.slots_used(World.side(other)), keeper.can_combine(made)], [most, true])
-			if World.side(needs[0]) == World.side(needs[1]):
-				var rest: Array = _slotted(side, who).filter(func(id): return not needs.has(id))
-				keeper.picks = rest.slice(0, Config.BUILD.slots[side] - 1)
-				_expect(out, "%s holding neither of %s with one %s slot left: %s cannot happen" % [who, needs, side, made], [keeper.can_combine(made), Ui.combo_hint(keeper, needs[0])], [false, ""])
-				keeper.picks = rest.slice(0, Config.BUILD.slots[side] - 2)
-				_expect(out, "%s holding neither of %s with two %s slots left: %s can happen" % [who, needs, side, made], keeper.can_combine(made), true)
 	for lit in [false, true]:
 		for n in [0, 1, 2]:
 			w = _night(Vector2(-50.0, 0.0) if lit else DARK, _times("piercing", n), "mage")
@@ -3632,51 +3632,105 @@ static func _own_rows() -> Array:
 	return out
 
 
-## The combined upgrades do what their rows say, and nothing without them. scorch: the ember ring burns an enemy's
-## last point away. beacon: an enemy the keeper's blow hits in the light is what the torch's sparks go for, and the
-## next comes sooner. bramble: a dash hurts each enemy it passes through, once. blast: logs put on the fire throw
-## back the enemies near the torch.
+## Steps w, pressing press on the first step. Returns, for each spark fired on the way ("shot"), the way it left.
+static func _shots(w, steps: int, press := "") -> Array:
+	var ways := []
+	for i in steps:
+		if _play(w, 1, press if i == 0 else "").has("shot"):
+			ways.append(w.sparks[-1].vel.normalized())
+	return ways
+
+
+## Presses attack and steps w until the blow lands on e (its hp drops). Returns the way of each spark fired meanwhile.
+static func _blow(w, e) -> Array:
+	var hp: int = e.hp
+	var ways := _shots(w, 1, "attack")
+	for i in 90:
+		if e.hp < hp:
+			break
+		ways.append_array(_shots(w, 1))
+	return ways
+
+
+## Whether shots is one spark, fired from the torch's mouth at at.
+static func _one_shot_at(shots: Array, at: Vector2) -> bool:
+	return shots.size() == 1 and shots[0].dot((at - Config.TORCH.pos - Config.SPARK.mouth).normalized()) > 0.999
+
+
+## The combined upgrades do what their rows say, and nothing without them. scorch: every scorch_every seconds the
+## ember ring burns away the last point of the enemies in it, a boss's never. beacon: the keeper's blow on an enemy
+## in the light makes the torch fire a spark at once, at that enemy or, when the blow killed it, at the nearest a
+## spark reaches, once every beacon_every seconds and apart from the torch's own sparks. bramble: a dash hurts each
+## enemy it passes through, once. blast: logs put on the fire throw back the enemies near the torch.
 static func _combined_rows() -> Array:
 	var out := []
+	var finish: float = World.upgrade("scorch", 1).scorch_every
+	_expect(out, "scorch finishes more slowly than the ring burns at any level", range(1, World.max_level("ember_ring") + 1).all(func(n): return World.upgrade("ember_ring", n).ember_every < finish), true)
 	for with in [false, true]:
 		var w = _night(DARK, ["ember_ring", "warm_glow"] + (["scorch"] if with else []))
 		var e = Enemy.new("slime", Config.TORCH.pos + Vector2(20.0, 0.0))
-		w.enemies.append(e)
-		var told := _play(w, roundi(w.mod("ember_every", 1.0) * 3.0 / Config.STEP))
-		_expect(out, "the ember ring %s: a slime in it for three burns %s" % ["with scorch" if with else "alone", "is burnt away, and scored" if with else "is left at 1"],
-			[e.dead, e.hp, told.has("kill"), w.score], [with, 0 if with else 1, with, Config.SCORE.kill if with else 0])
+		var king = Enemy.new("slime_king", Config.TORCH.pos + Vector2(-20.0, 0.0))
+		king.hp = 2
+		var beyond = Enemy.new("slime", Config.TORCH.pos + Vector2(0.0, w.mod("ember_radius", 0.0) + 2.0))
+		beyond.hp = 1
+		for foe in [e, king, beyond]:
+			w.enemies.append(_still(foe))
+		w.next_scorch = finish # as if the ring had just finished what it could
+		var told := _play(w, roundi(finish / Config.STEP) - 2)
+		_expect(out, "the ember ring %s: until scorch_every is up, a slime and a boss in it are burnt down to 1 and left there" % ("with scorch" if with else "alone"),
+			[e.hp, king.hp, told.has("kill")], [1, 1, false])
+		told = _play(w, 4)
+		_expect(out, "the ember ring %s: when scorch_every is up, the slime at 1 %s; the boss at 1 and the slime outside the ring are left" % ["with scorch" if with else "alone", "is burnt away, and scored" if with else "is left too"],
+			[e.dead, told.count("kill"), w.score, king.hp, king.dead, beyond.hp], [with, 1 if with else 0, Config.SCORE.kill if with else 0, 1, false, 1])
+		_play(w, roundi(finish * 3.0 / Config.STEP))
+		_expect(out, "the ember ring %s never finishes a boss, however long it stands in it" % ("with scorch" if with else "alone"), [king.hp, king.dead], [1, false])
 	for who in Config.CHARACTERS:
+		var every: float = World.upgrade("beacon", 1, who).beacon_every
+		var stand := Vector2(-70.0, 0.0) if who == "mage" else Vector2(40.0, 0.0)
 		for with in [false, true]:
-			var w = _night(Vector2(-70.0, 0.0) if who == "mage" else Vector2(40.0, 0.0), ["spark", "fire_blade"] + (["beacon"] if with else []), who)
+			var w = _night(stand, ["spark", "fire_blade"] + (["beacon"] if with else []), who)
 			w.fuel = Config.TORCH.max_fuel
+			w.next_spark = NEVER # the torch's own sparks stay out of the scene
 			var by_torch = _still(_add(w, "big_slime", Vector2.ZERO))
 			by_torch.pos = Config.TORCH.pos + Vector2(0.0, 24.0) # nearer the torch than the one the keeper strikes
 			var struck = _still(_add(w, "big_slime", Vector2(w.chop_ahead() if who == "woodcutter" else 40.0 if who == "mage" else NEAR.x, 0.0)))
-			var every: float = w.mod("spark_every", 0.0)
-			w.next_spark = every # as if the torch had just fired
-			_play(w, 30, "attack")
-			_expect(out, "%s's blow lands on the enemy in the light and leaves it alive (the beacon scene)" % who, [struck.hp < struck.full_hp, struck.dead, w.in_light(struck.pos)], [true, false, true])
-			_expect(out, "%s %s: the enemy its blow hit in the light is marked, and the next spark comes within mark_haste of the usual wait" % [who, "with beacon" if with else "without"],
-				[w.marked == struck, w.next_spark == every, w.next_spark <= w.time + every * World.upgrade("beacon", 1).mark_haste], [with, not with, with])
-			var steps := 30
-			while w.sparks.is_empty() and steps < 600:
-				_play(w, 1)
-				steps += 1
-			var from: Vector2 = Config.TORCH.pos + Config.SPARK.mouth
-			var aimed = struck if with else by_torch
-			_expect(out, "%s %s: the torch's next spark goes for %s" % [who, "with beacon" if with else "without", "the marked enemy" if with else "the enemy nearest the torch"],
-				[w.sparks.size(), snappedf(w.sparks[0].vel.normalized().dot((aimed.pos - from).normalized()), 0.01) if not w.sparks.is_empty() else 0.0, steps * Config.STEP < every * 0.75], [1, 1.0, with])
-			if with:
-				w._damage(struck, struck.hp, w.player.pos)
-				w.sparks = []
-				w.next_spark = w.time
-				_play(w, 1)
-				_expect(out, "%s: once the marked enemy is dead the spark goes for the nearest again" % who,
-					[w.sparks.size(), snappedf(w.sparks[0].vel.normalized().dot((by_torch.pos - from).normalized()), 0.01) if not w.sparks.is_empty() else 0.0], [1, 1.0])
+			struck.hp = 99
+			var swing: int = roundi(w.stat("attack_time") / Config.STEP) + 1
+			var shots := _blow(w, struck)
+			_expect(out, "%s's blow lands on the enemy in the light and leaves it alive (the beacon scene)" % who, [struck.hp < 99, struck.dead, w.in_light(struck.pos)], [true, false, true])
+			_expect(out, "%s %s: a blow on an enemy in the light makes the torch fire %s" % [who, "with beacon" if with else "without", "one spark at once, at that enemy" if with else "nothing"],
+				[shots.size(), _one_shot_at(shots, struck.pos)], [1 if with else 0, with])
+			_expect(out, "%s %s: the torch's own sparks come when they would have" % [who, "with beacon" if with else "without"], w.next_spark, NEVER)
+			_play(w, swing)
+			var hp_was: int = struck.hp
+			shots = _blow(w, struck)
+			_expect(out, "%s %s: a second blow within beacon_every of the first lands and fires nothing" % [who, "with beacon" if with else "without"], [struck.hp < hp_was, w.time < w.next_beacon, shots.size()], [true, with, 0])
+			_play(w, swing + roundi(every / Config.STEP))
+			shots = _blow(w, struck)
+			_expect(out, "%s %s: a blow after beacon_every fires %s" % [who, "with beacon" if with else "without", "again" if with else "nothing"], [shots.size(), _one_shot_at(shots, struck.pos)], [1 if with else 0, with])
+		# The blow kills what it lands on: the spark goes for the enemy nearest the torch that a spark reaches, lit or not.
+		var reach: float = Config.SPARK.speed * Config.SPARK.life
+		for far in [24.0, 130.0, reach + 40.0]:
+			var w = _night(stand, ["spark", "fire_blade", "beacon"], who)
+			w.fuel = Config.TORCH.max_fuel
+			w.next_spark = NEVER
+			var other = _still(_add(w, "big_slime", Vector2.ZERO))
+			other.pos = Config.TORCH.pos + Vector2(0.0, far)
+			var struck = _still(_add(w, "slime", Vector2(w.chop_ahead() if who == "woodcutter" else 40.0 if who == "mage" else NEAR.x, 0.0)))
+			struck.hp = 1
+			var shots := _shots(w, roundi(w.stat("attack_time") / Config.STEP) + 1, "attack")
+			var reached: bool = far <= reach
+			_expect(out, "%s with beacon: the blow kills the enemy in the light, and the spark goes for the other one %d from the torch (%s) %s" % [who, far, "in the light" if w.in_light(other.pos) else "in the dark", "" if reached else "only if a spark flies that far: it does not, and the wait does not start"],
+				[struck.dead, shots.size(), _one_shot_at(shots, other.pos), w.next_beacon > w.time], [true, 1 if reached else 0, reached, reached])
 	var dark = _night(DARK, ["spark", "fire_blade", "beacon"])
+	dark.next_spark = NEVER
 	var unlit = _still(_add(dark, "big_slime", NEAR))
-	_play(dark, SWING, "attack")
-	_expect(out, "beacon: an enemy hit outside the light is not marked", [unlit.hp < unlit.full_hp, dark.marked], [true, null])
+	var none := _shots(dark, SWING, "attack")
+	_expect(out, "beacon: a blow on an enemy outside the light fires nothing", [unlit.hp < unlit.full_hp, none.size()], [true, 0])
+	var ring = _night(Vector2(40.0, 0.0), ["spark", "fire_blade", "beacon", "ember_ring"])
+	ring.next_spark = NEVER
+	_still(_add(ring, "big_slime", Vector2(-20.0, 0.0)))
+	_expect(out, "beacon: what is not the keeper's own blow (the ember ring's burn) fires nothing", _shots(ring, 5).size(), 0)
 	for with in [false, true]:
 		var w = _night(LIT, ["dash", "thorns"] + (["bramble"] if with else []))
 		var dmg: int = World.upgrade("bramble", 1).dash_damage if with else 0

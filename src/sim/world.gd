@@ -51,6 +51,7 @@ var next_spawn := 0.0
 var next_wood := 0.0
 var next_berry := 0.0
 var next_ember := 0.0
+var next_scorch := 0.0
 var next_spark := 0.0
 var next_thorn := 0.0
 var sparks: Array = [] # embers the torch fired: { pos, vel, life }
@@ -62,7 +63,7 @@ var surges_due: Array = [] # tonight's surges still to come, first first: { kind
 var surge_slow := 1.0 # what the gap between the trickle's enemies is multiplied by tonight, to make up for the surges
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
 var haste_until := 0.0 # the night time until which the keeper walks and attacks faster for a kill (haste, haste_attack)
-var marked = null # the enemy the torch's sparks go for (mark_haste): the last one the keeper's blow hit in the light
+var next_beacon := 0.0 # the night time from which a blow in the light makes the torch fire again (beacon_every)
 var events: Array = [] # what happened in the last step; see the top of this file
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
 var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)
@@ -120,13 +121,14 @@ func reset() -> void:
 	next_spawn = N.first_spawn
 	next_wood = Config.WOOD.first
 	next_ember = 0.0
+	next_scorch = 0.0
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
 	bolts = []
 	blade_kills = 0
 	haste_until = 0.0
-	marked = null
+	next_beacon = 0.0
 	omen = ""
 	_dusk()
 	stats = character_stats(character)
@@ -496,8 +498,6 @@ func can_fill(id: String) -> bool:
 	return row.has("fuel") or row.has("logs") or row.has("score") or player.hp < max_hp()
 
 
-## A card's chance of being drawn, against 1: Config.BUILD.combo_weight for a combined upgrade, rare_weight for a
-## rare one.
 ## Whether this keeper can still come to hold this combined upgrade (a row with needs): it is not held, it and both
 ## upgrades it needs are this keeper's to have (only), and those of the two not held yet still fit their sides' free
 ## slots. What an ingredient's card and its line on the pause screen ask before they name it (Ui.combo_hint).
@@ -512,6 +512,8 @@ func can_combine(made: String) -> bool:
 	return true
 
 
+## A card's chance of being drawn, against 1: Config.BUILD.combo_weight for a combined upgrade, rare_weight for a
+## rare one.
 static func weight(id: String) -> float:
 	var row: Dictionary = Config.UPGRADES.get(id, {})
 	if row.has("needs"):
@@ -575,6 +577,7 @@ func _take(id: String, act := true) -> void:
 func _fill(row: Dictionary) -> void:
 	fuel = minf(max_fuel(), fuel + row.get("fuel", 0.0))
 	player.hp = mini(max_hp(), player.hp + row.get("heal", 0))
+	score += row.get("score", 0)
 	var count: int = row.get("logs", 0)
 	for i in count:
 		logs.append(T.pos + Vector2(row.log_at, 0.0).rotated(TAU * i / count))
@@ -591,7 +594,6 @@ func _end_or_offer() -> void:
 		picks_done += 1
 		_offer()
 
-	score += row.get("score", 0)
 
 ## The night is over. The sun clears the field, you rest (fully, from Config.HARDEN.from: with the hearts that night
 ## gives), the torch is topped up, and the next night begins with the torch's offer.
@@ -611,10 +613,11 @@ func _dawn() -> void:
 	next_spawn = N.first_spawn
 	next_wood = Config.WOOD.first
 	next_ember = 0.0
+	next_scorch = 0.0
 	next_spark = 0.0
 	next_thorn = 0.0
 	haste_until = 0.0
-	marked = null
+	next_beacon = 0.0
 	sparks = []
 	bolts = []
 	_dusk()
@@ -718,24 +721,48 @@ func _torch() -> void:
 	var ring: float = mod("ember_radius", 0.0)
 	if ring > 0.0 and time >= next_ember:
 		next_ember = time + mod("ember_every", 1.0)
-		var kills: bool = mod("ember_kills", false)
 		for e in enemies:
-			# The ring scorches but never kills: the last point is left for you to strike (unless ember_kills).
-			if not e.dead and (e.hp > 1 or kills) and e.pos.distance_to(T.pos) <= ring:
+			# The ring scorches but never kills: the last point is left for you to strike (or for scorch, below).
+			if not e.dead and e.hp > 1 and e.pos.distance_to(T.pos) <= ring:
+				_damage(e, 1, T.pos)
+	var finish: float = mod("scorch_every", 0.0)
+	if ring > 0.0 and finish > 0.0 and time >= next_scorch:
+		next_scorch = time + finish
+		for e in enemies:
+			if not e.dead and e.hp <= 1 and not e.T.get("boss", false) and e.pos.distance_to(T.pos) <= ring:
 				_damage(e, 1, T.pos)
 	var every: float = mod("spark_every", 0.0)
-	if every > 0.0 and time >= next_spark:
-		var target = null # the marked enemy (mark_haste) while it lives in the light, else the nearest enemy in the light
-		if marked != null and not marked.dead and not marked.gone and in_light(marked.pos):
-			target = marked
-		for e in enemies if target == null else []:
-			if not e.dead and in_light(e.pos) and (target == null or e.pos.distance_to(T.pos) < target.pos.distance_to(T.pos)):
-				target = e
-		if target != null:
-			next_spark = time + every
-			var from: Vector2 = T.pos + Config.SPARK.mouth
-			sparks.append({ "pos": from, "vel": (target.pos - from).normalized() * Config.SPARK.speed, "life": Config.SPARK.life })
-			events.append({ "kind": "shot", "pos": from })
+	if every > 0.0 and time >= next_spark and _spark_at(_nearest(light_radius())):
+		next_spark = time + every
+
+
+## The living enemy nearest the torch, no further from it than within, or null.
+func _nearest(within: float):
+	var best = null
+	for e in enemies:
+		if not e.dead and e.pos.distance_to(T.pos) <= within and (best == null or e.pos.distance_to(T.pos) < best.pos.distance_to(T.pos)):
+			best = e
+	return best
+
+
+## The torch fires a spark (Config.SPARK) at target. False, and nothing fired, when there is none.
+func _spark_at(target) -> bool:
+	if target == null:
+		return false
+	var from: Vector2 = T.pos + Config.SPARK.mouth
+	sparks.append({ "pos": from, "vel": (target.pos - from).normalized() * Config.SPARK.speed, "life": Config.SPARK.life })
+	events.append({ "kind": "shot", "pos": from })
+	return true
+
+
+## The beacon (beacon_every): the keeper's own blow has just landed on e in the torch's light, so the torch fires a
+## spark at once, at e if it still lives and else at the enemy nearest the torch that a spark flies far enough to
+## reach (in the light or not), at most once every beacon_every seconds. The torch's own sparks (spark_every) come as
+## they would without it.
+func _beacon(e) -> void:
+	var every: float = mod("beacon_every", 0.0)
+	if every > 0.0 and time >= next_beacon and in_light(e.pos) and _spark_at(_nearest(Config.SPARK.speed * Config.SPARK.life) if e.dead else e):
+		next_beacon = time + every
 
 
 ## The thorn cloak pricks every enemy pressed up against you every so often, besides hurting the ones that hit you.
@@ -879,11 +906,9 @@ func _damage(e, n: int, from: Vector2, blade := false, push := 1.0) -> void:
 		return
 	e.hit(n, from, push)
 	events.append({ "kind": "kill" if e.dead else "hit", "pos": e.pos, "dir": dir, "enemy": e.kind, "tier": e.tier })
+	if blade:
+		_beacon(e)
 	if not e.dead:
-		var haste: float = mod("mark_haste", 0.0)
-		if blade and haste > 0.0 and in_light(e.pos): # marked: the torch's sparks go for it, the next one soon
-			marked = e
-			next_spark = minf(next_spark, time + mod("spark_every", 0.0) * haste)
 		return
 	score += e.T.get("score", Config.SCORE.kill)
 	if mod("haste_time", 0.0) > 0.0:
