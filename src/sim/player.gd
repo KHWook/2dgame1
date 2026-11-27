@@ -25,6 +25,7 @@ var spin := false # this swing goes all the way round
 var dash_t := 0.0 # time left in a dash, or 0
 var dash_wait := 0.0 # time until the next dash is ready
 var dash_dir := Vector2.DOWN
+var dashed: Array = [] # the enemies this dash has hurt (World._trample): each once a dash
 var dropped = null # where the log you just put down lies, until you step off it; null otherwise
 
 
@@ -53,7 +54,8 @@ func step(world, inp) -> void:
 			dir = Vector2.from_angle(TAU * inp.stick / Config.STICK_DIRECTIONS)
 		var slow: bool = carrying and not world.mod("carry_full", false)
 		var lit: float = world.mod("lit_speed_mult", 1.0) if world.in_light(pos) else 1.0 # the bright fire upgrade
-		vel = dir * (carry_speed() if slow else P.speed) * lit
+		var haste: float = world.mod("haste", 1.0) if world.time < world.haste_until else 1.0 # just after a kill
+		vel = dir * (carry_speed() if slow else P.speed) * lit * haste
 		if dir != Vector2.ZERO and attack_t < 0.0:
 			face = dir
 		var every: float = world.mod("dash_every", 0.0)
@@ -61,6 +63,7 @@ func step(world, inp) -> void:
 			dash_dir = dir if dir != Vector2.ZERO else face
 			dash_t = P.dash_time
 			dash_wait = every
+			dashed = []
 			vel = dash_dir * P.dash_speed
 		# swift's last level attacks by itself: ready, holding nothing, an enemy in reach (Config auto_attack)
 		var auto: bool = attack_t < 0.0 and not carrying and world.mod("auto_attack", false) and world.foe_in_reach(pos)
@@ -98,9 +101,10 @@ func carry_speed() -> float:
 	return P.carry_speed - P.carry_slow * maxi(0, held - 1)
 
 
-## Takes one more log into its arms. False when they are full.
-func take_log() -> bool:
-	if held >= P.carry:
+## Takes one more log into its arms. False when they are full: most logs, its character's carry unless the world
+## says otherwise (World.carry()).
+func take_log(most := -1) -> bool:
+	if held >= (P.carry if most < 0 else most):
 		return false
 	held += 1
 	carrying = true
