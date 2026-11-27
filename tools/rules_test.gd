@@ -27,6 +27,7 @@ const NEVER := 1.0e9 # a time that does not come: keeps the night from adding th
 static func run() -> Array:
 	var out := []
 	out.append_array(_swing_area())
+	out.append_array(_splash())
 	out.append_array(_shade())
 	out.append_array(_big_slime())
 	out.append_array(_thief())
@@ -191,6 +192,56 @@ static func _swing_area() -> Array:
 					out.append("the trail or the smear still shows once the blow has stopped landing (%s)" % [ups])
 	_expect(out, "the painter drew a trail in the swings", drawn > 0, true)
 	_expect(out, "the painter drew a smear in the swings", smeared > 0, true)
+	return out
+
+
+## A still enemy of kind at from_player, that does not walk.
+static func _planted(w, kind: String, from_player: Vector2):
+	var e = _add(w, kind, from_player)
+	e.T = e.T.duplicate()
+	e.T.speed = 0.0
+	return e
+
+
+## The mage's ember bursts where it stops (bolt.splash): splash_damage on every other enemy whose body comes within
+## splash of the middle of the one it stopped in (a slime a pixel inside the edge burns, one a pixel outside does
+## not), told as a "burst" with that radius; not on the enemies it goes through in the light, only the last; each
+## ember of a fan bursts on its own; the embers' light is only to see by (the rules' light stays the torch's).
+static func _splash() -> Array:
+	var out := []
+	var B: Dictionary = World.character_stats("mage").bolt
+	var r: float = Config.ENEMY_TYPES.slime.radius
+	for inside in [true, false]:
+		var w = _night(DARK, [], "mage")
+		var target = _planted(w, "big_slime", Vector2(40.0, 0.0))
+		var side = _planted(w, "slime", Vector2(40.0, B.splash + r + (-0.5 if inside else 0.5)))
+		var far = _planted(w, "slime", Vector2(40.0, -(B.splash + r + 20.0)))
+		var told := []
+		for i in 30:
+			told.append_array(_play(w, 1, "attack" if i == 0 else ""))
+			for ev in w.events:
+				if ev.kind == "burst":
+					_expect(out, "a burst is told with its radius, at the enemy it stopped in", [ev.radius, ev.pos], [B.splash, target.pos])
+		_expect(out, "the ember burns its target (%s)" % ("inside" if inside else "outside"), target.hp, Config.ENEMY_TYPES.big_slime.hp - B.damage)
+		_expect(out, "the burst burns a slime a pixel %s its edge %s" % ["inside" if inside else "outside", "" if inside else "not at all"], side.hp, Config.ENEMY_TYPES.slime.hp - (B.splash_damage if inside else 0))
+		_expect(out, "the burst leaves a slime far off alone, and is told once", [far.hp, told.count("burst")], [Config.ENEMY_TYPES.slime.hp, 1])
+		_expect(out, "in_splash says the same (%s)" % ("inside" if inside else "outside"), World.in_splash(Vector2.ZERO, B.splash, Vector2(0.0, B.splash + r + (-0.5 if inside else 0.5)), r), inside)
+	# In the light the ember goes through one and bursts on the next, not on the one it went through.
+	var w = _night(Vector2(-50.0, 0.0), [], "mage")
+	var through = _planted(w, "big_slime", Vector2(25.0, 0.0))
+	var stop = _planted(w, "big_slime", Vector2(63.0, 0.0))
+	var by_through = _planted(w, "slime", Vector2(25.0, -(B.splash + r - 1.0)))
+	var by_stop = _planted(w, "slime", Vector2(63.0, B.splash + r - 1.0))
+	var told := _play(w, 30, "attack")
+	_expect(out, "in the light the ember bursts once, on the enemy it stops in", [told.count("burst"), by_through.hp, by_stop.hp], [1, Config.ENEMY_TYPES.slime.hp, Config.ENEMY_TYPES.slime.hp - B.splash_damage])
+	_expect(out, "...after going through the first", [through.hp < through.full_hp, stop.hp < stop.full_hp], [true, true])
+	# A fan of three: each ember bursts where it stops.
+	w = _night(DARK, ["spin"], "mage")
+	w.player.swings = 2
+	for turn in [-B.spread, 0.0, B.spread]:
+		_planted(w, "big_slime", Vector2.from_angle(turn) * 60.0)
+	told = _play(w, 40, "attack")
+	_expect(out, "each ember of a fan bursts on its own", told.count("burst"), 3)
 	return out
 
 
@@ -1639,7 +1690,7 @@ static func _mage() -> Array:
 	w = _night(Vector2(-50.0, 0.0), [], "mage") # in the light: it goes through lit_pierce more
 	var line := []
 	for i in B.lit_pierce + 2:
-		var e = _add(w, "big_slime", Vector2(25.0 + 22.0 * i, 0.0))
+		var e = _add(w, "big_slime", Vector2(25.0 + 38.0 * i, 0.0)) # apart by more than a burst (bolt.splash)
 		e.T = e.T.duplicate()
 		e.T.speed = 0.0
 		line.append(e)
@@ -1799,6 +1850,24 @@ static func _fx_sizes() -> Array:
 	var late: float = fposmod(first[3] - first[2], Painter.CHEVRON_GAP)
 	_expect(out, "the chevrons slide toward the end, faster as the wind-up runs out", early > 0.0 and late > early, true)
 	out.append_array(_attack_fx())
+	var B: Dictionary = World.character_stats("mage").bolt
+	w = _night(DARK, [], "mage")
+	_planted(w, "big_slime", Vector2(40.0, 0.0))
+	var bfx = Effects.new(1)
+	for i in 30:
+		_play(w, 1, "attack" if i == 0 else "")
+		bfx.step(w)
+		if bfx.rings.size() > 0:
+			break
+	_expect(out, "an ember's burst throws one ring", bfx.rings.size(), 1)
+	if bfx.rings.size() == 1:
+		var ring: Dictionary = bfx.rings[0]
+		var burst_radii := []
+		for i in Effects.RINGS.burst[0]:
+			burst_radii.append(Effects.ring_radius(ring))
+			ring.age += 1
+		_expect(out, "the burst's ring ends at the splash radius", snappedf(burst_radii[-1], 0.001), B.splash)
+		_expect(out, "the burst's ring never goes past it", burst_radii.all(func(x): return x <= B.splash + 0.001), true)
 	return out
 
 

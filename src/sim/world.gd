@@ -588,8 +588,26 @@ func _bolts() -> void:
 			_damage(e, B.damage + ((B.lit_bonus + mod("lit_damage", 0)) if lit else 0), e.pos - b.dir, true, B.push)
 			if b.hit.size() > b.pierce + (B.lit_pierce if lit else 0):
 				b.left = 0.0
+				_splash(e) # it bursts where it stops: on the last enemy it burns, not on those it goes through
 				break
 	bolts = bolts.filter(func(b): return b.left > 0.0)
+
+
+## Whether a body of radius r at at is inside an ember's burst centred on centre: its edge comes within splash pixels.
+## The painter's burst ring ends at that radius (src/art/effects.gd), so what it is seen to cover, it burns.
+static func in_splash(centre: Vector2, splash: float, at: Vector2, r: float) -> bool:
+	return centre.distance_to(at) < splash + r
+
+
+## An ember burst on e: splash_damage on every other enemy in it (in_splash), struck from e's middle. Taken before
+## any of it lands, so the halves of a big slime it breaks are not burned by the same burst.
+func _splash(e) -> void:
+	var B: Dictionary = stats.bolt
+	var centre: Vector2 = e.pos
+	events.append({ "kind": "burst", "pos": centre, "radius": B.splash })
+	var caught := enemies.filter(func(o): return o != e and not o.dead and in_splash(centre, B.splash, o.pos, o.T.radius))
+	for o in caught:
+		_damage(o, B.splash_damage, centre, true, B.splash_push)
 
 
 ## A blow of n lands on e, struck from from (by the sword when blade). The dark protects some enemies; a thief drops

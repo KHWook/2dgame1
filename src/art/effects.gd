@@ -67,7 +67,9 @@ const MAX_FLASHES := 24
 ## Rings thrown out from a spot: debris chunks out to a landing's shock (its "landed" event's shock: as far as it
 ## hurt), or smoke puffs round a boss breaking in or a decoy. kind -> [steps it lasts, pieces round it, radius it
 ## ends at (0: the event's shock)].
-const RINGS := { "debris": [18, 16, 0.0], "smoke": [16, 6, 14.0], "wisp": [16, 4, 8.0] }
+## A burst: an ember bursting on the enemy it stopped in, out to its "burst" event's radius (World.in_splash: what
+## the ring is seen to cover, it burns).
+const RINGS := { "debris": [18, 16, 0.0], "smoke": [16, 6, 14.0], "wisp": [16, 4, 8.0], "burst": [12, 14, 0.0] }
 const DEBRIS := ["m", "M", "t", "T", "c"]
 const DEBRIS_HOP := 3.0 # pixels a chunk rises on its way out
 
@@ -128,6 +130,8 @@ func step(w) -> void:
 				_ring("debris", ev.pos, ev.get("shock", 0.0))
 			"healed":
 				_burst(BURSTS.heal, ev.pos + HEAD, Vector2.UP, _keys(HEAL))
+			"burst":
+				_ring("burst", ev.pos, ev.radius)
 	_follow(w)
 	if bits.size() > MAX_BITS:
 		bits = bits.slice(bits.size() - MAX_BITS)
@@ -258,7 +262,11 @@ func _paint_ring(c: CanvasItem, r: Dictionary) -> void:
 	for i in n:
 		var a := TAU * (i + 0.37 * (i % 3)) / n
 		var at: Vector2 = r.pos + Vector2.from_angle(a) * out
-		if r.kind == "debris":
+		if r.kind == "burst": # tongues of fire, white-hot at first, cooling as they reach the edge
+			var size := 2.0 if k < 0.5 else 1.0
+			var colour: Color = Sprites.PALETTE[FIRE[mini(FIRE.size() - 1, int(k * FIRE.size() + (i % 2) * 0.5))]]
+			c.draw_rect(Rect2((at - Vector2(size, size) / 2.0).round(), Vector2(size, size)), Color(colour, 1.0 - k * k))
+		elif r.kind == "debris":
 			var size := 2.0 if k < 0.5 and i % 2 == 0 else 1.0
 			var colour: Color = Sprites.PALETTE[DEBRIS[i % DEBRIS.size()]]
 			at.y -= sin(k * PI) * DEBRIS_HOP

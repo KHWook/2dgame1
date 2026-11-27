@@ -26,7 +26,10 @@ const PLAYER := {
 ## bolt (attack "shoot"): the ember it fires toward World.aim(). It flies speed pixels a second for range pixels,
 ## hits what its radius touches (World.in_bolt), does damage, lit_bonus more to an enemy in the torch's light, pushes
 ## push of a blow's knockback and passes through pierce enemies before it stops (lit_pierce more in the light); spread: radians between the embers
-## of a fan (the spin upgrade as the mage has it). Upgrade rows can read differently per character (UPGRADES' as).
+## of a fan (the spin upgrade as the mage has it). splash: where an ember burns an enemy it bursts, and splash_damage
+## burns every other enemy whose body comes within splash pixels of that enemy's middle (World.in_splash), pushed out
+## by splash_push of a blow's knockback, so a crowd melts and does not just queue up for the next shot.
+## Upgrade rows can read differently per character (UPGRADES' as).
 const CHARACTERS := {
 	"knight": {
 		"name": "기사", "text": "칼을 든 횃불 지기. 무엇이든 고르게 해낸다", "trait": "약점 없음",
@@ -46,7 +49,8 @@ const CHARACTERS := {
 		"bars": [["힘", 2], ["거리", 5], ["장작", 1]],
 		"stats": { "hp": 3, "attack": "shoot", "attack_time": 0.68, "attack_hit_at": 0.06, "attack_hit_until": 0.06,
 			"carry_speed": 50.0,
-			"bolt": { "speed": 200.0, "range": 100.0, "radius": 3.0, "damage": 1, "lit_bonus": 1, "push": 0.5, "pierce": 0, "lit_pierce": 1, "spread": 0.3 } },
+			"bolt": { "speed": 200.0, "range": 100.0, "radius": 3.0, "damage": 1, "lit_bonus": 1, "push": 0.5, "pierce": 0, "lit_pierce": 1, "spread": 0.3,
+				"splash": 16.0, "splash_damage": 1, "splash_push": 0.3 } },
 	},
 }
 
