@@ -16,6 +16,7 @@ const Records := preload("res://src/records.gd")
 const Sprites := preload("res://src/art/sprites.gd")
 const Guide := preload("res://src/guide.gd")
 const Coach := preload("res://src/coach.gd")
+const Chooser := preload("res://src/chooser.gd")
 
 signal chosen(slot: int) # a card was clicked: main.gd presses that slot's key for the next step
 
@@ -131,6 +132,16 @@ const GUIDE_DOT_OFF := "○"
 const GUIDE_BOX := Rect2(80.0, 8.0, 320.0, 204.0) # the page's panel: clear of where the controls page draws the stick and the buttons
 const GUIDE_WAITING := 0.35 # how solid the buttons are while the guide does not listen yet
 ## The short lines under the cards, the end and the pause screen: for keys, and for a phone (src/touch.gd).
+## The choosing screen (src/chooser.gd): a card per character, dealt in like the offer, the one in focus lifted.
+const CHOOSE_TITLE := "누가 횃불을 지킬까"
+const CHOOSE_KEYS := "1 · 2 · 3 키, ← → 와 Enter, 또는 클릭으로 고르기"
+const CHOOSE_TOUCH := "카드를 눌러 고르기"
+const CHOOSE_PORTRAIT := 3.0 # the character's picture on its card, this many times its size
+const CHOOSE_PIPS := 5 # pips per bar
+const CHOOSE_PIP := Vector2(9.0, 4.0)
+const CHOOSE_PIP_OFF := Color("#3a3350")
+const CHOOSE_BAR_NAME := 26.0 # the width kept for a bar's name, so the pips line up
+const CHOOSE_HP := "체력"
 const PICK_KEYS := "1 · 2 · 3 키 또는 클릭으로 고르기"
 const PICK_TOUCH := "카드를 눌러 고르기"
 const AGAIN_KEYS := "R 다시 하기"
@@ -153,6 +164,12 @@ var bot_slot := 0 # the demo bot's slot, from 1; 0 without a bot
 var bot_looked := 0 # set by main.gd: steps the demo bot has looked at this offer
 var paused := false
 var intro := false # set by main.gd: the first screen is up
+var choosing := false # set by main.gd: the choosing screen is up
+var chooser = Chooser.new() # what the choosing screen's input does; main.gd feeds it
+var choose_title: Label
+var choose_hint: Label
+var choose_cards: Array = [] # per character, in Chooser.ids() order: { card, style, key_style, focus }
+var choose_age := 0.0 # real seconds since the choosing screen opened
 var guide = Guide.new() # what the first screen's input does; main.gd feeds it
 var coach = Coach.new() # the first night's arrows, on for a player who has not read the guide
 var guide_box: PanelContainer
@@ -344,6 +361,18 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	coach_label = _label(self, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	coach_label.visible = false
 
+	choose_title = _label(self, HUGE, WARM, HORIZONTAL_ALIGNMENT_CENTER)
+	choose_title.text = CHOOSE_TITLE
+	choose_title.size = Vector2(Painter.VIEW.x, 18.0)
+	choose_title.position = Vector2(0.0, Chooser.TOP - 22.0)
+	choose_hint = _label(self, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	choose_hint.size = Vector2(Painter.VIEW.x, 12.0)
+	choose_hint.position = Vector2(0.0, Chooser.TOP + Chooser.CARD.y + 6.0)
+	for i in Chooser.ids().size():
+		choose_cards.append(_char_card(i, Chooser.ids()[i]))
+	choose_title.visible = false
+	choose_hint.visible = false
+
 	flier = TextureRect.new()
 	flier.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	flier.stretch_mode = TextureRect.STRETCH_SCALE
@@ -391,11 +420,12 @@ func frame(w, delta: float) -> void:
 	again.text = AGAIN_TOUCH if touch else AGAIN_KEYS
 	pause_keys.text = PAUSE_TOUCH if touch else PAUSE_KEYS
 	_top(w, delta)
-	if intro: # the offer waits under the first screen, and is dealt once it is gone
+	if intro or choosing: # the offer waits under the first screen and the choosing, and is dealt once they are gone
 		box.visible = false
 	else:
 		_offer(w, delta)
 	_guide_frame(delta)
+	_choose_frame(delta)
 	_coach_frame(w)
 	_flight(w, delta)
 	_told(w, delta)
@@ -405,7 +435,7 @@ func frame(w, delta: float) -> void:
 		pause_box.reset_size()
 		pause_box.position = ((Painter.VIEW - pause_box.size) / 2.0).round()
 	var ended: bool = ENDINGS.has(w.phase)
-	var target := INTRO_SCRIM if intro else 0.55 if paused else (0.5 if ended else (0.45 if w.phase == "pick" else 0.0))
+	var target := INTRO_SCRIM if intro or choosing else 0.55 if paused else (0.5 if ended else (0.45 if w.phase == "pick" else 0.0))
 	if taken >= 0:
 		target = 0.45 * (1.0 - take_age / TAKE_TIME)
 	painter.scrim = move_toward(painter.scrim, target, delta * 3.0)
@@ -490,7 +520,7 @@ func _offer(w, delta: float) -> void:
 	var picking: bool = w.phase == "pick"
 	var ended: bool = ENDINGS.has(w.phase)
 	if picking:
-		var key := ",".join(w.offer) + "/%d/%d" % [w.picks.size(), w.night]
+		var key := ",".join(w.offer) + "/%d/%d/%s" % [w.picks.size(), w.night, w.character]
 		if key != offer_key:
 			offer_key = key
 			deal = 0.0
@@ -604,7 +634,7 @@ func _hovered(shown: Array, at = null) -> int:
 
 func _input(event: InputEvent) -> void:
 	var b := event as InputEventMouseButton
-	if b == null or not b.pressed or b.button_index != MOUSE_BUTTON_LEFT or paused or intro or offer_key == "":
+	if b == null or not b.pressed or b.button_index != MOUSE_BUTTON_LEFT or paused or intro or choosing or offer_key == "":
 		return
 	var shown := []
 	for i in offers.size():
@@ -628,15 +658,15 @@ func _fill_cards(w) -> void:
 		shown += 1
 		var id: String = w.offer[i]
 		var next: int = w.level(id) + 1
-		var u: Dictionary = World.upgrade(id, next)
-		var icon: Texture2D = painter.icon(id, true)
+		var u: Dictionary = World.upgrade(id, next, w.character)
+		var icon: Texture2D = painter.icon(id, true, w.character)
 		o.icon.texture = icon
 		o.icon.custom_minimum_size = icon.get_size() * CARD_ICON
 		o.name.text = u.name + (LEVEL % next if next > 1 else "")
 		var most := World.max_level(id)
 		o.tag.text = "새 힘" if next == 1 else ("%d단계 · 마지막" % next if next >= most else "%d단계 · 최대 %d" % [next, most])
 		o.tag.add_theme_color_override("font_color", FRESH if next == 1 else GOLD)
-		o.side.text = Looks.SIDE_NAMES[Looks.side(id)]
+		o.side.text = Looks.side_name(Looks.side(id), w.character)
 		o.side.add_theme_color_override("font_color", SIDE_COLOUR[Looks.side(id)])
 		o.text.text = _wrap(o.text, u.text, CARD.x - 8.0)
 		o.card.custom_minimum_size = CARD
@@ -700,7 +730,7 @@ func _fill_end(w) -> void:
 	heading.text = ENDINGS[w.phase]
 	heading.add_theme_font_size_override("font_size", HUGE)
 	heading.add_theme_color_override("font_color", RED if w.phase == "dead" else Color("#ff9a3c"))
-	foot.text = "%d번째 밤 · 점수 %d" % [w.night, w.score] + (" · 새 기록!" if records.place == 1 else (" · %d위" % records.place if records.place > 1 else ""))
+	foot.text = "%s · %d번째 밤 · 점수 %d" % [Config.CHARACTERS[w.character].name, w.night, w.score] + (" · 새 기록!" if records.place == 1 else (" · %d위" % records.place if records.place > 1 else ""))
 	foot.add_theme_color_override("font_color", GOLD if records.place == 1 else CREAM)
 	var ids := Painter.held(w)
 	held_head.visible = not ids.is_empty()
@@ -722,11 +752,11 @@ func _fill_end(w) -> void:
 ## An upgrade held, as a small row: its icon, its name and level in its side's colour, and (wide) what it does.
 func _held_item(w, id: String, words: bool) -> Control:
 	var level: int = w.level(id)
-	var u: Dictionary = World.upgrade(id, level)
+	var u: Dictionary = World.upgrade(id, level, w.character)
 	var item := HBoxContainer.new()
 	item.add_theme_constant_override("separation", 3)
 	var icon := _icon(item)
-	icon.texture = painter.icon(id, true)
+	icon.texture = painter.icon(id, true, w.character)
 	icon.custom_minimum_size = icon.texture.get_size()
 	var lines := VBoxContainer.new()
 	lines.add_theme_constant_override("separation", 0)
@@ -750,7 +780,7 @@ func _fill_pause(w) -> void:
 	var ids := Painter.held(w)
 	var lines := 0
 	for id in ids:
-		lines += 1 + int(ceilf(_text_width(World.upgrade(id, w.level(id)).text) / (PAUSE_COLUMN - 14.0)))
+		lines += 1 + int(ceilf(_text_width(World.upgrade(id, w.level(id), w.character).text) / (PAUSE_COLUMN - 14.0)))
 	var per_side := {}
 	for side in Looks.SIDES:
 		per_side[side] = ids.filter(func(id): return Looks.side(id) == side)
@@ -776,7 +806,7 @@ func _pause_rows(w, per_side: Dictionary, words: bool) -> void:
 		column.add_theme_constant_override("separation", 3)
 		pause_columns.add_child(column)
 		var head := _label(column, SMALL, SIDE_COLOUR[side])
-		head.text = Looks.SIDE_NAMES[side]
+		head.text = Looks.side_name(side, w.character)
 		for id in per_side[side]:
 			column.add_child(_held_item(w, id, words))
 
@@ -797,7 +827,7 @@ func _flight(w, delta: float) -> void:
 			var e := t * t * (3.0 - 2.0 * t)
 			var at := fly_from.lerp(to, e) + Vector2(0.0, -FLY_ARC * sin(e * PI))
 			var size := Painter.ICON_SIZE * lerpf(CARD_ICON, 1.0, e)
-			flier.texture = painter.icon(fly_id, true)
+			flier.texture = painter.icon(fly_id, true, w.character)
 			flier.size = Vector2(size, size)
 			flier.position = at - flier.size / 2.0
 	elif fly_id != "":
@@ -817,8 +847,8 @@ func _flight(w, delta: float) -> void:
 
 func _fill_told(w, id: String) -> void:
 	var level: int = w.level(id)
-	var u: Dictionary = World.upgrade(id, level)
-	told_icon.texture = painter.icon(id, true)
+	var u: Dictionary = World.upgrade(id, level, w.character)
+	told_icon.texture = painter.icon(id, true, w.character)
 	told_icon.custom_minimum_size = told_icon.texture.get_size() * CARD_ICON
 	told_name.text = u.name + (LEVEL % level if level > 1 else "") + ("  얻었다!" if level == 1 else "  강해졌다!")
 	told_text.text = u.text
@@ -902,7 +932,7 @@ func _board() -> String:
 	for i in mini(records.runs.size(), Records.SHOWN):
 		var r: Dictionary = records.runs[i]
 		var mark := "  ◀ 이번" if is_same(r, records.latest) else ""
-		lines.append("%d위   %d점 · %d번째 밤 · %s%s" % [i + 1, r.score, r.night, _day(r.date), mark])
+		lines.append("%d위   %d점 · %s · %d번째 밤 · %s%s" % [i + 1, r.score, Config.CHARACTERS[r.char].name, r.night, _day(r.date), mark])
 	return ("최고 기록\n" + "\n".join(lines)) if not lines.is_empty() else ""
 
 
@@ -990,6 +1020,105 @@ func _guide_frame(delta: float) -> void:
 	guide_left.modulate.a = 1.0 if ready else GUIDE_WAITING
 
 
+## The choosing screen: the cards dealt in one after another, bobbing, the one in focus lifted and gold-edged, the
+## heading over them and what to press under them; the cards are drawn at Chooser.rect(), where they answer.
+func _choose_frame(delta: float) -> void:
+	chooser.frame(delta)
+	choose_age = choose_age + delta if choosing else 0.0
+	choose_title.visible = choosing
+	choose_hint.visible = choosing
+	for i in choose_cards.size():
+		choose_cards[i].card.visible = choosing
+	if not choosing:
+		return
+	choose_hint.text = CHOOSE_TOUCH if touch else CHOOSE_KEYS
+	var ready: bool = chooser.listening()
+	choose_hint.modulate.a = (0.75 + 0.25 * sin(clock_time * INTRO_BLINK)) if ready else GUIDE_WAITING
+	choose_title.modulate.a = clampf(choose_age / FADE, 0.0, 1.0)
+	for i in choose_cards.size():
+		var c: Dictionary = choose_cards[i]
+		var card: PanelContainer = c.card
+		var k := clampf((choose_age - i * DEAL_APART) / DEAL_TIME, 0.0, 1.0)
+		c.focus = move_toward(c.focus, 1.0 if chooser.focus == i else 0.0, delta * FOCUS_RATE)
+		var f: float = c.focus
+		var pos: Vector2 = Chooser.rect(i).position + Vector2(0.0, (1.0 - _back(k)) * DEAL_DROP)
+		if k >= 1.0:
+			pos.y += sin(clock_time * BOB_SPEED + i * 1.7) * BOB * (1.0 - f)
+		pos.y -= f * FOCUS_LIFT
+		card.size = Chooser.CARD
+		card.pivot_offset = Chooser.CARD / 2.0
+		card.position = pos.round() if k >= 1.0 and f == 0.0 else pos
+		card.scale = Vector2(smoothstep(0.0, 1.0, k), 1.0) * (1.0 + FOCUS_GROW * f)
+		var shade := 1.0 if f > 0.5 else UNFOCUSED
+		card.modulate = Color(shade, shade, shade, clampf(k * 2.5, 0.0, 1.0))
+		var style: StyleBoxFlat = c.style
+		style.border_color = CARD_EDGE.lerp(GOLD, f)
+		style.set_border_width_all(2 if f > 0.5 else 1)
+		style.shadow_color = Color(GOLD, 0.45 * f)
+		style.shadow_size = int(round(5.0 * f))
+		c.key_style.bg_color = CARD_EDGE.lerp(GOLD, f)
+
+
+## One character's card: its key, its picture enlarged, its name, what it does, a bar for its hearts and its other
+## bars (Config.CHARACTERS), and its weakness.
+func _char_card(i: int, id: String) -> Dictionary:
+	var row_: Dictionary = Config.CHARACTERS[id]
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Chooser.CARD
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var style := StyleBoxFlat.new()
+	style.bg_color = CARD_BACK
+	style.border_color = CARD_EDGE
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(3)
+	style.set_content_margin_all(4.0)
+	card.add_theme_stylebox_override("panel", style)
+	add_child(card)
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 2)
+	card.add_child(stack)
+	var badge_row := CenterContainer.new()
+	stack.add_child(badge_row)
+	var key := _label(badge_row, SMALL, INK, HORIZONTAL_ALIGNMENT_CENTER)
+	key.remove_theme_constant_override("outline_size")
+	key.text = str(i + 1)
+	var key_style := StyleBoxFlat.new()
+	key_style.bg_color = CARD_EDGE
+	key_style.set_corner_radius_all(2)
+	key_style.content_margin_left = 4.0
+	key_style.content_margin_right = 4.0
+	key.add_theme_stylebox_override("normal", key_style)
+	var portrait := TextureRect.new()
+	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	portrait.texture = Sprites.alone(Looks.character(id).sprite + "_down_a")
+	portrait.custom_minimum_size = portrait.texture.get_size() * CHOOSE_PORTRAIT
+	stack.add_child(portrait)
+	_label(stack, BIG, WARM, HORIZONTAL_ALIGNMENT_CENTER).text = row_.name
+	var text := _label(stack, SMALL, CARD_TEXT, HORIZONTAL_ALIGNMENT_CENTER)
+	text.remove_theme_constant_override("outline_size")
+	text.text = _wrap(text, row_.text, Chooser.CARD.x - 10.0)
+	text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var bars: Array = [[CHOOSE_HP, World.character_stats(id).hp]] + row_.bars
+	for bar in bars:
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 2)
+		line.alignment = BoxContainer.ALIGNMENT_CENTER
+		stack.add_child(line)
+		var bar_name := _label(line, SMALL, MUTED)
+		bar_name.text = bar[0]
+		bar_name.custom_minimum_size = Vector2(CHOOSE_BAR_NAME, 0.0)
+		for n in CHOOSE_PIPS:
+			var pip := ColorRect.new()
+			pip.custom_minimum_size = CHOOSE_PIP
+			pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			pip.color = GOLD if n < bar[1] else CHOOSE_PIP_OFF
+			pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			line.add_child(pip)
+	_label(stack, SMALL, RED if row_.trait.begins_with("약점") else FRESH, HORIZONTAL_ALIGNMENT_CENTER).text = row_.trait
+	return { "card": card, "style": style, "key_style": key_style, "focus": 0.0 }
+
+
 ## A row of a guide page: its pictures (a "→" among them is an arrow), a name, and what to know.
 func _guide_row(parent: Node, line: Array) -> void:
 	var r := HBoxContainer.new()
@@ -1025,7 +1154,7 @@ func _guide_button() -> PanelContainer:
 
 ## The first night's coaching (src/coach.gd): words over a bobbing arrow above what to go to, on the HUD's layer.
 func _coach_frame(w) -> void:
-	var show: Array = [] if intro or paused or taken >= 0 else coach.now(w)
+	var show: Array = [] if intro or choosing or paused or taken >= 0 else coach.now(w)
 	coach_arrow.visible = not show.is_empty()
 	coach_label.visible = not show.is_empty()
 	if show.is_empty():

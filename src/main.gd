@@ -51,6 +51,10 @@ var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step ma
 var sfx := {} # sound name -> its AudioStreamPlayer
 var paused := false
 var intro := false # the first screen is up (src/ui.gd, src/guide.gd): the world waits until its start button
+var choosing := false # the choosing screen is up (src/chooser.gd): the world waits until a character is taken
+var chosen_by_flag := false # --char=ID picked the character: the choosing screen is skipped, as for the bot
+var start_night := 0 # --night=N: each run (whoever keeps the torch) starts at the dusk of night N
+var start_slot := 1
 var player_light: PointLight2D
 var touch # src/touch.gd: the stick and buttons on a phone
 ## Dev flags for looking at and measuring late nights; the replay and the balance tool never pass through here.
@@ -70,6 +74,7 @@ var perf_paint_us := 0
 func _ready() -> void:
 	var skip := 0
 	var slot := 1
+	var character := ""
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--seed="):
 			seed_value = int(a.substr(7))
@@ -79,17 +84,25 @@ func _ready() -> void:
 			slot = int(a.substr(7))
 		if a.begins_with("--crowd="):
 			crowd = int(a.substr(8))
+		if a.begins_with("--char="): # who keeps the torch, without the choosing screen (for the bot and dev runs)
+			character = a.substr(7)
 	perf = OS.get_cmdline_user_args().has("--perf")
 	if OS.get_cmdline_user_args().has("--bot"):
 		bot = Bot.new(slot)
 	# The window's title is the game's name on the first screen. project.godot keeps the old config/name, which on
 	# desktop names the folder user://records.json lives in; the web build's page title comes from config/name.web.
 	get_window().title = Ui.INTRO_TITLE
-	world = World.new(seed_value)
+	records = Records.new()
+	if character != "" and not Config.CHARACTERS.has(character):
+		push_warning("--char=%s is not a character (%s): the knight keeps the torch" % [character, ", ".join(Config.CHARACTERS.keys())])
+		character = "knight"
+	chosen_by_flag = character != ""
+	world = World.new(seed_value, character if chosen_by_flag else records.last_character())
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--night="):
-			world.begin_at(int(a.substr(8)), slot)
-	records = Records.new()
+			start_night = int(a.substr(8))
+			start_slot = slot
+			world.begin_at(start_night, slot)
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
 		world.step(bot.frame(world))
 	painter = Painter.new(seed_value)
@@ -154,6 +167,22 @@ func _set_intro(on: bool) -> void:
 		ui.guide.show(records.guide_read(), world.steps > 0)
 
 
+func _set_choosing(on: bool) -> void:
+	choosing = on
+	ui.choosing = on
+	if on:
+		ui.chooser.show(world.character)
+
+
+## The run starts (again) with this keeper: the same seed, the offers drawn for it.
+func _take_character(id: String) -> void:
+	records.remember_character(id)
+	world.choose(id)
+	if start_night > 0:
+		world.begin_at(start_night, start_slot)
+	_set_choosing(false)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	var click := event as InputEventMouseButton
@@ -168,9 +197,27 @@ func _unhandled_input(event: InputEvent) -> void:
 				did = ui.guide.release(click.position)
 		if did == "start":
 			records.read_guide()
+			var returning: bool = ui.guide.returning
 			_set_intro(false)
+			if not returning and bot == null and not chosen_by_flag:
+				_set_choosing(true)
 			if touch.on and OS.has_feature("web"): # a tap on the start button asks for the whole screen
 				JavaScriptBridge.eval(FULL_SCREEN_JS, true)
+		return
+	if choosing: # the choosing screen takes every key and click; a card taken starts the run with that keeper
+		var took := ""
+		var moved := event as InputEventMouseMotion
+		if k != null and k.pressed and not k.echo:
+			took = ui.chooser.key(k.keycode)
+		elif click != null and click.button_index == MOUSE_BUTTON_LEFT:
+			if click.pressed:
+				ui.chooser.press(click.position)
+			else:
+				took = ui.chooser.release(click.position)
+		elif moved != null:
+			ui.chooser.hover(moved.position)
+		if took != "":
+			_take_character(took)
 		return
 	if k != null and k.pressed and not k.echo and k.keycode == HELP_KEY:
 		_set_intro(true)
@@ -204,7 +251,10 @@ func _physics_process(_delta: float) -> void:
 	pending.merge(touch.take())
 	f.pressed = pending
 	pending = {}
-	if paused or intro or touch.upright(): # presses made while paused are dropped; keys still held count again once it goes on
+	if paused or intro or choosing or touch.upright(): # presses made while paused are dropped; keys still held count again once it goes on
+		return
+	if f.pressed.has("restart") and Ui.ENDINGS.has(world.phase) and bot == null and not chosen_by_flag:
+		_set_choosing(true) # a new run: who keeps the torch this time (the last one in focus)
 		return
 	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
 	juice.frame()
@@ -238,7 +288,7 @@ func _physics_process(_delta: float) -> void:
 func _process(delta: float) -> void:
 	if perf:
 		_perf(delta)
-	touch.mode = "off" if intro else "paused" if paused else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
+	touch.mode = "off" if intro or choosing else "paused" if paused else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
 	touch.dash_shown = world.mod("dash_every", 0.0) > 0.0
 	touch.guide_controls = intro and ui.guide.page == Guide.CONTROLS
 	touch.frame(delta)
