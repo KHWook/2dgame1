@@ -55,28 +55,28 @@ func step(w) -> void:
 	for ev in w.events:
 		match ev.kind:
 			"hit", "passed":
-				_burst(BURSTS[ev.kind], ev.pos, ev.dir, Looks.enemy(ev.enemy).bits)
+				_burst(BURSTS[ev.kind], ev.pos, ev.dir, Looks.bit_colours(ev.enemy, ev.tier))
 				if ev.kind == "hit" and _burning(w):
-					_burst(BURSTS.burn, ev.pos, ev.dir, FIRE)
+					_burst(BURSTS.burn, ev.pos, ev.dir, _keys(FIRE))
 			"kill", "banished":
 				if ev.kind == "kill" and _burning(w):
-					_burst(BURSTS.burn, ev.pos, ev.dir, FIRE)
-				_burst(BURSTS.kill, ev.pos, ev.dir, Looks.enemy(ev.enemy).bits)
+					_burst(BURSTS.burn, ev.pos, ev.dir, _keys(FIRE))
+				_burst(BURSTS.kill, ev.pos, ev.dir, Looks.bit_colours(ev.enemy, ev.tier))
 				poofs.append({ "pos": ev.pos, "age": 0 })
 			"fed":
-				_burst(BURSTS.sparks, ev.pos + FLAME_MOUTH, Vector2.UP, FIRE)
-				_burst(BURSTS.wave, ev.pos, Vector2.UP, FIRE)
+				_burst(BURSTS.sparks, ev.pos + FLAME_MOUTH, Vector2.UP, _keys(FIRE))
+				_burst(BURSTS.wave, ev.pos, Vector2.UP, _keys(FIRE))
 				flare = 1.0
 			"shot":
-				_burst(BURSTS.shot, ev.pos, Vector2.UP, FIRE)
+				_burst(BURSTS.shot, ev.pos, Vector2.UP, _keys(FIRE))
 			"boss":
-				_burst(BURSTS.arrive, ev.pos, Vector2.UP, Looks.enemy(ev.enemy).bits)
+				_burst(BURSTS.arrive, ev.pos, Vector2.UP, Looks.bit_colours(ev.enemy, 1))
 				poofs.append({ "pos": ev.pos, "age": 0 })
 			"landed":
-				_burst(BURSTS.landed, ev.pos, Vector2.UP, DUST + Looks.enemy(ev.enemy).bits)
+				_burst(BURSTS.landed, ev.pos, Vector2.UP, _keys(DUST) + Looks.bit_colours(ev.enemy, 1))
 				poofs.append({ "pos": ev.pos, "age": 0 })
 			"healed":
-				_burst(BURSTS.heal, ev.pos + HEAD, Vector2.UP, HEAL)
+				_burst(BURSTS.heal, ev.pos + HEAD, Vector2.UP, _keys(HEAL))
 	if bits.size() > MAX_BITS:
 		bits = bits.slice(bits.size() - MAX_BITS)
 	if poofs.size() > MAX_POOFS:
@@ -114,10 +114,16 @@ func paint(c: CanvasItem) -> void:
 		c.draw_rect(Rect2((b.pos - Vector2(size, size) / 2.0).round(), Vector2(size, size)), b.colour)
 
 
+## The colours of PALETTE keys.
+static func _keys(keys: Array) -> Array:
+	return keys.map(func(k): return Sprites.PALETTE[k])
+
+
+## Throws out b's pixels, each in one of colours: an enemy's in its tier's (Looks.bit_colours).
 func _burst(b: Dictionary, at: Vector2, dir: Vector2, colours: Array) -> void:
 	for i in b.count:
 		var angle: float = dir.angle() + rng.range_f(-b.fan, b.fan)
 		bits.append({
 			"pos": at, "vel": Vector2.from_angle(angle) * rng.range_f(b.speed[0], b.speed[1]), "keep": b.keep,
-			"age": 0.0, "life": rng.range_f(b.life[0], b.life[1]), "colour": Sprites.PALETTE[colours[rng.index(colours.size())]],
+			"age": 0.0, "life": rng.range_f(b.life[0], b.life[1]), "colour": colours[rng.index(colours.size())],
 		})

@@ -10,6 +10,8 @@ const Config := preload("res://src/sim/config.gd")
 const Ui := preload("res://src/ui.gd")
 const Painter := preload("res://src/art/painter.gd")
 const Coach := preload("res://src/coach.gd")
+const Sprites := preload("res://src/art/sprites.gd")
+const Looks := preload("res://src/art/looks.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -41,6 +43,9 @@ static func run() -> Array:
 	out.append_array(_coaching())
 	out.append_array(_crowds())
 	out.append_array(_late_nights())
+	out.append_array(_tier_stats())
+	out.append_array(_tier_nights())
+	out.append_array(_tier_looks())
 	return out
 
 
@@ -906,4 +911,158 @@ static func _late_nights() -> Array:
 	_expect(out, "up to night 18 the floor never shortens a gap", w.spawn_gap() > Config.LATER_NIGHTS.min_gap, true)
 	w.night = 60
 	_expect(out, "and a boss night's come further apart than that", is_equal_approx(w.spawn_gap(), Config.LATER_NIGHTS.min_gap * Config.BOSS.spawn_mult), true)
+	return out
+
+
+## Config.TIERS: a stronger tier is its kind's row with hp and score multiplied and rounded up, speed and smother
+## multiplied, and (tier 3) less knockback; a kill of one scores its tier's worth and says which tier it was; the
+## torch is smothered harder; a big slime breaks into halves of its own tier. Tier 1 is the row itself.
+static func _tier_stats() -> Array:
+	var out := []
+	for kind in Config.ENEMY_TYPES:
+		var base: Dictionary = Config.ENEMY_TYPES[kind]
+		_expect(out, "%s at tier 1 is its row" % kind, Enemy.row(kind, 1) == base, true)
+		if base.get("boss", false):
+			continue
+		for t in Config.TIERS.size():
+			var up: Dictionary = Config.TIERS[t]
+			var r: Dictionary = Enemy.row(kind, t + 2)
+			_expect(out, "%s tier %d: hp, speed, smother, score" % [kind, t + 2], [r.hp, snappedf(r.speed, 0.001), snappedf(r.smother, 0.001), r.score],
+				[ceili(base.hp * up.hp), snappedf(base.speed * up.speed, 0.001), snappedf(base.get("smother", 1.0) * up.smother, 0.001), ceili(base.get("score", Config.SCORE.kill) * up.score)])
+		_expect(out, "%s: each tier is tougher than the one below" % kind, base.hp <= Enemy.row(kind, 2).hp and Enemy.row(kind, 2).hp <= Enemy.row(kind, 3).hp and Enemy.row(kind, 3).hp > base.hp, true)
+	var e = Enemy.new("slime", Vector2.ZERO, 3)
+	_expect(out, "an enemy made at a tier has its tier's row and hp", [e.tier, e.hp, is_same(e.T, Enemy.row("slime", 3))], [3, Enemy.row("slime", 3).hp, true])
+	# a kill scores the tier's worth and the event names the tier, so the E1 count can follow it
+	var w = _night(DARK)
+	var red = Enemy.new("slime", w.player.pos + NEAR, 3)
+	red.hp = 1
+	w.enemies.append(red)
+	var before: int = w.score
+	var tiers := []
+	for i in SWING:
+		_play(w, 1, "attack" if i == 0 else "")
+		for ev in w.events:
+			if ev.kind == "kill":
+				tiers.append(ev.tier)
+	_expect(out, "a red slime's kill scores its tier's worth and says its tier", [w.score - before, tiers], [Enemy.row("slime", 3).score, [3]])
+	# smother
+	for t in [1, 3]:
+		w = _night(DARK)
+		var s = Enemy.new("slime", Config.TORCH.pos, t)
+		s.at_torch = true
+		w.enemies.append(s)
+		_expect(out, "a tier %d slime at the torch smothers it by its row's smother" % t, snappedf(w.burn_rate() - w.burn(), 0.001), snappedf(Config.TORCH.smother * Enemy.row("slime", t).get("smother", 1.0), 0.001))
+	# knockback
+	var pushed := []
+	for t in [1, 3]:
+		w = _night(DARK)
+		var s = Enemy.new("slime", w.player.pos + NEAR, t)
+		s.hp = 99
+		w.enemies.append(s)
+		_play(w, SWING, "attack")
+		pushed.append(s.knock.length() + s.vel.length())
+	_expect(out, "a red slime is knocked back less than a green one", pushed[1] < pushed[0] * 0.8, true)
+	# splits
+	w = _night(DARK)
+	var big = Enemy.new("big_slime", w.player.pos + NEAR, 2)
+	big.hp = 1
+	w.enemies.append(big)
+	_play(w, SWING, "attack")
+	_expect(out, "an orange big slime breaks into orange slimes", w.enemies.map(func(h): return [h.kind, h.tier]), [["slime", 2], ["slime", 2]])
+	return out
+
+
+## Config.TIER_NIGHTS: before its first row every enemy is tier 1 and no roll is made for it (the rng moves as it
+## did before tiers, so those nights are the same game); from a row on, the tiers come in its shares, those that
+## come along with an enemy share its tier, the strongest grow commoner night by night, and a boss stays tier 1.
+static func _tier_nights() -> Array:
+	var out := []
+	var first: int = Config.TIER_NIGHTS[0].from
+	for night in range(1, first + 1):
+		var w = _night(DARK)
+		w.night = night
+		var ref := RandomNumberGenerator.new() # check-ok: replays the world's own draws to count them
+		ref.seed = w.seed_value
+		ref.state = w.rng.state()
+		w.next_spawn = 0.0
+		_play(w, 1)
+		var draws := 2 + (1 if night >= first else 0) # the kind, the spot on the edge, and (from the first row) the tier
+		for i in draws:
+			ref.randf()
+		_expect(out, "night %d: a spawn draws %d numbers from the rng" % [night, draws], w.rng.state(), ref.state)
+	var last_strong := -1.0
+	for r in Config.TIER_NIGHTS:
+		var strong: float = r.shares[-1] / r.shares.reduce(func(a, b): return a + b, 0.0)
+		_expect(out, "from night %d the strongest tier is no rarer than before" % r.from, strong >= last_strong, true)
+		last_strong = strong
+	_expect(out, "late on, the strongest tier is the commonest", Config.TIER_NIGHTS[-1].shares.max() == Config.TIER_NIGHTS[-1].shares[-1], true)
+	for night in [first - 1, first, 12, 18]:
+		var w = _night(DARK)
+		w.night = night
+		var seen := {}
+		var mixed := 0
+		var spawns := 400
+		for i in spawns:
+			w.enemies = []
+			w.next_spawn = 0.0
+			_play(w, 1)
+			for e in w.enemies:
+				seen[e.tier] = seen.get(e.tier, 0) + 1
+			if w.enemies.any(func(e): return e.tier != w.enemies[0].tier):
+				mixed += 1
+		var shares: Array = w.tier_shares() if not w.tier_shares().is_empty() else [1.0]
+		var total: float = shares.reduce(func(a, b): return a + b, 0.0)
+		var leads := 0
+		for t in seen:
+			leads += seen[t]
+		for t in range(1, shares.size() + 1):
+			var want: float = shares[t - 1] / total
+			var got: float = float(seen.get(t, 0)) / leads
+			_expect(out, "night %d: tier %d comes about %.0f%% of the time" % [night, t, want * 100.0], absf(got - want) < 0.07 and (want > 0.0) == (got > 0.0), true)
+		_expect(out, "night %d: no tier above the table's" % night, seen.keys().all(func(t): return t <= shares.size()), true)
+		_expect(out, "night %d: an enemy and those that come along with it are of one tier" % night, mixed, 0)
+	var w = _night(DARK)
+	w.night = 20
+	w.boss_due = true
+	w.time = Config.NIGHT.length * Config.BOSS.at
+	_play(w, 1)
+	_play(w, 1)
+	_expect(out, "a boss is tier 1 on a late night", w.enemies.filter(func(e): return e.T.get("boss", false)).map(func(e): return e.tier), [1])
+	return out
+
+
+## A tier is the same picture in other colours (src/art/sprites.gd TIERS): every pixel is where its frame's is and
+## as see-through, the outline and the eyes keep their colour, and every other pixel takes its tier's colour. The
+## first sighting of a tier has its own line, named by its colour.
+static func _tier_looks() -> Array:
+	var out := []
+	for name in Sprites.tier_names():
+		var frame: String = name.get_slice("~", 0)
+		var a := Sprites.image(frame)
+		var b := Sprites.image(name)
+		var grid := Sprites.rows(frame)
+		var wrong := 0
+		var kept := 0
+		var changed := 0
+		for y in grid.size():
+			for x in grid[y].length():
+				var key: String = grid[y][x]
+				if a.get_pixel(x, y).a != b.get_pixel(x, y).a:
+					wrong += 1
+				elif Sprites.TIER_KEEP.has(key):
+					kept += 0 if a.get_pixel(x, y) == b.get_pixel(x, y) else 1
+				elif a.get_pixel(x, y) != b.get_pixel(x, y) or key in ["e", "i", "l"]: # eyes may keep their colour
+					changed += 1
+				else:
+					wrong += 1
+		_expect(out, "%s: the same shape, outline and whites kept, every other colour swapped" % name, [a.get_size() == b.get_size(), wrong, kept, changed > 0], [true, 0, 0, true])
+		_expect(out, "%s: its feet are where its frame's are" % name, Sprites.foot(name), Sprites.foot(frame))
+	var lines := {}
+	for kind in Looks.TIER_NAMES:
+		for t in Config.TIERS.size():
+			var line := Looks.hint(Looks.thing(kind, t + 2))
+			_expect(out, "%s tier %d has a first-sighting line of its own" % [kind, t + 2], line != "" and not lines.has(line) and line != Looks.hint(kind), true)
+			lines[line] = true
+	_expect(out, "an orange slime is told as one", Looks.hint(Looks.thing("slime", 2)).begins_with("주황 슬라임: "), true)
+	_expect(out, "a tier's bits are in its colours", Looks.bit_colours("slime", 3) != Looks.bit_colours("slime", 1), true)
 	return out

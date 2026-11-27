@@ -1236,6 +1236,42 @@ const VARIANTS := {
 }
 
 
+## The stronger tiers of the regular enemy kinds (Config.TIERS) are the same grids in other colours, made when the
+## atlas is: kind -> one map per tier from 2, PALETTE key -> the colour its pixels take there. The outline, the
+## empty pixel and white (TIER_KEEP) stay as they are; a map names every other colour of the kind's frames, so no
+## pixel keeps its tier-1 colour by being forgotten (A1 checks). A tier's picture is its frame's name with "~" and
+## the tier after it: "slime_a~2". Tier 2 is a colour of the kind's own; tier 3 is red for every kind, so the
+## strongest read the same whatever they are.
+const TIER_KEEP := [".", "_", "k", "W"]
+const TIER_FRAMES := ["%s_a", "%s_b"] # the frames that get tiers: an enemy kind's walking frames (Looks.FRAMES)
+const TIERS := {
+	"slime": [
+		{ "h": "#ffe3a3", "g": "#ffa63f", "G": "#d9742a" }, # orange
+		{ "h": "#ffb4a4", "g": "#f2584a", "G": "#bd2f3b" }, # red
+	],
+	"big_slime": [
+		{ "h": "#ffe3a3", "G": "#d9742a", "j": "#97461f" },
+		{ "h": "#ffb4a4", "G": "#bd2f3b", "j": "#7a1a2c" },
+	],
+	"bat": [
+		{ "p": "#fff09a", "P": "#e3b232", "q": "#8c6219", "e": "#ef4b5a" }, # gold
+		{ "p": "#ff8296", "P": "#cc3049", "q": "#7c1832", "e": "#ffe04a" }, # red
+	],
+	"shade": [
+		{ "7": "#63b3a6", "8": "#3b7f77", "9": "#173d3a", "l": "#b5e3ff" }, # teal
+		{ "7": "#c25c74", "8": "#8a2f4c", "9": "#3d1022", "l": "#b5e3ff" }, # red
+	],
+	"thief": [
+		{ "o": "#b3b3bd", "O": "#7f7f8e", "n": "#54546a" }, # ash
+		{ "o": "#e2603f", "O": "#ab3528", "n": "#6e1f1d" }, # red
+	],
+	"boar": [
+		{ "b": "#9c9caa", "B": "#666677", "S": "#d4a48e", "i": "#ef4b5a" }, # ash
+		{ "b": "#cf4a36", "B": "#8a2424", "S": "#f0a080", "i": "#ffd84a" }, # red
+	],
+}
+
+
 ## Every picture the game paints comes out of one shared texture, the atlas, packed at the start from the grids
 ## above (art stays text: nothing is saved as a file). Godot draws runs of pictures from the same texture as one
 ## batch, so a crowd sorted by depth with kinds mixed costs a few draw calls instead of one or more per enemy.
@@ -1258,8 +1294,25 @@ static func names() -> Array:
 	return SPRITES.keys() + VARIANTS.keys()
 
 
-## The finished rows of a sprite, with a variant's rows put in place.
+## Every tier's picture of every frame TIERS colours, by name ("slime_a~2").
+static func tier_names() -> Array:
+	var out := []
+	for kind in TIERS:
+		for frame in TIER_FRAMES:
+			for t in TIERS[kind].size():
+				out.append(tiered(frame % kind, t + 2))
+	return out
+
+
+## The picture of a sprite at an enemy tier: the sprite itself at tier 1.
+static func tiered(sprite: String, tier: int) -> String:
+	return sprite if tier <= 1 else "%s~%d" % [sprite, tier]
+
+
+## The finished rows of a sprite, with a variant's rows put in place. A tier's rows are its frame's.
 static func rows(sprite: String) -> Array:
+	if "~" in sprite:
+		sprite = sprite.get_slice("~", 0)
 	if SPRITES.has(sprite):
 		return SPRITES[sprite]
 	var v: Array = VARIANTS[sprite]
@@ -1271,11 +1324,21 @@ static func rows(sprite: String) -> Array:
 
 static func image(sprite: String) -> Image:
 	var grid := rows(sprite)
+	var colours := tier_colours(sprite)
 	var img := Image.create_empty(grid[0].length(), grid.size(), false, Image.FORMAT_RGBA8)
 	for y in grid.size():
 		for x in grid[y].length():
-			img.set_pixel(x, y, PALETTE[grid[y][x]])
+			var key: String = grid[y][x]
+			img.set_pixel(x, y, Color(colours[key]) if colours.has(key) else PALETTE[key])
 	return img
+
+
+## The colour map a tier's picture is painted with ({} for a sprite that is no tier's): from its name, "<kind>_a~2".
+static func tier_colours(sprite: String) -> Dictionary:
+	if not "~" in sprite:
+		return {}
+	var frame := sprite.get_slice("~", 0)
+	return TIERS[frame.substr(0, frame.rfind("_"))][int(sprite.get_slice("~", 1)) - 2]
 
 
 ## A sprite as a texture: mirrored left to right when flip, in its hit-flash white when white.
@@ -1353,10 +1416,10 @@ static func atlas_image() -> Image:
 	return _atlas
 
 
-## Every sprite four ways and its rim, in names() order, shelf by shelf.
+## Every sprite four ways and its rim, in names() order and then every tier's, shelf by shelf.
 static func _start_atlas() -> void:
 	var images := {}
-	for sprite in names():
+	for sprite in names() + tier_names():
 		var img := image(sprite)
 		var mirrored: Image = img.duplicate()
 		mirrored.flip_x()
@@ -1465,9 +1528,38 @@ static func grid_problems(sprite: String, grid: Array) -> Array:
 	return out
 
 
-## Rule A1 over every sprite and variant.
+## What is wrong with the colour maps of one kind's tiers, given the grids of the frames they paint: a colour of the
+## frames that a map does not name (it would keep its tier-1 colour), a key a map names that no frame uses (it was
+## meant for some other picture), or a colour that is not a colour.
+static func tier_problems(kind: String, maps: Array, frames: Array) -> Array:
+	var used := {}
+	for grid in frames:
+		for row in grid:
+			for c in row:
+				if not TIER_KEEP.has(c):
+					used[c] = true
+	var out := []
+	for t in maps.size():
+		for c in used:
+			if not maps[t].has(c):
+				out.append("TIERS %s tier %d does not colour '%s', which its frames use. Fix: give '%s' a colour in that map in src/art/sprites.gd." % [kind, t + 2, c, c])
+		for c in maps[t]:
+			if not used.has(c):
+				out.append("TIERS %s tier %d colours '%s', which none of its frames use. Fix: remove it from that map in src/art/sprites.gd." % [kind, t + 2, c])
+			elif not Color.html_is_valid(maps[t][c]):
+				out.append("TIERS %s tier %d: '%s' is not a colour. Fix: write it as \"#rrggbb\"." % [kind, t + 2, maps[t][c]])
+	return out
+
+
+## Rule A1 over every sprite and variant, and over the tiers' colour maps.
 static func problems() -> Array:
 	var out := []
+	for kind in TIERS:
+		var frames := TIER_FRAMES.map(func(f): return f % kind)
+		if not missing(frames).is_empty():
+			out.append("TIERS names '%s', which has no frames %s. Fix: name an enemy kind." % [kind, frames])
+			continue
+		out.append_array(tier_problems(kind, TIERS[kind], frames.map(func(f): return rows(f))))
 	for sprite in VARIANTS:
 		var v: Array = VARIANTS[sprite]
 		if not SPRITES.has(v[0]):
@@ -1507,4 +1599,12 @@ static func selftest() -> Array:
 		fails.append("[A1] missed a character that is not in PALETTE")
 	if not grid_problems("x", ["k.", ".k"]).is_empty():
 		fails.append("[A1] flagged a clean grid")
+	if tier_problems("x", [{ "g": "#ff0000" }], [["kgW"], ["kGg"]]).is_empty():
+		fails.append("[A1] missed a tier map that leaves a colour of its frames out")
+	if tier_problems("x", [{ "g": "#ff0000", "G": "#00ff00", "h": "#0000ff" }], [["kgW"], ["kGg"]]).is_empty():
+		fails.append("[A1] missed a tier map naming a colour its frames do not use")
+	if tier_problems("x", [{ "g": "red-ish", "G": "#00ff00" }], [["kgW"], ["kGg"]]).is_empty():
+		fails.append("[A1] missed a tier colour that is not a colour")
+	if not tier_problems("x", [{ "g": "#ff0000", "G": "#00ff00" }], [["kgW"], ["kGg"]]).is_empty():
+		fails.append("[A1] flagged a tier map that colours every colour of its frames")
 	return fails

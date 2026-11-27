@@ -1032,18 +1032,20 @@ func _crowd(w) -> void:
 	var light: float = w.light_radius()
 	for i in n:
 		var e = w.enemies[i]
-		var k := _kind(e.kind)
+		var k := _kind(e.kind, e.tier)
 		_picture[i] = k
 		_frame[i] = Looks.frame_index(e.kind, w.steps, i)
 		_mirror[i] = 1 if _turned(e, k.look) else 0
 		_lit[i] = 1 if e.pos.distance_to(T.pos) <= light else 0 # w.in_light(e.pos)
 
 
-## An enemy kind's pictures: each walking frame [as is, mirrored, white, mirrored white], where its feet are on each
-## frame, its eyes for the dark on each frame [as is, mirrored] and their colour, its shadow and its glows.
-func _kind(kind: String) -> Dictionary:
-	if _kinds.has(kind):
-		return _kinds[kind]
+## An enemy kind's pictures at a tier: each walking frame [as is, mirrored, white, mirrored white] in the tier's
+## colours, where its feet are on each frame, its eyes for the dark on each frame [as is, mirrored] and their colour,
+## its shadow and its glows (a tier has its kind's shape, so these are the same at every tier).
+func _kind(kind: String, tier: int = 1) -> Dictionary:
+	var key := Looks.thing(kind, tier)
+	if _kinds.has(key):
+		return _kinds[key]
 	var look := Looks.enemy(kind)
 	var k := { "look": look, "frames": [], "feet": [], "eyes": [], "eye_colour": Color.WHITE,
 		"shadow": Sprites.texture(look.shadow),
@@ -1051,13 +1053,14 @@ func _kind(kind: String) -> Dictionary:
 		"dark_glow": Sprites.texture(look.dark_glow) if look.dark_glow != "" else null }
 	for frame in Looks.FRAMES:
 		var name: String = frame % kind
-		k.frames.append([Sprites.texture(name), Sprites.texture(name, true), Sprites.texture(name, false, true), Sprites.texture(name, true, true)])
+		var coloured := Sprites.tiered(name, tier)
+		k.frames.append([Sprites.texture(coloured), Sprites.texture(coloured, true), Sprites.texture(name, false, true), Sprites.texture(name, true, true)])
 		k.feet.append(Sprites.foot(name))
 		if not look.in_dark.is_empty():
 			k.eyes.append([Sprites.only(name, look.in_dark[0]), Sprites.only(name, look.in_dark[0], true)])
 	if not look.in_dark.is_empty():
 		k.eye_colour = Sprites.PALETTE[look.in_dark[1]]
-	_kinds[kind] = k
+	_kinds[key] = k
 	return k
 
 

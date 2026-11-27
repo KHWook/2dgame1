@@ -1,4 +1,4 @@
-## Saves every sprite, enlarged, as one PNG, so the art can be looked at without running the game.
+## Saves every sprite (and every enemy tier's colours of its frames, "slime_a~2"), enlarged, as one PNG, so the art can be looked at without running the game.
 ## godot --headless --path . --script res://tools/art_sheet.gd -- [out.png] [scale] [name-prefix]
 ## With --atlas first, it saves the atlas the game draws from instead (src/art/sprites.gd), at 1:1:
 ## godot --headless --path . --script res://tools/art_sheet.gd -- --atlas /tmp/atlas.png
@@ -23,7 +23,7 @@ func _initialize() -> void:
 	var out: String = args[0] if args.size() > 0 else "res://docs/shots/sprites.png"
 	var scale: int = int(args[1]) if args.size() > 1 else 6
 	var prefix: String = args[2] if args.size() > 2 else ""
-	var names: Array = Sprites.names().filter(func(n): return n.begins_with(prefix))
+	var names: Array = (Sprites.names() + Sprites.tier_names()).filter(func(n): return n.begins_with(prefix))
 	names.sort()
 	var biggest := 0 # the cell fits the largest sprite shown
 	for n in names:

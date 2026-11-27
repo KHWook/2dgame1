@@ -67,6 +67,26 @@ const NIGHTS := [
 ## past twenty it keeps the count (and the frame time) from running away.
 const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82, "min_gap": 0.1 }
 
+## Stronger tiers of the regular kinds, for later nights. A boss is always tier 1; what a big slime breaks into
+## is of its tier. One row per tier from 2, applied to the kind's row in ENEMY_TYPES (Enemy.row): hp and score
+## multiplied and rounded up, speed and smother multiplied, heavy (optional) the share of a blow's knockback it takes.
+## Each tier is the same picture in other colours (TIERS in src/art/sprites.gd) and has a name (looks.gd).
+const TIERS := [
+	{ "hp": 1.5, "speed": 1.1, "smother": 1.25, "score": 1.5 },
+	{ "hp": 2.0, "speed": 1.2, "smother": 1.5, "score": 2.0, "heavy": 0.6 },
+]
+## Which tiers come when. From the night of a row (and until the next row's), each enemy that comes out of the dark,
+## with those that come along with it, is of one tier, rolled over shares (tier 1, tier 2, tier 3). Before the
+## first row every enemy is tier 1 and nothing is rolled, so those nights are the same as before tiers.
+const TIER_NIGHTS := [
+	{ "from": 8, "shares": [0.85, 0.15, 0.0] },
+	{ "from": 10, "shares": [0.7, 0.3, 0.0] },
+	{ "from": 12, "shares": [0.5, 0.4, 0.1] },
+	{ "from": 14, "shares": [0.35, 0.45, 0.2] },
+	{ "from": 16, "shares": [0.2, 0.4, 0.4] },
+	{ "from": 18, "shares": [0.1, 0.35, 0.55] },
+]
+
 ## Dawn: the sun clears the field, you rest (heal), and the torch is topped up to at least its starting fuel (its
 ## start_fuel share of the tank, so a big torch is topped up further).
 const DAWN := { "heal": 1 }

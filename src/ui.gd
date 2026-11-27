@@ -828,22 +828,22 @@ func _told(w, delta: float) -> void:
 
 ## Notices each kind of thing the first time it turns up and queues a line about it; counts the showing one down.
 func _hints(w) -> void:
-	var here: Array = w.enemies.map(func(e): return e.kind)
+	var here: Array = w.enemies.map(func(e): return Looks.thing(e.kind, e.tier))
 	if not w.berries.is_empty():
 		here.append("berry")
 	for thing in here:
-		if Looks.HINTS.has(thing) and not hints_told.has(thing):
+		if Looks.hint(thing) != "" and not hints_told.has(thing):
 			hints_told[thing] = true
 			hints_waiting.append(thing)
 	if w.phase == "night":
 		hint_steps = maxi(0, hint_steps - 1)
 		if hint_steps == 0 and not hints_waiting.is_empty():
 			var thing: String = hints_waiting.pop_front()
-			var line: String = Looks.HINTS[thing]
+			var line: String = Looks.hint(thing)
 			var cut := line.find(": ")
 			hint_name.text = line.substr(0, cut) if cut > 0 else ""
 			hint_text.text = line.substr(cut + 2) if cut > 0 else line
-			var tex := Sprites.alone("berry" if thing == "berry" else Looks.FRAMES[0] % thing)
+			var tex := Sprites.alone("berry" if thing == "berry" else Sprites.tiered(Looks.FRAMES[0] % thing.get_slice("~", 0), int(thing.get_slice("~", 1)) if "~" in thing else 1))
 			hint_icon.texture = tex
 			hint_icon.custom_minimum_size = tex.get_size() / (2.0 if tex.get_height() > 24 else 1.0)
 			hint_steps = HINT_STEPS

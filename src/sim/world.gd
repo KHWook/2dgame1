@@ -6,7 +6,7 @@
 ## night. R restarts from an ending.
 ##
 ## events is how the world tells whoever shows it what happened in the last step. The rules only add to it and
-## never read it. Kinds: "hit" and "kill" { pos, dir (away from the blow), enemy (its kind) }; "passed", the same
+## never read it. Kinds: "hit" and "kill" { pos, dir (away from the blow), enemy (its kind), tier }; "passed", the same
 ## for a blow that went through an enemy the dark protects; "banished", the same for an enemy the dawn clears
 ## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
 ## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "boss" { enemy, pos }
@@ -115,7 +115,7 @@ func crowd(k: int) -> void:
 	if phase != "night":
 		return
 	while enemies.size() < k:
-		enemies.append(Enemy.new(_who(_night_row().who), _edge_point()))
+		enemies.append(Enemy.new(_who(_night_row().who), _edge_point(), _tier()))
 	player.hp = max_hp()
 	fuel = max_fuel()
 	if time > N.length * 0.9:
@@ -322,7 +322,7 @@ func _dawn() -> void:
 	score += Config.SCORE.dawn
 	events.append({ "kind": "dawn", "night": night })
 	for e in enemies + born:
-		events.append({ "kind": "banished", "pos": e.pos, "dir": Vector2.UP, "enemy": e.kind })
+		events.append({ "kind": "banished", "pos": e.pos, "dir": Vector2.UP, "enemy": e.kind, "tier": e.tier })
 		if e.carrying:
 			logs.append(e.pos.clamp(Config.FIELD.position, Config.FIELD.end))
 	enemies = []
@@ -471,10 +471,10 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 		return
 	var dir: Vector2 = (e.pos - from).normalized()
 	if e.T.get("dark_proof", false) and not in_light(e.pos):
-		events.append({ "kind": "passed", "pos": e.pos, "dir": dir, "enemy": e.kind })
+		events.append({ "kind": "passed", "pos": e.pos, "dir": dir, "enemy": e.kind, "tier": e.tier })
 		return
 	e.hit(n, from)
-	events.append({ "kind": "kill" if e.dead else "hit", "pos": e.pos, "dir": dir, "enemy": e.kind })
+	events.append({ "kind": "kill" if e.dead else "hit", "pos": e.pos, "dir": dir, "enemy": e.kind, "tier": e.tier })
 	if not e.dead:
 		return
 	score += e.T.get("score", Config.SCORE.kill)
@@ -490,7 +490,7 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 		logs.append(e.pos)
 	for i in e.T.get("split_count", 0):
 		var side := -1.0 if i % 2 == 0 else 1.0
-		var half = Enemy.new(e.T.splits_into, e.pos + Vector2(side * Config.ENEMY.split_spread, 0.0))
+		var half = Enemy.new(e.T.splits_into, e.pos + Vector2(side * Config.ENEMY.split_spread, 0.0), e.tier)
 		half.knock = Vector2(side * Config.ENEMY.split_knock, 0.0)
 		born.append(half)
 		if player.attack_t >= 0.0:
@@ -503,11 +503,12 @@ func _spawns() -> void:
 		next_spawn = time + spawn_gap()
 		var kind := _who(row.who)
 		var at := _edge_point()
-		enemies.append(Enemy.new(kind, at))
+		var tier := _tier()
+		enemies.append(Enemy.new(kind, at, tier))
 		var along := _along_edge(at)
 		var company: Array = row.get("with", {}).get(kind, [])
 		for i in company.size(): # beside it on the edge, one each side in turn
-			enemies.append(Enemy.new(company[i], at + along * Config.ENEMY.with_gap * (i / 2 + 1) * (1.0 if i % 2 == 0 else -1.0)))
+			enemies.append(Enemy.new(company[i], at + along * Config.ENEMY.with_gap * (i / 2 + 1) * (1.0 if i % 2 == 0 else -1.0), tier))
 	if boss_due and time >= N.length * Config.BOSS.at - Config.BOSS.warn:
 		boss_due = false
 		boss_from = _edge_point()
@@ -563,6 +564,28 @@ func _nights_past() -> int:
 ## Fuel the torch uses per second tonight, before upgrades.
 func burn() -> float:
 	return _night_row().burn + Config.LATER_NIGHTS.burn * _nights_past()
+
+
+## Tonight's shares of each tier (Config.TIER_NIGHTS), or [] before the first row: then every enemy is tier 1.
+func tier_shares() -> Array:
+	var shares := []
+	for r in Config.TIER_NIGHTS:
+		if night >= r.from:
+			shares = r.shares
+	return shares
+
+
+## How strong what comes out of the dark is: one roll over tonight's tier_shares(), none on a night without them.
+func _tier() -> int:
+	var shares := tier_shares()
+	if shares.is_empty():
+		return 1
+	var roll: float = rng.next() * shares.reduce(func(a, b): return a + b, 0.0)
+	for i in shares.size():
+		roll -= shares[i]
+		if roll < 0.0:
+			return i + 1
+	return shares.size()
 
 
 ## Which kind comes out of the dark: one roll over the shares in a night's row.

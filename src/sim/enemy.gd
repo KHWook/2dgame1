@@ -14,6 +14,7 @@ const E := Config.ENEMY
 const KNOCK_KEEP: float = pow(E.knock_decay, Config.STEP) # share of its knockback a body keeps from one step to the next
 
 var kind: String
+var tier := 1 # how strong it is, from 1 (Config.TIERS); T is its kind's row made that strong
 var T: Dictionary
 var pos: Vector2
 var vel := Vector2.ZERO
@@ -32,9 +33,13 @@ var move_to := Vector2.ZERO # where it lands, or where the rush goes, or where a
 var aim := Vector2.ZERO # the way a charger charges, fixed when it starts to warn
 
 
-func _init(kind_: String, pos_: Vector2) -> void:
+static var _rows := {} # "kind~tier" -> row(), made once
+
+
+func _init(kind_: String, pos_: Vector2, tier_: int = 1) -> void:
 	kind = kind_
-	T = Config.ENEMY_TYPES[kind]
+	tier = tier_
+	T = row(kind, tier)
 	pos = pos_
 	hp = T.hp
 	if T.has("summon"):
@@ -45,6 +50,25 @@ func _init(kind_: String, pos_: Vector2) -> void:
 		move_t = T.lunge.every
 	if T.has("charge"):
 		move_t = T.charge.every
+
+
+## A kind's row in Config.ENEMY_TYPES at a tier: the row itself at tier 1, made stronger by Config.TIERS above it.
+static func row(kind_: String, tier_: int) -> Dictionary:
+	var base: Dictionary = Config.ENEMY_TYPES[kind_]
+	if tier_ <= 1:
+		return base
+	var key := "%s~%d" % [kind_, tier_]
+	if not _rows.has(key):
+		var up: Dictionary = Config.TIERS[tier_ - 2]
+		var r: Dictionary = base.duplicate()
+		r.hp = ceili(base.hp * up.hp)
+		r.speed = base.speed * up.speed
+		r.smother = base.get("smother", 1.0) * up.smother
+		r.score = ceili(base.get("score", Config.SCORE.kill) * up.score)
+		if up.has("heavy"):
+			r.heavy = base.get("heavy", 1.0) * up.heavy
+		_rows[key] = r
+	return _rows[key]
 
 
 func step(world) -> void:
