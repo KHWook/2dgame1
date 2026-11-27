@@ -305,7 +305,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			pending["pick_%d" % (slot + 1)] = true
 		return
 	if k != null and k.pressed and world.phase == "pick" and k.keycode == Picker.REROLL_KEY:
-		if not k.echo and bot == null:
+		if not k.echo and bot == null and ui.picker.reroll_key(k.keycode): # only once the offer listens, as its button
 			pending["reroll"] = true
 		return
 	if k == null or not KEYS.has(k.keycode):

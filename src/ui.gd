@@ -35,7 +35,8 @@ const WARM := Color("#ffe6a8") # names: upgrades, enemies, headings
 const RED := Color("#ff5a4a") # danger: low fuel, a boss
 const FRESH := Color("#a6e36a") # an upgrade not held yet
 const SIDE_COLOUR := { "torch": Color("#ffb05a"), "keeper": Color("#9cc8ff") }
-const RARE := Color("#c07ee0") # a rare card's edge, badge and word: the bats' violet (PALETTE p), used for nothing else here
+const RARE: Color = Sprites.PALETTE["p"] # a rare card's edge, badge and word: the bats' violet, used for nothing else here
+const COMBO: Color = Sprites.PALETTE["L"] # a combined card's (a row with needs), and the line that says what combines into one: the cool flame's blue
 const SMALL := 10 # Galmuri9 is drawn for 10px
 const BIG := 12 # Galmuri11 Bold, 12px: the numbers and headings that should hit hardest
 const HUGE := 15 # Galmuri14, 15px
@@ -61,11 +62,11 @@ const OMEN_WORD := "오늘 밤"
 const OMEN_GAP := 6.0 # between the omen's name and the night, in the HUD
 
 ## The offer cards: size, gap, icon enlargement, colours.
-const CARD := Vector2(126.0, 0.0) # as wide as a character's card (src/chooser.gd), as tall as the tallest card's words
+const CARD := Vector2(Chooser.CARD.x, 0.0) # as wide as a character's card, as tall as the tallest card's words
 const CARD_GAP := 6.0
 const CARD_ICON := 2.0
 const CARD_TEXT_WIDTH := CARD.x - 8.0
-const CARD_LINES := 4 # the most lines a card's words take (an R1 scene holds it): the tallest offer still clears the HUD
+const CARD_LINES := 4 # the most lines a card's words take, its combo_hint with them (an R1 scene holds it): the tallest offer still clears the HUD
 const CARD_BACK := Color(0.16, 0.12, 0.2, 0.97)
 const CARD_EDGE := Color("#c8862f")
 const CARD_TEXT := Color("#e6dcc6")
@@ -159,6 +160,10 @@ const REROLL_KEYS := "R 다시 뽑기 · %d번 남음"
 const REROLL_TOUCH := "다시 뽑기 · %d번 남음"
 const REROLL_OFF := 0.4 # how solid the reroll button is when it would do nothing
 const TAG_RARE := "희귀 · "
+const TAG_COMBO := "결합 · "
+const TAG_OWN := "전용 · " # an upgrade only this character is offered (a row with only)
+const COMBO_HINT := "+ %s = %s" # on an ingredient: the other one, and what the two combine into
+const COMBO_HELD := " · 결합" # after a combined upgrade's name on the pause screen
 const TAG_FILLER := "덤"
 const FILLER_SIDE := "지금 한 번, 칸 밖"
 const FREE_SLOT := " · 칸 밖" # after the side of an upgrade that takes no slot
@@ -238,7 +243,7 @@ var omen_row: HBoxContainer
 var omen_name: Label
 var omen_text: Label
 var row: Control # the cards, placed by hand so they can move; under them the line of keys and the reroll button
-var offers: Array = [] # per slot: { card, style, key, tag, icon, name, text, focus, edge (its edge's colour at rest) }
+var offers: Array = [] # per slot: { card, style, key, tag, icon, name, text, hint, focus, edge (its edge's colour at rest) }
 var press: Label
 var reroll: PanelContainer # drawn where it answers: Picker.reroll_rect(), in row
 var reroll_label: Label
@@ -265,7 +270,6 @@ var flier: TextureRect
 
 var offer_key := ""
 var last_offer: Array = []
-var last_picks := 0
 var deal := 0.0 # seconds since this offer was dealt
 var taken := -1 # the slot just taken while its card plays out, -1 otherwise
 var take_age := 0.0
@@ -427,32 +431,26 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	flier.stretch_mode = TextureRect.STRETCH_SCALE
 	flier.visible = false
 	add_child(flier)
-	last_picks = w.picks.size()
 	shown_score = w.score
 
 
-## Call once after each world.step(): notices a pick, counts the hint down, notices new things.
+## Call once after each world.step(): notices a card taken, counts the hint down, notices new things.
 func after_step(w) -> void:
-	if w.picks.size() < last_picks or w.score < shown_score: # a new run
-		last_picks = w.picks.size()
+	if w.score < shown_score: # a new run
 		shown_score = w.score
 		gain_age = -1.0
-	if w.picks.size() > last_picks:
-		var id: String = w.picks[-1]
-		var slot := last_offer.find(id)
-		if slot >= 0:
-			taken = slot
-			take_age = 0.0
-			fly_id = id
-			var icon: TextureRect = offers[slot].icon
-			fly_from = icon.get_global_rect().get_center()
-		last_picks = w.picks.size()
-	for ev in w.events: # a filler joins no build and flies to no tile: its card plays out and the line names it
-		if ev.kind == "took" and Config.FILLERS.has(ev.id):
-			taken = last_offer.find(ev.id)
-			take_age = 0.0
+	for ev in w.events: # a card taken ("took") plays out: an upgrade's icon then flies to its tile; a filler joins no build, and the line names it at once
+		if ev.kind != "took":
+			continue
+		taken = last_offer.find(ev.id)
+		take_age = 0.0
+		if Config.FILLERS.has(ev.id):
 			told_age = 0.0
 			_fill_told(w, ev.id)
+		elif taken >= 0:
+			fly_id = ev.id
+			var icon: TextureRect = offers[taken].icon
+			fly_from = icon.get_global_rect().get_center()
 	if w.score > shown_score:
 		gain = (gain if gain_age >= 0.0 and gain_age < GAIN_TIME * 0.6 else 0) + w.score - shown_score
 		gain_age = 0.0
@@ -755,7 +753,8 @@ func _fill_cards(w) -> void:
 		o.icon.custom_minimum_size = icon.get_size() * CARD_ICON
 		o.name.text = u.name + (LEVEL % next if next > 1 else "")
 		var rare: bool = u.get("rare", false)
-		o.edge = RARE if rare else CARD_EDGE
+		var combo: bool = u.has("needs")
+		o.edge = COMBO if combo else RARE if rare else CARD_EDGE
 		if filler:
 			o.tag.text = TAG_FILLER
 			o.tag.add_theme_color_override("font_color", MUTED)
@@ -763,11 +762,13 @@ func _fill_cards(w) -> void:
 			o.side.add_theme_color_override("font_color", MUTED)
 		else:
 			var most := World.max_level(id)
-			o.tag.text = (TAG_RARE if rare else "") + ("새 힘" if next == 1 else ("%d단계 · 마지막" % next if next >= most else "%d단계 · 최대 %d" % [next, most]))
-			o.tag.add_theme_color_override("font_color", RARE if rare else FRESH if next == 1 else GOLD)
+			o.tag.text = (TAG_COMBO if combo else TAG_RARE if rare else TAG_OWN if u.has("only") else "") + ("새 힘" if next == 1 else ("%d단계 · 마지막" % next if next >= most else "%d단계 · 최대 %d" % [next, most]))
+			o.tag.add_theme_color_override("font_color", COMBO if combo else RARE if rare else FRESH if next == 1 else GOLD)
 			o.side.text = Looks.side_name(Looks.side(id), w.character) + ("" if World.takes_slot(id) else FREE_SLOT)
 			o.side.add_theme_color_override("font_color", SIDE_COLOUR[Looks.side(id)])
 		o.text.text = _wrap(o.text, u.text, CARD_TEXT_WIDTH)
+		o.hint.text = "" if filler else _wrap(o.hint, combo_hint(w, id), CARD_TEXT_WIDTH)
+		o.hint.visible = o.hint.text != ""
 		o.card.custom_minimum_size = CARD
 		o.card.size = Vector2.ZERO
 	var tall := 0.0
@@ -828,8 +829,22 @@ func _card(i: int) -> Dictionary:
 	var side := _label(stack, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	var text := _label(stack, SMALL, CARD_TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	text.remove_theme_constant_override("outline_size")
+	var hint := _label(stack, SMALL, COMBO, HORIZONTAL_ALIGNMENT_CENTER)
 	return { "card": card, "style": style, "key": key, "key_style": key_style, "tag": tag, "icon": icon, "name": name,
-		"side": side, "text": text, "focus": 0.0, "base": Vector2.ZERO, "edge": CARD_EDGE }
+		"side": side, "text": text, "hint": hint, "focus": 0.0, "base": Vector2.ZERO, "edge": CARD_EDGE }
+
+
+## What an upgrade combines with and into what, for its card and its line on the pause screen: COMBO_HINT for each
+## combined upgrade (a row of Config.UPGRADES with needs) that names it, that this keeper can come to hold and does
+## not hold yet. "" for an upgrade that is no ingredient.
+static func combo_hint(w, id: String) -> String:
+	var lines := []
+	for made in Config.UPGRADES:
+		var needs: Array = Config.UPGRADES[made].get("needs", [])
+		if needs.has(id) and w.level(made) == 0 and (needs + [made]).all(func(part): return World.open_to(part, w.character)):
+			var other: String = needs.filter(func(part): return part != id)[0]
+			lines.append(COMBO_HINT % [World.upgrade_row(other, w.character).name, World.upgrade_row(made, w.character).name])
+	return "\n".join(lines)
 
 
 ## The end: how it ended, the night and score and where it landed, the upgrades held by name, the best runs, and in
@@ -886,13 +901,15 @@ func _held_item(w, id: String, words: bool) -> Control:
 	lines.add_theme_constant_override("separation", 0)
 	item.add_child(lines)
 	var name := _label(lines, SMALL, SIDE_COLOUR[Looks.side(id)])
-	name.text = u.name + (LEVEL % level if level > 1 else "") + (" (최대)" if words and level >= World.max_level(id) and World.max_level(id) > 1 else "")
+	name.text = u.name + (LEVEL % level if level > 1 else "") + (" (최대)" if words and level >= World.max_level(id) and World.max_level(id) > 1 else "") + (COMBO_HELD if u.has("needs") else "")
 	if id == "vampire": # the kills it wants grow every night: say how far along tonight's count is
 		name.text += "  %d/%d" % [w.blade_kills, w.vamp_need()]
 	if words:
 		var text := _label(lines, SMALL, MUTED)
 		text.remove_theme_constant_override("outline_size")
 		text.text = _wrap(text, u.text, PAUSE_COLUMN - 14.0)
+		if combo_hint(w, id) != "":
+			_label(lines, SMALL, COMBO).text = combo_hint(w, id)
 	return item
 
 
@@ -906,7 +923,7 @@ func _fill_pause(w) -> void:
 	var ids := Painter.held(w)
 	var lines := 0
 	for id in ids:
-		lines += 1 + int(ceilf(_text_width(World.upgrade(id, w.level(id), w.character).text) / (PAUSE_COLUMN - 14.0)))
+		lines += 1 + int(ceilf(_text_width(World.upgrade(id, w.level(id), w.character).text) / (PAUSE_COLUMN - 14.0))) + (1 if combo_hint(w, id) != "" else 0)
 	var per_side := {}
 	for side in Looks.SIDES:
 		per_side[side] = ids.filter(func(id): return Looks.side(id) == side)

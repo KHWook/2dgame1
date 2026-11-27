@@ -166,6 +166,9 @@ const BOSS_BAR_COLOUR := "i"
 const DASH_GHOSTS := 3
 const DASH_GHOST_GAP := 6.0
 const DASH_GHOST := Color(0.65, 0.85, 1.0, 0.45)
+## The haste a kill gives (World.haste_until): fewer, warmer copies trail behind the keeper while it walks faster.
+const HASTE_GHOSTS := 2
+const HASTE_GHOST := Color(1.0, 0.82, 0.4, 0.4)
 const SPARK_TAIL := [[0.012, "F"], [0.024, "x"], [0.036, "X"]] # pixels behind a spark: [seconds back along its flight, colour]
 ## The keeper's embers (a shooter's bolts): a disc as big as what it hits (World.bolt_radius, World.in_bolt), brighter
 ## in the torch's light where it burns harder, with its core and a tail of [pixels back along its flight, colour].
@@ -845,10 +848,13 @@ func _standing(w) -> Array:
 		_put(out, p.pos.y + 5.0, me.sprite + "_dead", p.pos, BODY)
 	elif _keeper_shows(w):
 		var look := _keeper(w)
-		for g in DASH_GHOSTS if p.dash_t > 0.0 else 0:
-			var ghost := DASH_GHOST
-			ghost.a *= 1.0 - float(g) / DASH_GHOSTS
-			_put(out, p.pos.y + 4.8, look[0], p.pos - p.dash_dir * DASH_GHOST_GAP * (g + 1), BODY, look[1], true, ghost)
+		var dashing: bool = p.dash_t > 0.0
+		var trail: Vector2 = p.dash_dir if dashing else p.vel.normalized() if w.time < w.haste_until else Vector2.ZERO
+		var ghosts: int = DASH_GHOSTS if dashing else HASTE_GHOSTS
+		for g in ghosts if trail != Vector2.ZERO else 0:
+			var ghost := DASH_GHOST if dashing else HASTE_GHOST
+			ghost.a *= 1.0 - float(g) / ghosts
+			_put(out, p.pos.y + 4.8, look[0], p.pos - trail * DASH_GHOST_GAP * (g + 1), BODY, look[1], true, ghost)
 		_put(out, p.pos.y + 5.0, look[0], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)
 		if w.mod("thorns", 0) > 0 and me.cloak: # the thorn cloak: behind the keeper, except seen from behind
 			_put(out, p.pos.y + (5.05 if look[2] == "up" else 4.95), "thorns_%s" % look[2], p.pos + _lean(w), BODY, look[1], p.hurt_t > 0.0)

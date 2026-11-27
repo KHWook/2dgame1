@@ -17,7 +17,7 @@ const NEXT_KEYS := Chooser.NEXT_KEYS
 const BACK_KEYS := Chooser.BACK_KEYS
 
 ## The reroll button (the R key's): one under the cards for the mouse and a thumb. It is drawn at reroll_rect() and
-## answers REROLL_PAD past it, once the offer listens (so the tap that drew an offer again is not also the next
+## answers REROLL_PAD past it, once the offer listens (as the key does: reroll_key) (so the tap that drew an offer again is not also the next
 ## reroll). It sits in the middle, REROLL_BELOW under the cards' bottom edge with the line of keys between, so a
 ## thumb that lands low on a card, or just under one, takes neither.
 const REROLL_KEY := KEY_R
@@ -45,6 +45,12 @@ static func reroll_rect(across: float, bottom: float) -> Rect2:
 ## Whether a click or a tap at pos (in that frame) is on the reroll button, while it listens.
 func reroll_at(pos: Vector2, across: float, bottom: float) -> bool:
 	return listening() and reroll_rect(across, bottom).grow(REROLL_PAD).has_point(pos)
+
+
+## Whether this key, pressed now, draws the offer again: the reroll key, once the offer listens (so the R that
+## restarted a run from its end screen, pressed twice, does not also spend a reroll on the new run's first offer).
+func reroll_key(keycode: int) -> bool:
+	return listening() and keycode == REROLL_KEY
 
 
 ## A new offer of n cards: the middle one in focus, deaf for WAIT seconds.
