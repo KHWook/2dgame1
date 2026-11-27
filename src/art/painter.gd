@@ -126,7 +126,8 @@ const HUD_LOW_SECONDS := 10.0 # ... or when it would go out within this many sec
 const HUD_BLINK_STEPS := 10
 ## The upgrades you hold: each on a tile, one row per side (looks.gd's SIDES: the torch's, then the keeper's), in the
 ## order first taken. A tile's colour says the side; under the icon a pip per level it can reach, the reached ones
-## gold; a tile at its last level gets a gold edge. main.gd's ui names them on the pause and end screens.
+## gold; a tile at its last level gets a gold edge. main.gd's ui names them on the pause and end screens. A row is
+## as long as its side has slots (Config.BUILD.slots), the empty ones drawn hollow, so what room is left shows.
 const HUD_PICKS := Vector2(5.0, 28.0) # the first tile's top-left
 const TILE := Vector2(13.0, 15.0)
 const TILE_STEP := Vector2(14.0, 17.0) # tile to tile along a row, row to row
@@ -138,6 +139,8 @@ const TILE_BACK := { "torch": Color("#43281a"), "keeper": Color("#1f2d4a") }
 const TILE_EDGE := { "torch": Color("#8a5430"), "keeper": Color("#46619a") }
 const TILE_FULL := "Y" # PALETTE key of a reached pip, and of the edge of a tile at its last level
 const TILE_EMPTY := "K"
+const TILE_EMPTY_EDGE := 0.55 # how solid the edge of an empty slot is
+const TILE_FREE := 3.0 # pixels between a row's last slot and the tiles of upgrades that take no slot
 const TILE_FLASH := 3.0 # pixels the white ring grows out from a tile that just got its upgrade
 ## Logs and berries keep a lit ring the night does not dim (Sprites.rim), stronger in the dark, breathing, with a glint
 ## now and then, so they read on the dark grass; a berry also bobs. Each thing has its own phase, from where it lies.
@@ -510,6 +513,9 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		var fill := Rect2(bar.position, Vector2(ceilf(bar.size.x * share), bar.size.y))
 		c.draw_rect(fill, Sprites.PALETTE["X" if low else "x"])
 		c.draw_rect(Rect2(fill.position, Vector2(fill.size.x, 1.0)), Sprites.PALETTE["x" if low else "F"])
+	for slot in empty_slots(w): # a slot with nothing in it yet: the side's edge, dim, round a dark hollow
+		c.draw_rect(Rect2(slot[0], TILE), Color(TILE_EDGE[slot[1]], TILE_EMPTY_EDGE))
+		c.draw_rect(Rect2(slot[0] + Vector2.ONE, TILE - Vector2(2.0, 2.0)), Sprites.PALETTE["k"])
 	var tiles := tiles(w)
 	for id in tiles:
 		_tile(c, w, id, tiles[id])
@@ -530,16 +536,34 @@ static func held(w) -> Array:
 	return out
 
 
-## Where each held upgrade's tile is: id -> top-left. One row per side, a side with nothing held takes no row.
+## Where each held upgrade's tile is: id -> top-left. One row per side: the upgrades that fill its slots
+## (Config.BUILD.slots) from the left in the order taken, then, past the last slot and TILE_FREE further, those that
+## take none.
 static func tiles(w) -> Dictionary:
 	var out := {}
-	var row := 0
-	for side in Looks.SIDES:
-		var ids := held(w).filter(func(id): return Looks.side(id) == side)
-		for i in ids.size():
-			out[ids[i]] = HUD_PICKS + Vector2(i * TILE_STEP.x, row * TILE_STEP.y)
-		row += 1 if not ids.is_empty() else 0
+	for row in Looks.SIDES.size():
+		var ids := held(w).filter(func(id): return Looks.side(id) == Looks.SIDES[row])
+		var slotted := ids.filter(func(id): return w.takes_slot(id))
+		var free := ids.filter(func(id): return not w.takes_slot(id))
+		for i in slotted.size():
+			out[slotted[i]] = _tile_at(i, row)
+		for i in free.size():
+			out[free[i]] = _tile_at(w.slots(Looks.SIDES[row]) + i, row) + Vector2(TILE_FREE, 0.0)
 	return out
+
+
+## The slots still empty: [top-left, side] each, after the filled ones of its side's row.
+static func empty_slots(w) -> Array:
+	var out := []
+	for row in Looks.SIDES.size():
+		var side: String = Looks.SIDES[row]
+		for i in range(w.slots_used(side), w.slots(side)):
+			out.append([_tile_at(i, row), side])
+	return out
+
+
+static func _tile_at(i: int, row: int) -> Vector2:
+	return HUD_PICKS + Vector2(i * TILE_STEP.x, row * TILE_STEP.y)
 
 
 ## The middle of an upgrade's icon on its tile, where the ui flies a picked card's icon to.
@@ -549,17 +573,14 @@ static func icon_spot(w, id: String) -> Vector2:
 
 ## The lowest pixel of the HUD's top-left panel, so a box in the middle can keep clear of it.
 static func hud_bottom(w) -> float:
-	var bottom := fuel_bar(w).end.y
-	for at in tiles(w).values():
-		bottom = maxf(bottom, at.y + TILE.y)
-	return bottom + HUD_PAD
+	return _tile_at(0, Looks.SIDES.size() - 1).y + TILE.y + HUD_PAD
 
 
 ## The right edge of the HUD's top-left panel.
 func hud_right(w) -> float:
 	var right := fuel_bar(w).end.x + (HUD_FUEL_TEXT + fuel_text_width if fuel_text_width > 0.0 else 0.0)
 	right = maxf(right, HUD_HEARTS.x + w.max_hp() * HUD_HEART_STEP - 1.0)
-	for at in tiles(w).values():
+	for at in tiles(w).values() + empty_slots(w).map(func(s): return s[0]):
 		right = maxf(right, at.x + TILE.x)
 	return right + HUD_PAD
 

@@ -161,6 +161,7 @@ func _ready() -> void:
 	ui.coach.on = bot == null and not records.guide_read() # the first night is coached until the guide has been read once
 	_set_intro(bot == null) # the demo bot starts at once
 	ui.chosen.connect(func(slot: int): pending["pick_%d" % (slot + 1)] = true)
+	ui.rerolled.connect(func(): pending["reroll"] = true)
 	var touch_layer := CanvasLayer.new()
 	touch_layer.layer = ui.layer + 1
 	add_child(touch_layer)
@@ -302,6 +303,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		var slot: int = ui.picker.key(k.keycode)
 		if slot >= 0:
 			pending["pick_%d" % (slot + 1)] = true
+		return
+	# While the offer is up, R draws it again (the world counts how often it may); it restarts only from an ending.
+	if k != null and k.pressed and world.phase == "pick" and k.keycode == Picker.REROLL_KEY:
+		if not k.echo and bot == null:
+			pending["reroll"] = true
 		return
 	if k == null or not KEYS.has(k.keycode):
 		return

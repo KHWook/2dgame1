@@ -21,6 +21,7 @@ const Chooser := preload("res://src/chooser.gd")
 const Picker := preload("res://src/picker.gd")
 
 signal chosen(slot: int) # a card was clicked: main.gd presses that slot's key for the next step
+signal rerolled # the reroll button was clicked: main.gd presses "reroll" for the next step
 
 ## One palette and three sizes for every word. Each word has a dark outline so it reads over grass, light and day.
 ## The words are Galmuri (assets/fonts/, SIL OFL 1.1), a Korean pixel font. A pixel font is crisp only at its own
@@ -34,6 +35,7 @@ const WARM := Color("#ffe6a8") # names: upgrades, enemies, headings
 const RED := Color("#ff5a4a") # danger: low fuel, a boss
 const FRESH := Color("#a6e36a") # an upgrade not held yet
 const SIDE_COLOUR := { "torch": Color("#ffb05a"), "keeper": Color("#9cc8ff") }
+const RARE := Color("#c07ee0") # a rare card's edge, badge and word: the bats' violet (PALETTE p), used for nothing else here
 const SMALL := 10 # Galmuri9 is drawn for 10px
 const BIG := 12 # Galmuri11 Bold, 12px: the numbers and headings that should hit hardest
 const HUGE := 15 # Galmuri14, 15px
@@ -59,9 +61,11 @@ const OMEN_WORD := "오늘 밤"
 const OMEN_GAP := 6.0 # between the omen's name and the night, in the HUD
 
 ## The offer cards: size, gap, icon enlargement, colours.
-const CARD := Vector2(112.0, 0.0) # as tall as the tallest card's words
+const CARD := Vector2(126.0, 0.0) # as wide as a character's card (src/chooser.gd), as tall as the tallest card's words
 const CARD_GAP := 6.0
 const CARD_ICON := 2.0
+const CARD_TEXT_WIDTH := CARD.x - 8.0
+const CARD_LINES := 4 # the most lines a card's words take (an R1 scene holds it): the tallest offer still clears the HUD
 const CARD_BACK := Color(0.16, 0.12, 0.2, 0.97)
 const CARD_EDGE := Color("#c8862f")
 const CARD_TEXT := Color("#e6dcc6")
@@ -151,6 +155,16 @@ const CHOOSE_BAR_NAME := 26.0 # the width kept for a bar's name, so the pips lin
 const CHOOSE_HP := "체력"
 const PICK_KEYS := CHOOSE_KEYS # the offer answers the same keys as the choosing screen (src/picker.gd)
 const PICK_TOUCH := "카드를 눌러 고르기"
+const REROLL_KEYS := "R 다시 뽑기 · %d번 남음"
+const REROLL_TOUCH := "다시 뽑기 · %d번 남음"
+const REROLL_OFF := 0.4 # how solid the reroll button is when it would do nothing
+const TAG_RARE := "희귀 · "
+const TAG_FILLER := "덤"
+const FILLER_SIDE := "지금 한 번, 칸 밖"
+const FREE_SLOT := " · 칸 밖" # after the side of an upgrade that takes no slot
+const SLOTS := "%d / %d칸"
+const NONE_HELD := "아직 없다"
+const SLOT_PIP := Vector2(7.0, 7.0) # a slot on the pause screen
 const AGAIN_KEYS := "R 다시 하기"
 const AGAIN_TOUCH := "눌러서 다시 하기"
 const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
@@ -223,9 +237,12 @@ var subheading: Label
 var omen_row: HBoxContainer
 var omen_name: Label
 var omen_text: Label
-var row: Control # the cards, placed by hand so they can move
-var offers: Array = [] # per slot: { card, style, key, tag, icon, name, text, focus }
+var row: Control # the cards, placed by hand so they can move; under them the line of keys and the reroll button
+var offers: Array = [] # per slot: { card, style, key, tag, icon, name, text, focus, edge (its edge's colour at rest) }
 var press: Label
+var reroll: PanelContainer # drawn where it answers: Picker.reroll_rect(), in row
+var reroll_label: Label
+var cards_bottom := 0.0 # the cards' bottom edge in row, which the reroll button is placed from
 var foot: Label
 var held_head: Label
 var held_flow: HFlowContainer
@@ -314,8 +331,12 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	lines.add_child(row)
 	for i in Config.NIGHT.offer_size:
 		offers.append(_card(i))
-	press = _label(lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
-	foot = _label(lines, BIG, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
+	press = _label(row, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	reroll = _panel(row, CARD_BACK, 1.0)
+	reroll_label = _label(reroll, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	reroll_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	(reroll.get_theme_stylebox("panel") as StyleBoxFlat).border_color = CARD_EDGE
+	foot =_label(lines, BIG, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
 	held_head = _label(lines, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	held_head.text = "고른 힘"
 	held_flow = HFlowContainer.new()
@@ -426,6 +447,12 @@ func after_step(w) -> void:
 			var icon: TextureRect = offers[slot].icon
 			fly_from = icon.get_global_rect().get_center()
 		last_picks = w.picks.size()
+	for ev in w.events: # a filler joins no build and flies to no tile: its card plays out and the line names it
+		if ev.kind == "took" and Config.FILLERS.has(ev.id):
+			taken = last_offer.find(ev.id)
+			take_age = 0.0
+			told_age = 0.0
+			_fill_told(w, ev.id)
 	if w.score > shown_score:
 		gain = (gain if gain_age >= 0.0 and gain_age < GAIN_TIME * 0.6 else 0) + w.score - shown_score
 		gain_age = 0.0
@@ -565,7 +592,7 @@ func _offer(w, delta: float) -> void:
 	var picking: bool = w.phase == "pick"
 	var ended: bool = ENDINGS.has(w.phase)
 	if picking:
-		var key := ",".join(w.offer) + "/%d/%d/%s" % [w.picks.size(), w.night, w.character]
+		var key := ",".join(w.offer) + "/%d/%d/%s/%d" % [w.picks.size(), w.night, w.character, w.rerolls]
 		if key != offer_key:
 			offer_key = key
 			deal = 0.0
@@ -587,7 +614,11 @@ func _offer(w, delta: float) -> void:
 		return
 	heading.visible = true
 	row.visible = cards_on and not ended
-	press.visible = row.visible
+	reroll.visible = picking
+	if picking: # greyed when a reroll would do nothing: none left, or no other card to draw
+		reroll_label.text = (REROLL_TOUCH if touch else REROLL_KEYS) % w.rerolls
+		reroll_label.add_theme_color_override("font_color", GOLD if w.can_reroll() else MUTED)
+		reroll.modulate.a = 1.0 if w.can_reroll() else REROLL_OFF
 	for n in [foot, held_head, held_flow, board, again, end_seed]:
 		n.visible = ended
 	if ended:
@@ -614,6 +645,7 @@ func _offer(w, delta: float) -> void:
 	box.self_modulate.a = fade
 	for n in [heading, subheading, omen_row, press]:
 		n.modulate.a = fade
+	reroll.modulate.a *= fade
 	if row.visible:
 		_cards(w, delta)
 	box.reset_size()
@@ -663,11 +695,11 @@ func _cards(w, delta: float) -> void:
 		card.scale = size
 		card.modulate = tint
 		var style: StyleBoxFlat = o.style
-		style.border_color = CARD_EDGE.lerp(GOLD, f)
+		style.border_color = o.edge.lerp(GOLD, f)
 		style.set_border_width_all(2 if f > 0.5 else 1)
 		style.shadow_color = Color(GOLD, 0.45 * f)
 		style.shadow_size = int(round(5.0 * f))
-		o.key_style.bg_color = CARD_EDGE.lerp(GOLD, f)
+		o.key_style.bg_color = o.edge.lerp(GOLD, f)
 
 
 ## The card slot under the mouse (or under at, a point on the screen, such as where a click or a tap landed), or -1.
@@ -699,6 +731,8 @@ func _input(event: InputEvent) -> void:
 	var i := _hovered(shown, b.position) # a tap moves no mouse, so where it landed is the event's own place
 	if i >= 0:
 		chosen.emit(i)
+	elif bot_slot == 0 and reroll.is_visible_in_tree() and picker.reroll_at(row.get_global_transform_with_canvas().affine_inverse() * b.position, row.custom_minimum_size.x, cards_bottom):
+		rerolled.emit()
 
 
 ## Puts this offer's words on its cards, makes them all as tall as the tallest, and lays them out.
@@ -713,18 +747,27 @@ func _fill_cards(w) -> void:
 			continue
 		shown += 1
 		var id: String = w.offer[i]
-		var next: int = w.level(id) + 1
-		var u: Dictionary = World.upgrade(id, next, w.character)
+		var filler: bool = Config.FILLERS.has(id)
+		var next: int = 1 if filler else w.level(id) + 1
+		var u: Dictionary = Config.FILLERS[id] if filler else World.upgrade(id, next, w.character)
 		var icon: Texture2D = painter.icon(id, true, w.character)
 		o.icon.texture = icon
 		o.icon.custom_minimum_size = icon.get_size() * CARD_ICON
 		o.name.text = u.name + (LEVEL % next if next > 1 else "")
-		var most := World.max_level(id)
-		o.tag.text = "새 힘" if next == 1 else ("%d단계 · 마지막" % next if next >= most else "%d단계 · 최대 %d" % [next, most])
-		o.tag.add_theme_color_override("font_color", FRESH if next == 1 else GOLD)
-		o.side.text = Looks.side_name(Looks.side(id), w.character)
-		o.side.add_theme_color_override("font_color", SIDE_COLOUR[Looks.side(id)])
-		o.text.text = _wrap(o.text, u.text, CARD.x - 8.0)
+		var rare: bool = u.get("rare", false)
+		o.edge = RARE if rare else CARD_EDGE
+		if filler:
+			o.tag.text = TAG_FILLER
+			o.tag.add_theme_color_override("font_color", MUTED)
+			o.side.text = FILLER_SIDE
+			o.side.add_theme_color_override("font_color", MUTED)
+		else:
+			var most := World.max_level(id)
+			o.tag.text = (TAG_RARE if rare else "") + ("새 힘" if next == 1 else ("%d단계 · 마지막" % next if next >= most else "%d단계 · 최대 %d" % [next, most]))
+			o.tag.add_theme_color_override("font_color", RARE if rare else FRESH if next == 1 else GOLD)
+			o.side.text = Looks.side_name(Looks.side(id), w.character) + ("" if World.takes_slot(id) else FREE_SLOT)
+			o.side.add_theme_color_override("font_color", SIDE_COLOUR[Looks.side(id)])
+		o.text.text = _wrap(o.text, u.text, CARD_TEXT_WIDTH)
 		o.card.custom_minimum_size = CARD
 		o.card.size = Vector2.ZERO
 	var tall := 0.0
@@ -733,7 +776,13 @@ func _fill_cards(w) -> void:
 			tall = maxf(tall, o.card.get_combined_minimum_size().y)
 	var width := shown * CARD.x + (shown - 1) * CARD_GAP
 	var full := offers.size() * CARD.x + (offers.size() - 1) * CARD_GAP
-	row.custom_minimum_size = Vector2(full, tall + FOCUS_LIFT + 2.0)
+	cards_bottom = FOCUS_LIFT + 1.0 + tall
+	var button := Picker.reroll_rect(full, cards_bottom)
+	row.custom_minimum_size = Vector2(full, button.end.y + 1.0)
+	press.position = Vector2(0.0, cards_bottom + 1.0)
+	press.size = Vector2(full, button.position.y - cards_bottom - 2.0)
+	reroll.position = button.position
+	reroll.size = button.size
 	for i in shown:
 		var o: Dictionary = offers[i]
 		o.card.custom_minimum_size = Vector2(CARD.x, tall)
@@ -757,7 +806,9 @@ func _card(i: int) -> Dictionary:
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 1)
 	card.add_child(stack)
-	var badge_row := CenterContainer.new()
+	var badge_row := HBoxContainer.new() # the key and the tag share a line: the box has the reroll button to fit too
+	badge_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	badge_row.add_theme_constant_override("separation", 4)
 	stack.add_child(badge_row)
 	var key := _label(badge_row, SMALL, INK, HORIZONTAL_ALIGNMENT_CENTER)
 	key.remove_theme_constant_override("outline_size")
@@ -768,7 +819,7 @@ func _card(i: int) -> Dictionary:
 	key_style.content_margin_left = 4.0
 	key_style.content_margin_right = 4.0
 	key.add_theme_stylebox_override("normal", key_style)
-	var tag := _label(stack, SMALL, FRESH, HORIZONTAL_ALIGNMENT_CENTER)
+	var tag := _label(badge_row, SMALL, FRESH, HORIZONTAL_ALIGNMENT_CENTER)
 	var icon := TextureRect.new()
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -778,7 +829,7 @@ func _card(i: int) -> Dictionary:
 	var text := _label(stack, SMALL, CARD_TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	text.remove_theme_constant_override("outline_size")
 	return { "card": card, "style": style, "key": key, "key_style": key_style, "tag": tag, "icon": icon, "name": name,
-		"side": side, "text": text, "focus": 0.0, "base": Vector2.ZERO }
+		"side": side, "text": text, "focus": 0.0, "base": Vector2.ZERO, "edge": CARD_EDGE }
 
 
 ## The end: how it ended, the night and score and where it landed, the upgrades held by name, the best runs, and in
@@ -868,21 +919,29 @@ func _fill_pause(w) -> void:
 		_pause_rows(w, per_side, false)
 
 
+## A column per side: its name, a pip per slot (Config.BUILD.slots; the filled ones in the side's colour) and how
+## many are filled, then what it holds.
 func _pause_rows(w, per_side: Dictionary, words: bool) -> void:
-	if per_side.values().all(func(a): return a.is_empty()):
-		var none := _label(pause_columns, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
-		none.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		none.text = "아직 고른 힘이 없다"
-		return
 	for side in Looks.SIDES:
-		if per_side[side].is_empty():
-			continue
 		var column := VBoxContainer.new()
 		column.custom_minimum_size = Vector2(PAUSE_COLUMN, 0.0)
 		column.add_theme_constant_override("separation", 3)
 		pause_columns.add_child(column)
-		var head := _label(column, SMALL, SIDE_COLOUR[side])
-		head.text = Looks.side_name(side, w.character)
+		var head := HBoxContainer.new()
+		head.add_theme_constant_override("separation", 2)
+		column.add_child(head)
+		var head_name := _label(head, SMALL, SIDE_COLOUR[side])
+		head_name.text = Looks.side_name(side, w.character) + " "
+		for n in w.slots(side):
+			var pip := ColorRect.new()
+			pip.custom_minimum_size = SLOT_PIP
+			pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			pip.color = SIDE_COLOUR[side] if n < w.slots_used(side) else CHOOSE_PIP_OFF
+			pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			head.add_child(pip)
+		_label(head, SMALL, MUTED).text = " " + SLOTS % [w.slots_used(side), w.slots(side)]
+		if per_side[side].is_empty():
+			_label(column, SMALL, MUTED).text = NONE_HELD
 		for id in per_side[side]:
 			column.add_child(_held_item(w, id, words))
 
@@ -922,11 +981,12 @@ func _flight(w, delta: float) -> void:
 
 
 func _fill_told(w, id: String) -> void:
-	var level: int = w.level(id)
-	var u: Dictionary = World.upgrade(id, level, w.character)
+	var filler: bool = Config.FILLERS.has(id)
+	var level: int = 1 if filler else w.level(id)
+	var u: Dictionary = Config.FILLERS[id] if filler else World.upgrade(id, level, w.character)
 	told_icon.texture = painter.icon(id, true, w.character)
 	told_icon.custom_minimum_size = told_icon.texture.get_size() * CARD_ICON
-	told_name.text = u.name + (LEVEL % level if level > 1 else "") + ("  얻었다!" if level == 1 else "  강해졌다!")
+	told_name.text = u.name + (LEVEL % level if level > 1 else "") + ("  받았다!" if filler else "  얻었다!" if level == 1 else "  강해졌다!")
 	told_text.text = u.text
 
 
@@ -1037,7 +1097,11 @@ static func _back(k: float) -> float:
 ## The words broken into lines at spaces only, each no wider than width in label's font. The label's own autowrap
 ## would also break inside a Korean word.
 func _wrap(label: Label, words: String, width: float) -> String:
-	var font := label.get_theme_font("font")
+	return wrapped(label.get_theme_font("font"), words, width)
+
+
+## words in font at size SMALL, broken as _wrap breaks them.
+static func wrapped(font: Font, words: String, width: float) -> String:
 	var lines: Array = []
 	for word in words.split(" "):
 		var longer: String = word if lines.is_empty() else lines[-1] + " " + word
