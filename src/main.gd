@@ -16,6 +16,7 @@ const Ui := preload("res://src/ui.gd")
 const Touch := preload("res://src/touch.gd")
 const Guide := preload("res://src/guide.gd")
 const Looks := preload("res://src/art/looks.gd")
+const Picker := preload("res://src/picker.gd")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -225,6 +226,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if k != null and k.pressed and not k.echo and PAUSE_KEYS.has(k.keycode):
 		_toggle_pause()
+		return
+	# While the torch's offer is up, ← → (A D) move the focus between its cards and Enter or Space takes it
+	# (src/picker.gd), as the same pick_N action a number key or a click on the card sends; they do not walk or swing.
+	if k != null and k.pressed and not k.echo and world.phase == "pick" and bot == null and Picker.hears(k.keycode):
+		var slot: int = ui.picker.key(k.keycode)
+		if slot >= 0:
+			pending["pick_%d" % (slot + 1)] = true
 		return
 	if k == null or not KEYS.has(k.keycode):
 		return
