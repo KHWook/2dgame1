@@ -49,6 +49,7 @@ var sparks: Array = [] # embers the torch fired: { pos, vel, life }
 var boss_due := false # a boss is still to come tonight
 var boss_from = null # where the boss will come from once its warning is given, until it comes; null otherwise
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
+var vamp_ready := 0.0 # night time from which the vampire blade counts kills again after a heal
 var events: Array = [] # what happened in the last step; see the top of this file
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
 var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)
@@ -85,6 +86,7 @@ func reset() -> void:
 	next_thorn = 0.0
 	sparks = []
 	blade_kills = 0
+	vamp_ready = 0.0
 	boss_due = _boss_night()
 	boss_from = null
 	player = Player.new()
@@ -336,6 +338,7 @@ func _dawn() -> void:
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
+	vamp_ready = 0.0
 	boss_due = _boss_night()
 	boss_from = null
 	player.hp = mini(max_hp(), player.hp + Config.DAWN.heal)
@@ -460,7 +463,9 @@ func melee(p) -> void:
 
 ## A blow of n lands on e, struck from from (by the sword when blade). The dark protects some enemies; a thief drops
 ## its log when it dies; a big slime breaks into smaller ones, which join the fight at the end of the step; with the
-## vampire upgrade enough sword kills heal you.
+## vampire upgrade enough sword kills heal you (kills made at full health wait for the next hurt), and after a heal
+## none count for vamp_wait seconds times the night: the crowds of late nights give kills in plenty, and the blade
+## would otherwise heal every few seconds.
 func _damage(e, n: int, from: Vector2, blade := false) -> void:
 	if e.dead:
 		return
@@ -474,10 +479,11 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 		return
 	score += e.T.get("score", Config.SCORE.kill)
 	var thirst: int = mod("vamp_kills", 0)
-	if blade and thirst > 0:
+	if blade and thirst > 0 and time >= vamp_ready:
 		blade_kills = mini(blade_kills + 1, thirst)
 		if blade_kills >= thirst and player.hp < max_hp() and not player.dead:
 			blade_kills = 0
+			vamp_ready = time + mod("vamp_wait", 0.0) * night
 			player.hp += 1
 			events.append({ "kind": "healed", "pos": player.pos })
 	if e.carrying:
@@ -494,8 +500,7 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 func _spawns() -> void:
 	if time >= next_spawn:
 		var row := _night_row()
-		var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(time / N.length, 0.0, 1.0))
-		next_spawn = time + apart * pow(Config.LATER_NIGHTS.spawn, _nights_past()) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
+		next_spawn = time + spawn_gap()
 		var kind := _who(row.who)
 		var at := _edge_point()
 		enemies.append(Enemy.new(kind, at))
@@ -524,6 +529,14 @@ func _spawns() -> void:
 			var spot = _free_spot(Config.BERRY.keep_away)
 			if spot != null:
 				berries.append(spot)
+
+
+## Seconds from one enemy to the next at this point of tonight: the row's gap (from dusk to just before dawn),
+## shorter on every night past the table, but never under LATER_NIGHTS.min_gap; on a boss night, further apart.
+func spawn_gap() -> float:
+	var row := _night_row()
+	var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(time / N.length, 0.0, 1.0)) * pow(Config.LATER_NIGHTS.spawn, _nights_past())
+	return maxf(apart, Config.LATER_NIGHTS.min_gap) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
 
 
 ## Whether a boss comes tonight.

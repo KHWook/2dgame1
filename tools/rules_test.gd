@@ -40,6 +40,7 @@ static func run() -> Array:
 	out.append_array(_setup())
 	out.append_array(_coaching())
 	out.append_array(_crowds())
+	out.append_array(_late_nights())
 	return out
 
 
@@ -341,6 +342,24 @@ static func _new_upgrades() -> Array:
 		bat.T.speed = 0.0
 		healed = _play(w, SWING + 10, "attack").has("healed")
 	_expect(out, "the vampire blade heals after enough sword kills, and says so", [w.player.hp, healed], [4, true])
+	# after a heal it rests vamp_wait seconds times the night: on the tenth night, kills in that time do not count
+	w.night = 10
+	w.vamp_ready = w.time + Config.UPGRADES.vampire.vamp_wait * w.night
+	w.player.hp = 3
+	for i in Config.UPGRADES.vampire.vamp_kills + 2:
+		var bat = _add(w, "bat", NEAR)
+		bat.T = bat.T.duplicate()
+		bat.T.speed = 0.0
+		_play(w, SWING + 10, "attack")
+	_expect(out, "the vampire blade does not heal while it rests (%.0f s on night 10)" % (Config.UPGRADES.vampire.vamp_wait * 10), [w.player.hp, w.blade_kills], [3, 0])
+	w.time = w.vamp_ready
+	for i in Config.UPGRADES.vampire.vamp_kills:
+		var bat = _add(w, "bat", NEAR)
+		bat.T = bat.T.duplicate()
+		bat.T.speed = 0.0
+		_play(w, SWING + 10, "attack")
+	_expect(out, "once rested it heals again after enough kills", w.player.hp, 4)
+	_expect(out, "its rest grows with the night", [w.vamp_ready - w.time > Config.UPGRADES.vampire.vamp_wait * 10 - 5.0, World.upgrade("vampire", 2).vamp_wait < Config.UPGRADES.vampire.vamp_wait], [true, true])
 	# big torch
 	w = _night(DARK, ["big_torch"])
 	w.fuel = Config.TORCH.max_fuel
@@ -867,3 +886,22 @@ static func _mod_the_slow_way(w, key: String, fallback):
 			continue
 		v = v * u[key] if key.ends_with("_mult") or key == "glow_slow" else u[key]
 	return v
+
+
+## Nights past the table come closer together night by night (LATER_NIGHTS.spawn), but never closer than
+## LATER_NIGHTS.min_gap, however late; a boss night's still come further apart than that.
+static func _late_nights() -> Array:
+	var out := []
+	var w = _night(DARK)
+	var gaps := []
+	for night in [Config.NIGHTS.size(), Config.NIGHTS.size() + 1, Config.NIGHTS.size() + 2, Config.NIGHTS.size() + 6]:
+		w.night = night
+		w.time = 0.0
+		gaps.append(w.spawn_gap())
+	_expect(out, "each night past the table its enemies come closer together", [gaps[1] < gaps[0] or w._boss_night(), gaps[2] < gaps[1], gaps[3] < gaps[2]], [true, true, true])
+	w.night = 61 # not a boss night
+	w.time = Config.NIGHT.length
+	_expect(out, "however late, they never come closer than min_gap", w.spawn_gap(), Config.LATER_NIGHTS.min_gap)
+	w.night = 60
+	_expect(out, "and a boss night's come further apart than that", is_equal_approx(w.spawn_gap(), Config.LATER_NIGHTS.min_gap * Config.BOSS.spawn_mult), true)
+	return out

@@ -62,7 +62,9 @@ const NIGHTS := [
 	{ "burn": 4.65, "spawn": [1.05, 0.7], "who": { "slime": 0.24, "bat": 0.14, "thief": 0.16, "shade": 0.14, "big_slime": 0.1, "boar": 0.22 },
 		"with": { "thief": ["shade", "shade"], "boar": ["bat", "bat"], "big_slime": ["boar"] } },
 ]
-const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82 } # per night past the table: fuel per second added, spawn gap multiplied
+## Per night past the table: fuel per second added, spawn gap multiplied. min_gap: the gap never gets shorter than
+## this (seconds), however late, so the nights keep getting harder without the count running away into a wall.
+const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.88, "min_gap": 0.2 }
 
 ## Dawn: the sun clears the field, you rest (heal), and the torch is topped up to at least its starting fuel (its
 ## start_fuel share of the tank, so a big torch is topped up further).
@@ -157,8 +159,9 @@ const UPGRADES := {
 	"spark": { "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
 		"levels": [{ "text": "횃불이 1.6초마다 불씨를 쏜다", "spark_every": 1.6 },
 			{ "text": "횃불이 1.2초마다 불씨를 쏜다", "spark_every": 1.2 }] },
-	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1", "vamp_kills": 8,
-		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1", "vamp_kills": 5 }] },
+	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1, 회복 뒤 쉬는 시간이 밤마다 2초씩 길어진다",
+		"vamp_kills": 8, "vamp_wait": 2.0,
+		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1, 쉬는 시간은 밤마다 1.5초씩", "vamp_kills": 5, "vamp_wait": 1.5 }] },
 	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
 		"levels": [{ "text": "연료 최대치 +60, 새벽에 그만큼 더 채워진다", "fuel_bonus": 60.0 }] },
 }
