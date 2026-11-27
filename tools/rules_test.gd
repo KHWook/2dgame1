@@ -2428,7 +2428,8 @@ static func _auto_attack() -> Array:
 
 ## A run is the night its seed gives. World.choose(id, seed) starts the run that keeper and that seed give, whatever
 ## the world was before: the offer a world made with them starts with and, played alike, the same world step for
-## step. Another seed gives another offer. A world that restarts by itself keeps the seed it was handed.
+## step. Another seed gives another offer. A world that restarts by itself keeps the seed it was handed. The ground
+## the painter lays out again for a run (Painter.lay_ground) is its seed's, with nothing left of the run before.
 static func _seeds() -> Array:
 	var out := []
 	var steps := 600 # ten seconds of the first night: enemies have come out of the dark and wood has fallen
@@ -2464,6 +2465,12 @@ static func _seeds() -> Array:
 	again.phase = "out"
 	_play(again, 1, "restart")
 	_expect(out, "a world that restarts by itself keeps the seed it was handed", [again.seed_value, again.phase, again.offer], [6, "pick", dusk])
+	var painter = Painter.new(1)
+	var first: Array = painter.scenery.duplicate()
+	painter.lay_ground(2)
+	_expect(out, "the ground laid out again from another seed is that seed's, with nothing left of the last", [painter.scenery == Painter.new(2).scenery, painter.scenery == first], [true, false])
+	painter.lay_ground(1)
+	_expect(out, "and the first seed's again when it is laid out from that one", painter.scenery == first, true)
 	return out
 
 

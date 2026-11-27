@@ -316,7 +316,6 @@ var _mirror := PackedInt32Array()
 var _lit := PackedByteArray()
 
 
-## The ground is laid out from the night's seed with its own generator, so it never draws from world.rng.
 func _init(seed_value: int) -> void:
 	effects = Effects.new(seed_value)
 	# The clearing and the treetops go into the sprites' atlas too, and so do the eyes that show in the dark, so the
@@ -339,6 +338,13 @@ func _init(seed_value: int) -> void:
 				for flip in [false, true]:
 					eyes.append([frame % kind, look.in_dark[0], flip])
 	Sprites.prepare_only(eyes)
+	lay_ground(seed_value)
+
+
+## Lays the ground's scenery out from a run's seed, in place of what lay there, with a generator of its own, so it
+## never draws from world.rng. main.gd calls it again whenever a run starts, since each run has its own seed.
+func lay_ground(seed_value: int) -> void:
+	scenery = []
 	var rng := SimRng.new(seed_value)
 	var cells := Vector2i((VIEW / SCENERY_CELL).ceil())
 	for cy in cells.y:
