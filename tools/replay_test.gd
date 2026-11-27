@@ -21,6 +21,8 @@ static func digest(w) -> String:
 		nums.append_array([e.pos.x, e.pos.y, e.hp, e.knock.x, e.knock.y, 1.0 if e.carrying else 0.0, e.tier])
 	for l in w.logs + w.berries:
 		nums.append_array([l.x, l.y])
+	for b in w.blobs:
+		nums.append_array([b.pos.x, b.pos.y, b.left])
 	var ctx := HashingContext.new()
 	ctx.start(HashingContext.HASH_SHA256)
 	ctx.update(nums.to_byte_array())

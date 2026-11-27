@@ -17,7 +17,9 @@
 ## { pos, enemy } where one breaks or fades (src/sim/enemy.gd); "pack_coming" { enemy, pos, count } Config.SURGE.warn
 ## seconds before a surge comes, from there, and "pack" { enemy, pos, count } when it does; "took" { id } for a card
 ## taken from the offer (an upgrade or a filler); "wave" { pos, radius, ring } for enemies thrown back from pos out to
-## radius (ring: the ring the screen throws out there, one of Effects.RINGS).
+## radius (ring: the ring the screen throws out there, one of Effects.RINGS); "burned" { pos, enemy, tier } for a moth
+## burning up in the flame, "spat" { pos, enemy } for a spitter letting its blob go and "beat" { pos, enemy } for a
+## drummer's beat (src/sim/enemy.gd); "splat" { pos, hurt } where a blob bursts on the keeper (hurt) or under a blow.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -56,6 +58,9 @@ var next_spark := 0.0
 var next_thorn := 0.0
 var sparks: Array = [] # embers the torch fired: { pos, vel, life }
 var bolts: Array = [] # embers the keeper fired: { pos, dir, left (pixels it still flies), radius, pierce, hit (enemies it went through) }
+var blobs: Array = [] # what the spitters spat, in flight: { pos, dir, left (pixels it still flies), radius, speed }
+var boss_order: Array = [] # Config.BOSS.kinds in the order they take turns this run: drawn at the dusk of the run's
+						 # first boss night (_plan_night), [] until then
 var bosses_due: Array = [] # tonight's bosses still to come, first first: { kind, at (night time), from }; from is
 						 # where it comes from once its warning is given (Config.BOSS.warn before at), null until then
 var omen := "" # tonight's omen (Config.OMENS), "" on a night without one
@@ -126,6 +131,8 @@ func reset() -> void:
 	next_thorn = 0.0
 	sparks = []
 	bolts = []
+	blobs = []
+	boss_order = []
 	blade_kills = 0
 	haste_until = 0.0
 	next_beacon = 0.0
@@ -426,9 +433,18 @@ func step(inp) -> void:
 			continue
 		e.step(self)
 		if not e.T.get("harmless", false) and e.touches(player) and player.hurt(e.pos):
+			if e.move == "charge" and e.T.charge.has("plough"): # the chief's charge knocks the logs out of its arms:
+				var across: Vector2 = e.aim.orthogonal() # they land beside its lane, on the far side from the keeper
+				if across.dot(player.pos - e.pos) > 0.0:
+					across = -across
+				for i in player.held:
+					logs.append((e.pos + across * (e.lane_half() + stats.grab)).clamp(Config.FIELD.position, Config.FIELD.end))
+				player.held = 0
+				player.carrying = false
 			var thorns: int = mod("thorns", 0)
 			if thorns > 0:
 				_damage(e, thorns, player.pos)
+	_blobs()
 	if player.hp < hp_was:
 		_guard()
 	_prickle()
@@ -620,6 +636,7 @@ func _dawn() -> void:
 	next_beacon = 0.0
 	sparks = []
 	bolts = []
+	blobs = []
 	_dusk()
 	player.invuln_for = keeper_invuln()
 	var heal: int = max_hp() if night >= Config.HARDEN.from else Config.DAWN.heal
@@ -825,6 +842,34 @@ func melee(p) -> void:
 		if not e.dead and not p.struck.has(e) and in_blow(e.pos, e.T.radius):
 			p.struck.append(e)
 			_damage(e, dmg, p.pos, true, stats.push)
+	for b in blobs:
+		if b.left > 0.0 and in_blow(b.pos, b.radius):
+			_pop(b, false)
+
+
+## A spitter's blob bursts where it is: on the keeper (hurt), or under a blow.
+func _pop(b: Dictionary, hurt: bool) -> void:
+	b.left = 0.0
+	events.append({ "kind": "splat", "pos": b.pos, "hurt": hurt })
+
+
+## What the spitters spat flies straight along its line, slowly, and is gone at the end of it or at the field's edge.
+## One that touches the keeper hurts it and bursts (it passes a keeper who cannot be hurt just now); a blow that
+## reaches one bursts it (melee, _bolts).
+func _blobs() -> void:
+	if blobs.is_empty():
+		return
+	for b in blobs:
+		if b.left <= 0.0:
+			continue
+		var go: float = minf(b.speed * Config.STEP, b.left)
+		b.pos += b.dir * go
+		b.left -= go
+		if not Config.FIELD.has_point(b.pos):
+			b.left = 0.0
+		elif b.pos.distance_to(player.pos) < b.radius + stats.radius and player.hurt(b.pos - b.dir):
+			_pop(b, true)
+	blobs = blobs.filter(func(b): return b.left > 0.0)
 
 
 ## A shooter's attack lets go (at PLAYER.attack_hit_at into it): one ember along the facing (World.aim turned it), or
@@ -859,6 +904,9 @@ func _bolts() -> void:
 		var from: Vector2 = b.pos
 		b.pos = from + b.dir * go
 		b.left -= go
+		for s in blobs: # an ember bursts a spitter's blob on its way, and flies on
+			if s.left > 0.0 and in_bolt(from, b.pos, b.radius, s.pos, s.radius):
+				_pop(s, false)
 		for e in enemies:
 			if e.dead or b.hit.has(e) or not in_bolt(from, b.pos, b.radius, e.pos, e.T.radius):
 				continue
@@ -1025,9 +1073,17 @@ func _dusk() -> void:
 	_plan_night()
 
 
-## Tonight under its omen: when the first berry comes, its bosses, its surges.
+## Tonight under its omen: when the first berry comes, its bosses, its surges. On the run's first boss night the
+## order the boss kinds take turns in is drawn first (boss_order): nights before it draw nothing for it.
 func _plan_night() -> void:
 	next_berry = Config.BERRY.first * mod("berry_mult", 1.0)
+	if _boss_night() and boss_order.is_empty():
+		boss_order = Config.BOSS.kinds.duplicate()
+		for i in range(boss_order.size() - 1, 0, -1): # a shuffle: each place from the last takes one of those up to it
+			var j: int = rng.index(i + 1)
+			var kind: String = boss_order[i]
+			boss_order[i] = boss_order[j]
+			boss_order[j] = kind
 	bosses_due = _plan_bosses()
 	_plan_surges()
 
@@ -1120,7 +1176,8 @@ func _boss_night() -> bool:
 
 
 ## Which bosses come tonight, in the order they come ([] on a night without): Config.BOSS.counts of them, the kinds
-## taking turns from boss night to boss night and, on a night with several, from one boss to the next.
+## taking turns from boss night to boss night and, on a night with several, from one boss to the next (so they are
+## different kinds), in this run's order (boss_order; the table's own while that is not drawn yet).
 func boss_kinds() -> Array:
 	if not _boss_night():
 		return []
@@ -1128,7 +1185,7 @@ func boss_kinds() -> Array:
 	for r in Config.BOSS.counts:
 		if night >= r.from:
 			count = r.count
-	var kinds: Array = Config.BOSS.kinds
+	var kinds: Array = boss_order if not boss_order.is_empty() else Config.BOSS.kinds
 	var out := []
 	for i in count:
 		out.append(kinds[(night / Config.BOSS.every - 1 + i) % kinds.size()])

@@ -52,6 +52,7 @@ const STREAK := 0.025 # seconds of flight a streaking pixel is drawn long
 const FIRE := ["f", "F", "x"]
 const HEAL := ["i", "W", "I"]
 const DUST := ["m", "M", "c"] # thrown up off the ground
+const SPLAT := [Color("#9be8ff"), Color("#3f8fd0"), Color.WHITE] # a spitter's blob (painter.gd's SPIT), burst
 const HEAD := Vector2(0.0, -8.0) # from the keeper's position
 const BIG_UNTIL := 0.5 # a flying pixel is 2x2 for this share of its life, then 1x1
 const POOF := ["poof_a", "poof_b", "poof_c", "poof_d"]
@@ -137,6 +138,12 @@ func step(w) -> void:
 				_ring("burst", ev.pos, ev.radius)
 			"wave":
 				_ring(ev.ring, ev.pos, ev.radius)
+			"burned": # a moth in the flame: its wings go up with a spurt of the fire it took
+				_burst(BURSTS.kill, ev.pos, Vector2.UP, Looks.bit_colours(ev.enemy, ev.tier))
+				_burst(BURSTS.sparks, Config.TORCH.pos + FLAME_MOUTH, Vector2.UP, _keys(FIRE))
+				poofs.append({ "pos": ev.pos, "age": 0 })
+			"splat": # a spitter's blob bursts
+				_burst(BURSTS.pop, ev.pos, Vector2.UP, SPLAT)
 	_follow(w)
 	if landed(w, _was_t):
 		var at: Vector2 = w.chop_centre(w.player.pos, w.player.face)

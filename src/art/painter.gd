@@ -261,6 +261,7 @@ const LANE_FAINT := 0.06 # how solid the band is the moment it is drawn
 const LANE_FULL := 0.15 # how solid the filled part is (and the whole band while it charges)
 const LANE_EDGE := 0.6 # its outline, blinking down to 0.7 of this
 const LANE_ROUND := 8 # points on each round end
+const LANE_LEAST := 4.0 # a band shorter than this is not drawn: its two round ends run together, which cannot be filled
 const CHEVRON_GAP := 12.0 # pixels between chevrons along the band
 const CHEVRON_SIZE := 3.0 # pixels from a chevron's tip back to its arms
 const CHEVRON_SPEED := [12.0, 70.0] # pixels a second they slide: as the wind-up starts, as it ends
@@ -272,10 +273,23 @@ const DUST := ["m", "M", "c"] # PALETTE keys of dust thrown up off the ground
 const PAW_STEPS := 3 # simulation steps per shuffle while it paws
 const DAZED_AT := Vector2(-3.0, -13.0) # the stars' top-left, from the charger's position
 const DAZED_STEPS := 8 # simulation steps per turn of the stars
+const PANT_STEPS := 6 # simulation steps per frame of a winded boss's breath (Effects.POOF, then two frames' pause)
+## A spitter about to spit: it flashes, a dashed line runs from it along its line as far as the blob will fly, and
+## the blob swells at its mouth; then the blob flies, drawn as the disc it hurts with (its radius), a pale middle and
+## drips behind it. It glows, so the night does not dim it.
+const SPIT := Color("#9be8ff")
+const SPIT_DARK := Color("#3f8fd0")
+const SPIT_DRIPS := [[3.0, 0.8], [6.0, 0.55], [9.0, 0.3]] # [pixels behind it, how solid]
+## A drummer: a dashed ring at its drum's reach, bright on each beat and faint between, and a mark hopping over each
+## enemy that hears it (the "drummed" sprite), so you see whom it drives.
+const DRUM := Color("#ffd84a")
+const DRUM_RING := [0.75, 0.25] # how solid the ring is: on the beat, between beats
+const DRUMMED_AT := Vector2(-2.0, -15.0) # the mark's top-left, from the enemy's position
 ## A boss on its way: Config.BOSS.warn seconds ahead, the edge it comes from glows and an arrow there points out at it.
 const COMING_BAND := Vector2(70.0, 4.0) # along the edge, into the field
 const COMING_ARROW := 7.0 # pixels from the arrow's tip to its back
 const COMING_IN := 12.0 # from the edge to the arrow's tip
+const COMING_CLEAR := 2.0 # under a HUD panel at the top, the mark starts this far below it (coming_spot)
 const COMING_SMOKE := 14 # smoke pixels curling in over the edge it comes from
 const COMING_SMOKE_KEY := "A" # half of them pale, so they show on the black past the light
 const COMING_BLINK_STEPS := 8
@@ -494,9 +508,15 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		if dark and not k.eyes.is_empty(): # its eyes, on the frame and facing it is drawn in
 			var eyes: Texture2D = k.eyes[_frame[i]][_mirror[i]]
 			c.draw_texture(eyes, (at + _paw(w, e)).round(), Color(k.eye_colour, night))
-		if e.move == "rest":
+		if e.spent(): # dazed after its charge, or winded after its set of them
 			var stars := Sprites.texture("dazed", (w.steps / DAZED_STEPS) % 2 == 1)
-			c.draw_texture(stars, (e.pos + DAZED_AT).round())
+			var over: Vector2 = e.pos + DAZED_AT * (e.T.radius / Config.ENEMY_TYPES.boar.radius) # higher over a bigger body
+			c.draw_texture(stars, Vector2(over.x, maxf(over.y, 1.0)).round()) # on screen at the top edge too
+			var puff: int = (w.steps / PANT_STEPS) % (Effects.POOF.size() + 2)
+			if e.T.charge.has("winded") and puff < Effects.POOF.size(): # it pants: breath at its snout, which shows in the dark
+				c.draw_texture(Sprites.texture(Effects.POOF[puff]), (e.pos + Vector2(signf(e.aim.x) * (e.T.radius + 5.0), 1.0) - Effects.POOF_ANCHOR).round(), Color(1.0, 1.0, 1.0, 0.7))
+		if e.drum != null: # a drummer drives it: the mark hops on the beat
+			c.draw_texture(Sprites.texture("drummed"), (e.pos + DRUMMED_AT + Vector2(0.0, -1.0 if e.drum_t > e.drum.T.drum.beat * 0.5 else 0.0)).round())
 	_dash_bar(c, w)
 	_ember(c, w)
 	_beacons(c, w)
@@ -524,6 +544,7 @@ func paint_overlay(c: CanvasItem, w) -> void:
 		_tile(c, w, id, tiles[id])
 	_sparks(c, w)
 	_bolts(c, w)
+	_blobs(c, w)
 	_coming(c, w)
 	_boss_bar(c, w)
 	_night_bar(c, w)
@@ -647,12 +668,20 @@ static func _berry_bob(w, b: Vector2) -> Vector2:
 
 ## The dark panels behind the HUD. The words' widths come from main.gd, which writes them.
 func _hud_panels(c: CanvasItem, w) -> void:
+	for panel in hud_rects(w):
+		c.draw_rect(panel, HUD_PANEL)
+
+
+## Where the HUD's dark panels are, all along the top: the hearts, fuel and upgrades on the left, the clock in the
+## middle during a night, the score on the right.
+func hud_rects(w) -> Array:
 	var left := HUD_HEARTS.x - HUD_PAD
-	c.draw_rect(Rect2(left, 1.0, hud_right(w) - left, hud_bottom(w) - 1.0), HUD_PANEL)
+	var out := [Rect2(left, 1.0, hud_right(w) - left, hud_bottom(w) - 1.0)]
 	if w.phase == "night":
-		c.draw_rect(CLOCK_PANEL, HUD_PANEL)
+		out.append(CLOCK_PANEL)
 	if score_panel.x > 0.0:
-		c.draw_rect(Rect2(VIEW.x - score_panel.x - 4.0 - HUD_PAD * 2.0, 1.0, score_panel.x + HUD_PAD * 2.0 + 2.0, score_panel.y), HUD_PANEL)
+		out.append(Rect2(VIEW.x - score_panel.x - 4.0 - HUD_PAD * 2.0, 1.0, score_panel.x + HUD_PAD * 2.0 + 2.0, score_panel.y))
+	return out
 
 
 ## Whether anything is smothering the torch right now, so its fuel runs out faster.
@@ -695,6 +724,18 @@ func _sparks(c: CanvasItem, w) -> void:
 		for t in SPARK_TAIL:
 			c.draw_rect(Rect2((sp.pos - sp.vel * t[0]).round(), Vector2.ONE), Sprites.PALETTE[t[1]])
 		c.draw_texture(tex, (sp.pos - tex.get_size() / 2.0).round())
+
+
+## What the spitters spat, in flight: each the disc it hurts with, drips behind it.
+func _blobs(c: CanvasItem, w) -> void:
+	c.draw_set_transform(shake)
+	for b in w.blobs:
+		for d in SPIT_DRIPS:
+			c.draw_rect(Rect2((b.pos - b.dir * d[0]).round(), Vector2.ONE), Color(SPIT_DARK, d[1]))
+		c.draw_circle(b.pos, b.radius, SPIT_DARK)
+		c.draw_circle(b.pos, b.radius - 1.0, SPIT)
+		c.draw_rect(Rect2((b.pos - Vector2.ONE).round(), Vector2.ONE), Color.WHITE)
+	c.draw_set_transform(Vector2.ZERO)
 
 
 ## The keeper's embers right now, as [middle, radius, lit]: the disc each is drawn as, the same as what it hits.
@@ -898,12 +939,25 @@ func _telegraphs(c: CanvasItem, w) -> void:
 				var at: Vector2 = Config.TORCH.pos + (e.pos - Config.TORCH.pos).rotated(TAU * (i + 1) / (e.T.split.count + 1) * k)
 				_wisp(c, w, at, e.T.radius * (0.6 + 0.6 * k), Color(smoke, 0.5 + 0.4 * k), i)
 			_dashed_ring(c, e.pos.round(), e.T.radius + 4.0 + 4.0 * k, w.steps * Config.STEP * MARK_TURN, Color(MARK_RING, 0.9 if blink else 0.55))
+		elif e.T.has("spit") and e.move == "warn": # its line, and the blob swelling at its mouth
+			var k: float = clampf(1.0 - e.move_t / e.T.spit.warn, 0.0, 1.0)
+			_dashes(c, e.pos, e.move_to, Color(SPIT, 0.95 if blink else 0.55))
+			c.draw_circle((e.pos + e.aim * e.T.radius).round(), 1.0 + e.T.spit.radius * k, Color(SPIT, 0.9))
+		elif e.T.has("drum") and Config.FIELD.has_point(e.pos): # how far its drum reaches, bright on the beat
+			var since: float = 1.0 - clampf(e.move_t / e.T.drum.beat, 0.0, 1.0)
+			_dashed_ring(c, e.pos.round(), e.T.drum.radius, 0.0, Color(DRUM, lerpf(DRUM_RING[0], DRUM_RING[1], minf(1.0, since * 3.0))))
 		elif e.T.has("charge") and e.move in ["warn", "charge"]:
 			_charge_mark(c, w, e, blink)
-		elif e.T.has("charge") and e.move == "rest":
-			var since: int = roundi((e.T.charge.rest - e.move_t) / Config.STEP) # a skid puff where it stopped
-			if since < Effects.POOF.size() * Effects.POOF_STEPS:
-				c.draw_texture(Sprites.texture(Effects.POOF[since / Effects.POOF_STEPS]), (e.pos + e.aim * 4.0 - Effects.POOF_ANCHOR).round(), Color(1.0, 0.92, 0.8, 0.8))
+		elif e.T.has("charge") and e.move == "rest" and skid_frame(e) >= 0: # a skid puff where it stopped
+			c.draw_texture(Sprites.texture(Effects.POOF[skid_frame(e)]), (e.pos + e.aim * 4.0 - Effects.POOF_ANCHOR).round(), Color(1.0, 0.92, 0.8, 0.8))
+
+
+## Which frame of the skid puff (Effects.POOF) shows where a charger has just stopped: from the first as its stop
+## begins (however long that stop is: a boar's daze, the chief's short stops and its long winded one), -1 once the
+## puff has cleared.
+static func skid_frame(e) -> int:
+	var since: int = roundi((e.rest_time() - e.move_t) / Config.STEP)
+	return since / Effects.POOF_STEPS if since >= 0 and since < Effects.POOF.size() * Effects.POOF_STEPS else -1
 
 
 ## The radius the slime king's marked landing is drawn at: the shock of the leap (or hop) under way, where it hurts.
@@ -959,6 +1013,8 @@ static func _wisp(c: CanvasItem, w, at: Vector2, r: float, colour: Color, i: int
 ## as the wind-up runs out; chevrons sliding along it toward the end; dust at its feet while it paws, and behind it
 ## while it charges.
 func _charge_mark(c: CanvasItem, w, e, blink: bool) -> void:
+	if e.pos.distance_to(e.charge_end()) < LANE_LEAST: # the last steps of a charge: no band left to draw
+		return
 	var band := charge_band(e)
 	var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
 	c.draw_colored_polygon(band, Color(LANE, LANE_FAINT))
@@ -1089,13 +1145,44 @@ func _coming(c: CanvasItem, w) -> void:
 		_coming_at(c, w, b.from)
 
 
-func _coming_at(c: CanvasItem, w, f: Vector2) -> void:
-	var out := Vector2.ZERO # which edge: the one it is past
-	if f.x < Config.FIELD.position.x: out = Vector2.LEFT
-	elif f.x > Config.FIELD.end.x: out = Vector2.RIGHT
-	elif f.y < Config.FIELD.position.y: out = Vector2.UP
-	else: out = Vector2.DOWN
+## Which edge something coming from f (a point past an edge) comes over: the way out of the field there.
+static func coming_out(f: Vector2) -> Vector2:
+	if f.x < Config.FIELD.position.x: return Vector2.LEFT
+	if f.x > Config.FIELD.end.x: return Vector2.RIGHT
+	return Vector2.UP if f.y < Config.FIELD.position.y else Vector2.DOWN
+
+
+## Where the mark for something coming from f is put: on that edge of the view, or, where a HUD panel (hud_rects)
+## would lie over its arrow, moved in from the edge to just past that panel, so the arrow, its band and its smoke
+## show clear of the HUD wherever it comes from (the panels lie along the top: a third of what comes, comes there).
+func coming_spot(w, f: Vector2) -> Vector2:
+	var out := coming_out(f)
 	var spot: Vector2 = f.clamp(Vector2.ZERO, VIEW)
+	for panel in hud_rects(w):
+		if not panel.grow(COMING_ARROW + COMING_CLEAR).has_point(_coming_tip(spot, out)):
+			continue
+		if out == Vector2.UP: spot.y = panel.end.y + COMING_CLEAR
+		elif out == Vector2.LEFT: spot.x = panel.end.x + COMING_CLEAR
+		elif out == Vector2.RIGHT: spot.x = panel.position.x - COMING_CLEAR
+	return spot
+
+
+static func _coming_tip(spot: Vector2, out: Vector2) -> Vector2:
+	return (spot - out * COMING_IN).clamp(Vector2(COMING_IN, COMING_IN), VIEW - Vector2(COMING_IN, COMING_IN))
+
+
+## The arrow that points at what is coming from f, tip first.
+func coming_arrow(w, f: Vector2) -> PackedVector2Array:
+	var out := coming_out(f)
+	var tip := _coming_tip(coming_spot(w, f), out)
+	var back: Vector2 = tip - out * COMING_ARROW
+	var side: Vector2 = out.orthogonal() * COMING_ARROW * 0.7
+	return PackedVector2Array([tip.round(), (back + side).round(), (back - side).round()])
+
+
+func _coming_at(c: CanvasItem, w, f: Vector2) -> void:
+	var out := coming_out(f)
+	var spot: Vector2 = coming_spot(w, f)
 	var on: bool = (w.steps / COMING_BLINK_STEPS) % 2 == 0
 	var colour: Color = Sprites.PALETTE[MARK]
 	var band_size := COMING_BAND if out.y != 0.0 else Vector2(COMING_BAND.y, COMING_BAND.x)
@@ -1108,10 +1195,7 @@ func _coming_at(c: CanvasItem, w, f: Vector2) -> void:
 		var drift := float((w.steps + i * 7) % 30) / 30.0
 		var p: Vector2 = spot - out * (2.0 + drift * 14.0) + along * (((h % 41) - 20.0) * COMING_BAND.x / 45.0)
 		c.draw_rect(Rect2(p.round(), Vector2.ONE * (2.0 if h % 3 == 0 else 1.0)), Color(Sprites.PALETTE[COMING_SMOKE_KEY if h % 2 == 0 else SPLIT_SMOKE], 0.8 * (1.0 - drift)))
-	var tip: Vector2 = (spot - out * COMING_IN).clamp(Vector2(COMING_IN, COMING_IN), VIEW - Vector2(COMING_IN, COMING_IN))
-	var back: Vector2 = tip - out * COMING_ARROW
-	var side: Vector2 = out.orthogonal() * COMING_ARROW * 0.7
-	var arrow := PackedVector2Array([tip.round(), (back + side).round(), (back - side).round()])
+	var arrow := coming_arrow(w, f)
 	c.draw_colored_polygon(arrow, Color(colour, 1.0 if on else 0.6))
 	c.draw_polyline(PackedVector2Array([arrow[0], arrow[1], arrow[2], arrow[0]]), Sprites.PALETTE["k"], 1.0)
 
