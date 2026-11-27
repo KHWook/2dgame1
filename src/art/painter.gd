@@ -297,6 +297,7 @@ var effects # short-lived pictures that answer what happens in the world
 var scenery: Array = [] # [texture, top-left]
 var clearing: Texture2D
 var hedges := {} # side -> texture: the treetops along each screen edge
+var paper := false
 var shake := Vector2.ZERO # set by main.gd: how far the field is drawn off its place right now (src/art/juice.gd)
 var scrim := 0.0 # set by main.gd's ui: how dark the dim over the field is, 0 to 1
 var hidden_pick := "" # set by the ui: an upgrade whose icon is still flying to its tile, drawn empty until it lands
@@ -438,9 +439,13 @@ static func flicker(w) -> float:
 
 func paint(c: CanvasItem, w) -> void:
 	_crowd(w)
-	c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"]) # the hedge goes on past the view, for a shake
-	c.draw_rect(Rect2(Vector2.ZERO, VIEW), GROUND)
-	c.draw_texture(clearing, (T.pos + CLEARING_DROP - Vector2(CLEARING) / 2.0).round())
+	if paper:
+		for strip in margin_strips():
+			c.draw_rect(strip, Sprites.PALETTE["u"])
+	else:
+		c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"])
+		c.draw_rect(Rect2(Vector2.ZERO, VIEW), GROUND)
+		c.draw_texture(clearing, clearing_at())
 	for s in scenery:
 		c.draw_texture(s[0], s[1])
 	_ember_ring(c, w)
@@ -1491,6 +1496,26 @@ func _kind(kind: String, tier: int = 1) -> Dictionary:
 		k.eye_colour = Sprites.PALETTE[look.in_dark[1]]
 	_kinds[key] = k
 	return k
+
+
+## Where the clearing's top-left is on the field.
+static func clearing_at() -> Vector2:
+	return (T.pos + CLEARING_DROP - Vector2(CLEARING) / 2.0).round()
+
+
+## The ground's colour for each game pixel of the view, for src/art/ground.gdshader to draw its strokes in: GROUND,
+## with the clearing where paint() puts it.
+static func ground_map() -> Image:
+	var img := Image.create_empty(int(VIEW.x), int(VIEW.y), false, Image.FORMAT_RGBA8)
+	img.fill(GROUND)
+	img.blend_rect(_clearing_image(), Rect2i(Vector2i.ZERO, CLEARING), Vector2i(clearing_at()))
+	return img
+
+
+## The four strips just past the view, where the paper ground does not reach: the hedge goes on there, for a shake.
+static func margin_strips() -> Array:
+	var m: float = Juice.MARGIN
+	return [Rect2(-m, -m, VIEW.x + 2.0 * m, m), Rect2(-m, VIEW.y, VIEW.x + 2.0 * m, m), Rect2(-m, 0.0, m, VIEW.y), Rect2(VIEW.x, 0.0, m, VIEW.y)]
 
 
 ## Bare earth with a wobbly edge and a few specks, made from the dirt colours. The same picture every time.

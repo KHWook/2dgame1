@@ -18,6 +18,7 @@ const Touch := preload("res://src/touch.gd")
 const Guide := preload("res://src/guide.gd")
 const Looks := preload("res://src/art/looks.gd")
 const Picker := preload("res://src/picker.gd")
+const GroundShader := preload("res://src/art/ground.gdshader")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -47,6 +48,7 @@ var bot_looked := 0 # steps the demo bot has spent on the offer in front of it
 var held := {}
 var pending := {} # presses since the last step; each counts for exactly one step (D6)
 var sky: CanvasModulate
+var ground: ShaderMaterial = null
 var overlay: Node2D # above the night and the lights: what glows by itself, and the HUD pictures
 var ui # src/ui.gd: every word on screen, and the offer cards
 var records # src/records.gd: the best runs on disk
@@ -67,7 +69,7 @@ var touch # src/touch.gd: the stick and buttons on a phone
 ## Dev flags for looking at and measuring late nights; the replay and the balance tool never pass through here.
 ## --night=N starts at the dusk of night N (World.begin_at); --crowd=K keeps K enemies on the field and the keeper and
 ## the torch from failing (World.crowd); --perf prints, once a second, the crowd, the time world.step takes, the frame
-## time and the draw calls.
+## time and the draw calls. --flat paints the ground in flat colours.
 var crowd := 0
 var perf := false
 var perf_frames := 0
@@ -128,6 +130,8 @@ func _ready() -> void:
 		sfx[name] = player
 	sky = CanvasModulate.new()
 	add_child(sky)
+	if not OS.get_cmdline_user_args().has("--flat"):
+		_lay_paper()
 	for ring in Painter.LIGHT_RINGS:
 		var light := PointLight2D.new()
 		light.texture = ImageTexture.create_from_image(Painter.light_image(ring[0], Painter.LIGHT_LICK))
@@ -166,6 +170,21 @@ func _ready() -> void:
 	touch.help_pressed.connect(func(): _set_intro(true)) # the H key's touch: over the pause screen too, as H is
 	get_tree().root.size_changed.connect(_fit)
 	_fit()
+
+
+## The paper ground: one rectangle the size of the view under everything main.gd draws, which the shader fills with
+## crayon strokes in the ground's colours. The painter then leaves the ground out of what it paints.
+func _lay_paper() -> void:
+	ground = ShaderMaterial.new()
+	ground.shader = GroundShader
+	ground.set_shader_parameter("ground", ImageTexture.create_from_image(Painter.ground_map()))
+	var rect := ColorRect.new()
+	rect.size = Config.VIEW
+	rect.z_index = -1
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.material = ground
+	add_child(rect)
+	painter.paper = true
 
 
 ## On the web and on phones, the field keeps whole-pixel scaling unless that leaves it small (Touch.stretch_for).
@@ -360,6 +379,8 @@ func _process(delta: float) -> void:
 	overlay.queue_redraw() # the ui's dim, flights and flashes move on real time, also while the world is not stepped
 	var day: float = painter.daylight(world)
 	sky.color = painter.sky(world)
+	if ground != null:
+		ground.set_shader_parameter("day", day)
 	var energy: float = lerpf(TORCH_ENERGY, DAY_ENERGY, day) * (Painter.flicker(world) + FLARE_ENERGY * painter.flare()) if world.fuel > 0.0 else 0.0
 	for i in torch_lights.size(): # together as bright as one light; where only one ring's tongue reaches, half
 		torch_lights[i].texture_scale = world.light_radius() * 2.0 / Painter.LIGHT_SIZE
