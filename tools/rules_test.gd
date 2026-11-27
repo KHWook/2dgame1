@@ -76,6 +76,10 @@ static func run() -> Array:
 	out.append_array(_fillers())
 	out.append_array(_rerolls())
 	out.append_array(_slot_tiles())
+	out.append_array(_only())
+	out.append_array(_needs())
+	out.append_array(_own_rows())
+	out.append_array(_combined_rows())
 	return out
 
 
@@ -2208,7 +2212,7 @@ static func _character_upgrades() -> Array:
 			if "휘두르기" in u.name or "베" in u.name + u.text:
 				out.append("the woodcutter's %s at level %d still speaks of a sweep: %s / %s" % [id, n, u.name, u.text])
 	for who in Config.CHARACTERS:
-		for id in Config.UPGRADES:
+		for id in Config.UPGRADES.keys().filter(func(i): return World.open_to(i, who)): # another's own row is never on its cards
 			for n in range(1, World.max_level(id) + 1):
 				var u := World.upgrade(id, n, who)
 				if not (u.get("name", "") != "" and u.get("text", "") != ""):
@@ -2577,7 +2581,7 @@ static func _swift() -> Array:
 			twin.rng = SimRng.new(seed_value + 1000)
 			w.rng = SimRng.new(seed_value + 1000)
 			w._offer()
-			var pool: Array = Config.UPGRADES.keys().filter(func(id): return id != "swift")
+			var pool: Array = Config.UPGRADES.keys().filter(func(id): return id != "swift" and World.open_to(id, "knight") and not Config.UPGRADES[id].has("needs"))
 			var want := []
 			while want.size() < Config.NIGHT.offer_size:
 				want.append(twin._draw(pool))
@@ -2892,14 +2896,14 @@ static func _times(id: String, n: int) -> Array:
 	return out
 
 
-## The upgrades of a side that take one of its slots, in Config's order.
-static func _slotted(side: String) -> Array:
-	return Config.UPGRADES.keys().filter(func(id): return World.side(id) == side and World.takes_slot(id))
+## The upgrades of a side that take one of its slots and that who can come to hold, in Config's order.
+static func _slotted(side: String, who := "knight") -> Array:
+	return Config.UPGRADES.keys().filter(func(id): return World.side(id) == side and World.takes_slot(id) and World.open_to(id, who))
 
 
 ## A world at its first dusk holding these upgrades (each at level 1), its offer drawn again for them.
-static func _holding(seed_value: int, upgrades: Array, night := 1):
-	var w = World.new(seed_value)
+static func _holding(seed_value: int, upgrades: Array, night := 1, who := "knight"):
+	var w = World.new(seed_value, who)
 	w.picks = upgrades.duplicate()
 	w.night = night
 	w._offer()
@@ -2943,8 +2947,8 @@ static func _build() -> Array:
 	for id in Config.UPGRADES:
 		_expect(out, "upgrade %s is on a side that has slots" % id, B.slots.has(Config.UPGRADES[id].get("side", "")), true)
 		_expect(out, "the screen groups %s on the side the rules count it on" % id, Looks.side(id), World.side(id))
-		_expect(out, "%s takes a slot unless it comes only from a later night" % id, World.takes_slot(id), not Config.UPGRADES[id].has("from_night"))
-		_expect(out, "%s weighs what its row says" % id, World.weight(id), B.rare_weight if rare.has(id) else 1.0)
+		_expect(out, "%s takes a slot unless it comes only from a later night or is a combined one" % id, World.takes_slot(id), not (Config.UPGRADES[id].has("from_night") or Config.UPGRADES[id].has("needs")))
+		_expect(out, "%s weighs what its row says" % id, World.weight(id), B.combo_weight if Config.UPGRADES[id].has("needs") else B.rare_weight if rare.has(id) else 1.0)
 	for side in B.slots:
 		_expect(out, "the %s side has fewer slots than upgrades that want one, so a build is a choice" % side, [B.slots[side] >= 1, B.slots[side] < _slotted(side).size()], [true, true])
 	for path in DirAccess.get_files_at("res://src/sim"):
@@ -2965,7 +2969,7 @@ static func _build() -> Array:
 			for id in w.offer:
 				if Config.FILLERS.has(id):
 					out.append("seed %d: a filler (%s) is offered while upgrades are left" % [seed_value, id])
-				elif World.side(id) == side and not full.has(id):
+				elif World.side(id) == side and not full.has(id) and World.takes_slot(id):
 					fresh += 1
 				elif World.side(id) == side:
 					levels += 1
@@ -3007,8 +3011,9 @@ static func _build() -> Array:
 				once[id] = true
 				if Config.UPGRADES.has(id) and not w.can_offer(id):
 					out.append("seed %d night %d: %s is offered, but cannot be taken (levels %d, slots used %d)" % [seed_value, w.night, id, w.level(id), w.slots_used(World.side(id))])
-			if once.size() != cards.size() or cards.size() != Config.NIGHT.offer_size:
-				out.append("seed %d night %d: an offer holds %d different cards of %d: %s" % [seed_value, w.night, once.size(), Config.NIGHT.offer_size, cards])
+			var there: int = Config.UPGRADES.keys().filter(w.can_offer).size() + Config.FILLERS.keys().filter(w.can_fill).size()
+			if once.size() != cards.size() or cards.size() != mini(Config.NIGHT.offer_size, there):
+				out.append("seed %d night %d: an offer holds %d different cards of %d (%d could come): %s" % [seed_value, w.night, once.size(), Config.NIGHT.offer_size, there, cards])
 			var fillers: Array = cards.filter(func(id): return Config.FILLERS.has(id))
 			if not fillers.is_empty() and cards.slice(cards.size() - fillers.size()) != fillers:
 				out.append("seed %d night %d: fillers come before upgrades in an offer: %s" % [seed_value, w.night, cards])
@@ -3029,7 +3034,9 @@ static func _build() -> Array:
 	# A rare card is drawn as often as its weight says: the first card of 4000 first offers, where every upgrade
 	# that may come on the first night is in the pool. Within a fifth of what the weights give (over three standard
 	# deviations of the count); with the weight ignored it comes out near 470.
-	var pool: Array = Config.UPGRADES.keys().filter(func(id): return World.offered_on(id, 1))
+	var pool: Array = Config.UPGRADES.keys().filter(World.new(1).can_offer)
+	_expect(out, "the first night's pool is the knight's rows that need no other upgrade and no later night", pool,
+		Config.UPGRADES.keys().filter(func(id): return World.offered_on(id, 1) and World.open_to(id, "knight") and not Config.UPGRADES[id].has("needs")))
 	var weights := 0.0
 	var rare_weights := 0.0
 	for id in pool:
@@ -3098,6 +3105,38 @@ static func _fillers() -> Array:
 		w.offer = [id]
 		_play(w, 1, "pick_1")
 		_expect(out, "filler %s fills neither the torch nor the keeper past full" % id, [w.fuel <= w.max_fuel(), w.player.hp], [true, w.max_hp()])
+	# A filler that would give nothing is not offered: hearts to an unhurt keeper. Fuel and logs may always come, so
+	# an offer is never empty.
+	var healers: Array = Config.FILLERS.keys().filter(func(id): return not (Config.FILLERS[id].has("fuel") or Config.FILLERS[id].has("logs")))
+	_expect(out, "some filler only heals, and others can always come", [healers.is_empty(), healers.size() < Config.FILLERS.size()], [false, true])
+	var unhurt := 0
+	var hurt := 0
+	for seed_value in range(1, 101):
+		w = _holding(seed_value, done, 30)
+		w.player.hp = w.max_hp()
+		w.fuel = w.max_fuel()
+		w._offer()
+		unhurt += w.offer.filter(func(id): return healers.has(id)).size()
+		_expect(out, "seed %d: an unhurt keeper by a full torch is still offered every other filler, each once" % seed_value,
+			[w.offer.size(), w.phase, w.offer.all(func(id): return Config.FILLERS.has(id) and w.can_fill(id))], [mini(Config.NIGHT.offer_size, Config.FILLERS.size() - healers.size()), "pick", true])
+		_press(w, "reroll")
+		unhurt += w.offer.filter(func(id): return healers.has(id)).size()
+		w.player.hp -= 1
+		w._offer()
+		hurt += w.offer.filter(func(id): return healers.has(id)).size()
+	_expect(out, "a filler that only heals is never offered to an unhurt keeper (100 offers, each rerolled)", unhurt, 0)
+	_expect(out, "it is offered to a hurt one (100 offers)", hurt > 50, true)
+	_expect(out, "the fuel filler's card says it stops at a full torch", Config.FILLERS.values().filter(func(row): return row.has("fuel")).all(func(row): return "가득" in row.text), true)
+	# An offer answered without its night (play_offers) takes the card and gives nothing: there is no night to help.
+	w = _holding(1, done, 30)
+	w.fuel = 20.0
+	w.player.hp = 1
+	w.logs = []
+	var skipped := []
+	w.play_offers(3, func(cards: Array) -> int:
+		skipped.append(cards[0])
+		return 0)
+	_expect(out, "fillers taken by play_offers give no fuel, no hearts and no logs", [skipped.size(), skipped.all(func(id): return Config.FILLERS.has(id)), w.fuel, w.player.hp, w.logs, w.picks], [3, true, 20.0, 1, [], done])
 	# A late start (begin_at) past a done build takes fillers on its way and still starts rested, the torch at its
 	# start share, no logs lying.
 	for slot in [1, 2, 3]:
@@ -3175,6 +3214,19 @@ static func _rerolls() -> Array:
 	var fresh: int = mini(1, Config.FILLERS.size() - 1)
 	_expect(out, "with fewer upgrades than an offer holds, a reroll keeps them and draws other fillers where there are any",
 		[w.offer.slice(0, size - 1).all(func(id): return Config.UPGRADES.has(id) and shown.has(id)), w.offer.slice(size - 1).filter(func(id): return not shown.has(id)).size(), w.rerolls], [true, fresh, most - fresh])
+	# A reroll pressed that cannot be taken is not there: a card picked in the same step is taken. One that can be
+	# taken comes first, and nothing is picked.
+	var both := InputFrame.new()
+	both.pressed["reroll"] = true
+	both.pressed["pick_2"] = true
+	w = World.new(3)
+	w.rerolls = 0
+	var cards: Array = w.offer.duplicate()
+	w.step(both)
+	_expect(out, "with no reroll left, a card picked in the same step as a reroll press is taken", [w.picks, w.phase, w.rerolls], [[cards[1]], "night", 0])
+	w = World.new(3)
+	w.step(both)
+	_expect(out, "with a reroll left, a reroll pressed with a pick draws again and takes nothing", [w.picks, w.phase, w.rerolls, w.offer.any(func(id): return cards.has(id))], [[], "pick", most - 1, false])
 	# The bot plays its runs without one: the replay, the balance tool and the demo are what they are without rerolls.
 	for slot in [1, 2, 3]:
 		var run = World.new(slot + 20)
@@ -3225,14 +3277,322 @@ static func _slot_tiles() -> Array:
 			_expect(out, "holding %d upgrades, the HUD's panel is behind every tile" % held.size(), rects[i].end.y <= Painter.hud_bottom(w) and rects[i].end.x <= Painter.new(1).hud_right(w), true)
 	# The offer's box has the reroll button to fit under its cards and the HUD's two rows of slots above it: no
 	# card's words (any upgrade at any level for any keeper, any filler) take more lines than Ui.CARD_LINES.
+	# An ingredient's card also says what it combines into (Ui.combo_hint), on lines of its own under its words.
 	var font := Ui.font(Ui.SMALL)
-	var texts := Config.FILLERS.values().map(func(row): return row.text)
+	var texts := Config.FILLERS.values().map(func(row): return [row.text])
 	for who in Config.CHARACTERS:
+		var keeper = _night(LIT, [], who)
 		for id in Config.UPGRADES:
 			for n in range(1, World.max_level(id) + 1):
-				texts.append(World.upgrade(id, n, who).text)
+				texts.append([World.upgrade(id, n, who).text, Ui.combo_hint(keeper, id)])
 	for text in texts:
-		var lines: int = Ui.wrapped(font, text, Ui.CARD_TEXT_WIDTH).count("\n") + 1
+		var lines := 0
+		for part in text:
+			lines += Ui.wrapped(font, part, Ui.CARD_TEXT_WIDTH).count("\n") + 1 if part != "" else 0
 		if lines > Ui.CARD_LINES:
 			out.append("a card's words take %d lines (at most %d fit the offer under the HUD): %s" % [lines, Ui.CARD_LINES, text])
+	return out
+
+
+## Every card that was on a table over a run of offers for who: nights of them, a random card taken at each.
+static func _offered(who: String, seed_value: int, nights: int) -> Dictionary:
+	var w = World.new(seed_value, who)
+	var dice = SimRng.new(seed_value + 900)
+	var seen := {}
+	w.play_offers(nights * (1 + Config.NIGHT.picks_at.size()), func(cards: Array) -> int:
+		for id in cards:
+			seen[id] = seen.get(id, 0) + 1
+		return dice.index(cards.size()))
+	return seen
+
+
+## Upgrades of one character (a row's only): the torch offers the row to that character and never to another, over
+## many runs of offers; to its own it comes like any other row and takes a slot of its side. Each character has two.
+static func _only() -> Array:
+	var out := []
+	var own := {}
+	for who in Config.CHARACTERS:
+		own[who] = []
+	for id in Config.UPGRADES:
+		var row: Dictionary = Config.UPGRADES[id]
+		if not row.has("only"):
+			continue
+		_expect(out, "%s is for a character there is, takes a slot and combines nothing" % id, [Config.CHARACTERS.has(row.only), World.takes_slot(id), row.has("needs")], [true, true, false])
+		if own.has(row.only):
+			own[row.only].append(id)
+		for who in Config.CHARACTERS:
+			_expect(out, "%s may be offered to %s only if it is theirs" % [id, who], [World.open_to(id, who), World.new(1, who).can_offer(id)], [who == row.only, who == row.only])
+	for who in Config.CHARACTERS:
+		_expect(out, "%s has two upgrades of its own" % who, own[who].size(), 2)
+		var seen := {}
+		for seed_value in range(1, 81):
+			var run := _offered(who, seed_value, 12)
+			for id in run:
+				seen[id] = seen.get(id, 0) + run[id]
+		for id in seen:
+			if Config.UPGRADES.has(id) and not World.open_to(id, who):
+				out.append("%s is offered %s, which is %s's alone, %d times over 80 runs of offers" % [who, id, Config.UPGRADES[id].only, seen[id]])
+		for id in own[who]:
+			_expect(out, "%s is offered its own %s over 80 runs of offers" % [who, id], seen.get(id, 0) > 20, true)
+			var w = _night(LIT, [], who)
+			var used: int = w.slots_used(World.side(id))
+			w.picks.append(id)
+			_expect(out, "%s held takes one of the %s side's slots" % [id, World.side(id)], w.slots_used(World.side(id)), used + 1)
+	return out
+
+
+## Combined upgrades (a row's needs): offered only while both upgrades it names are held, never with one or none;
+## whoever holds both sees it within a few offers (Config.BUILD.combo_weight); it takes no slot, so a full side is
+## offered it too; an ingredient's card says what it combines with and into what, until the combined one is held.
+static func _needs() -> Array:
+	var out := []
+	var combos: Array = Config.UPGRADES.keys().filter(func(id): return Config.UPGRADES[id].has("needs"))
+	_expect(out, "there are combined upgrades, and one is drawn more often than any other card", [combos.size() >= 4, Config.BUILD.combo_weight > 1.0], [true, true])
+	var parts := {}
+	for made in combos:
+		var needs: Array = Config.UPGRADES[made].needs
+		var side: String = World.side(made)
+		_expect(out, "%s combines two different upgrades, neither combined nor one character's alone, and is no one's alone" % made,
+			[needs.size(), needs[0] != needs[-1], needs.all(func(id): return Config.UPGRADES.has(id) and not Config.UPGRADES[id].has("needs") and not Config.UPGRADES[id].has("only")), Config.UPGRADES[made].has("only")], [2, true, true, false])
+		_expect(out, "%s takes no slot, has one level and weighs what a combined card weighs" % made, [World.takes_slot(made), World.max_level(made), World.weight(made)], [false, 1, Config.BUILD.combo_weight])
+		for id in needs:
+			_expect(out, "%s goes into one combined upgrade only (its card has one line to say so)" % id, parts.has(id), false)
+			parts[id] = made
+		for who in Config.CHARACTERS:
+			var soon := 0
+			for seed_value in range(1, 101):
+				for held in [[], [needs[0]], [needs[1]]]:
+					var short = _holding(seed_value, held, 1, who)
+					var shown: Array = short.offer.duplicate()
+					for again in Config.BUILD.rerolls:
+						_press(short, "reroll")
+						shown.append_array(short.offer)
+					if short.can_offer(made) or shown.has(made):
+						out.append("seed %d: %s holding %s is offered %s, which needs %s" % [seed_value, who, held, made, needs])
+				var w = _holding(seed_value, needs, 1, who)
+				_expect(out, "seed %d: %s holding %s may be offered %s" % [seed_value, who, needs, made], w.can_offer(made), true)
+				var seen: bool = w.offer.has(made)
+				for again in 2:
+					w._offer()
+					seen = seen or w.offer.has(made)
+				soon += 1 if seen else 0
+			_expect(out, "%s holding %s sees %s within three offers in most of 100 seeds (%d)" % [who, needs, made, soon], soon >= 75, true)
+			var w = _holding(1, needs, 1, who)
+			var used: int = w.slots_used(side)
+			w.offer = [made]
+			_play(w, 1, "pick_1")
+			_expect(out, "%s taken by %s: held, no slot of the %s side used for it, and not offered again" % [made, who, side], [w.level(made), w.slots_used(side), w.can_offer(made)], [1, used, false])
+			var keeper = _night(LIT, [], who)
+			for i in 2:
+				_expect(out, "%s's card for %s says what it combines with and into what" % [who, needs[i]], Ui.combo_hint(keeper, needs[i]),
+					Ui.COMBO_HINT % [World.upgrade_row(needs[1 - i], who).name, World.upgrade_row(made, who).name])
+			keeper.picks = [made]
+			_expect(out, "once %s holds %s its ingredients say nothing of it" % [who, made], [Ui.combo_hint(keeper, needs[0]), Ui.combo_hint(keeper, needs[1])], ["", ""])
+		var full: Array = needs.duplicate()
+		for id in _slotted(side):
+			if not full.has(id) and full.filter(func(x): return World.side(x) == side).size() < Config.BUILD.slots[side]:
+				full.append(id)
+		var w = _holding(1, full)
+		_expect(out, "%s is offered to a full %s side that holds both" % [made, side], [w.slots_used(side), w.can_offer(made)], [Config.BUILD.slots[side], true])
+	var plain: Array = Config.UPGRADES.keys().filter(func(id): return not parts.has(id) and not combos.has(id))
+	_expect(out, "an upgrade that goes into no combined one says nothing of one", Ui.combo_hint(_night(LIT), plain[0]), "")
+	_expect(out, "a combined card has its own colour, not the rare one's nor a plain card's", [Ui.COMBO != Ui.RARE, Ui.COMBO != Ui.CARD_EDGE, Ui.RARE, Ui.COMBO], [true, true, Sprites.PALETTE["p"], Sprites.PALETTE["L"]])
+	return out
+
+
+## The characters' own upgrades do what their rows say. guard: a hit keeps the knight safe longer and throws back
+## what stands round it. momentum: a kill makes it walk faster for a while. splitter: an enemy the woodcutter's axe
+## kills leaves a log now and then, rolled on the world's rng and only by one who has it. big_pack: one more log
+## carried. piercing: the mage's ember goes through more. kindle: an enemy an ember kills throws a spark at the
+## nearest other in reach, and that spark's kill throws none.
+static func _own_rows() -> Array:
+	var out := []
+	for n in [0, 1, 2]:
+		var G: Dictionary = World.upgrade("guard", maxi(n, 1))
+		var w = _night(LIT, _times("guard", n))
+		var hitter = _planted(w, "slime", Vector2(8.0, 0.0))
+		var near = _planted(w, "slime", Vector2(0.0, 34.0)) # its body within the first level's reach
+		var mid = _planted(w, "slime", Vector2(0.0, -46.0)) # within the second level's only
+		var far = _planted(w, "slime", Vector2(-70.0, 0.0))
+		_expect(out, "the guard scene's slimes stand where the levels' reaches tell them apart",
+			[34.0 < World.upgrade("guard", 1).guard_reach + near.T.radius, 46.0 < World.upgrade("guard", 1).guard_reach + mid.T.radius, 46.0 < World.upgrade("guard", 2).guard_reach + mid.T.radius, 70.0 < World.upgrade("guard", 2).guard_reach + far.T.radius], [true, false, true, false])
+		var told := _play(w, 1)
+		_expect(out, "guard at level %d: a hit costs a heart and keeps the knight from the next for its invuln more" % n,
+			[w.player.hp, snappedf(w.player.invuln, 0.001)], [Config.PLAYER.hp - 1, snappedf(w.keeper_invuln() + (G.guard_invuln if n > 0 else 0.0), 0.001)])
+		var dmg: int = G.guard_damage if n > 0 else 0
+		_expect(out, "guard at level %d: the hit throws back the enemies within its reach, away from the knight, and does them its damage" % n,
+			[near.knock.y > 0.0, mid.knock.y < 0.0, far.knock != Vector2.ZERO, told.count("wave"), hitter.hp, near.hp, mid.hp, far.hp],
+			[n >= 1, n >= 2, false, mini(n, 1), hitter.full_hp - dmg, near.full_hp - dmg, mid.full_hp - (dmg if n >= 2 else 0), far.full_hp])
+		if n > 0:
+			var wave: Dictionary = w.events.filter(func(ev): return ev.kind == "wave")[0]
+			_expect(out, "guard at level %d tells the screen where and how far" % n, [wave.pos, wave.radius, Effects.RINGS.has(wave.ring)], [w.player.pos, G.guard_reach, true])
+	for n in [0, 1, 2]:
+		var M: Dictionary = World.upgrade("momentum", maxi(n, 1))
+		var w = _night(LIT, _times("momentum", n))
+		_add(w, "bat", NEAR)
+		var told := _play(w, SWING, "attack")
+		var from: float = w.player.pos.x
+		_play(w, 30, "", "right")
+		var fast: float = (w.player.pos.x - from) / (30 * Config.STEP)
+		var swing: float = w.stat("attack_time")
+		_play(w, roundi(M.haste_time / Config.STEP))
+		from = w.player.pos.x
+		_play(w, 30, "", "right")
+		var after: float = (w.player.pos.x - from) / (30 * Config.STEP)
+		_expect(out, "momentum at level %d: after a kill the knight walks its haste times as fast and its swing takes haste_attack of its time; both as before once haste_time is over" % n,
+			[told.has("kill"), snappedf(fast, 0.01), snappedf(swing, 0.0001), snappedf(after, 0.01), w.stat("attack_time")],
+			[true, snappedf(Config.PLAYER.speed * (M.haste if n > 0 else 1.0), 0.01), snappedf(Config.PLAYER.attack_time * (M.haste_attack if n > 0 else 1.0), 0.0001), Config.PLAYER.speed, Config.PLAYER.attack_time])
+	for n in [0, 1, 2]:
+		var chance: float = World.upgrade("splitter", n).log_chance if n > 0 else 0.0
+		var w = _night(LIT, _times("splitter", n), "woodcutter")
+		var state: int = w.rng.state()
+		var kills := 600
+		for i in kills:
+			var e = _add(w, "slime", Vector2(20.0, 0.0))
+			w._damage(e, e.hp, w.player.pos, true)
+		var spread: float = 4.0 * sqrt(kills * chance * (1.0 - chance))
+		if absf(w.logs.size() - kills * chance) > spread:
+			out.append("splitter at level %d: %d of %d enemies the axe killed left a log; its chance (%.2f) says %.0f, give or take %.0f" % [n, w.logs.size(), kills, chance, kills * chance, spread])
+		_expect(out, "splitter at level %d: the logs lie where the enemies fell, and only one who has it rolls for them" % n,
+			[w.logs.all(func(l): return l == w.player.pos + Vector2(20.0, 0.0)), w.rng.state() == state], [true, n == 0])
+	var w = _night(LIT, _times("splitter", 2), "woodcutter")
+	var state: int = w.rng.state()
+	for i in 200:
+		var e = _add(w, "slime", Vector2(20.0, 0.0))
+		w._damage(e, e.hp, w.player.pos)
+	_expect(out, "splitter: an enemy killed by anything but the keeper's own blow leaves no log and rolls nothing", [w.logs.size(), w.rng.state()], [0, state])
+	for i in 200:
+		var e = _add(w, "slime", Vector2.ZERO)
+		e.pos = Config.FIELD.end + Vector2(10.0, 10.0)
+		w._damage(e, e.hp, w.player.pos, true)
+	_expect(out, "splitter: a log left by an enemy killed off the field lies on its edge", [w.logs.size() > 10, w.logs.all(func(l): return l == Config.FIELD.end)], [true, true])
+	w = _night(LIT, _times("splitter", 2), "woodcutter")
+	for i in 40:
+		_add(w, "bat", Vector2(w.chop_ahead(), 0.0))
+		_play(w, roundi(w.stat("attack_time") / Config.STEP) + 2, "attack")
+	_expect(out, "splitter: 40 bats chopped down leave some logs, not forty", [w.enemies.size(), w.logs.size() > 0, w.logs.size() < 20], [0, true, true])
+	for n in [0, 1]:
+		var carry: int = World.character_stats("woodcutter").carry
+		w = _night(DARK, _times("big_pack", n), "woodcutter")
+		for i in carry + 2:
+			w.logs.append(w.player.pos)
+		_play(w, carry + 3)
+		_expect(out, "big_pack at level %d: the woodcutter carries that many more logs, and no more" % n, [w.carry(), w.player.held, w.logs.size()], [carry + n, carry + n, 2 - n])
+		w.fuel = 10.0
+		w.player.pos = Config.TORCH.pos
+		var told := _play(w, 1)
+		_expect(out, "big_pack at level %d: every log carried goes on the fire" % n, [told.count("fed"), w.player.held, w.score], [carry + n, 0, (carry + n) * Config.SCORE.log])
+	var B: Dictionary = World.character_stats("mage").bolt
+	for lit in [false, true]:
+		for n in [0, 1, 2]:
+			w = _night(Vector2(-50.0, 0.0) if lit else DARK, _times("piercing", n), "mage")
+			var line := []
+			for i in 4:
+				line.append(_still(_add(w, "slime", Vector2(20.0 + 25.0 * i, 0.0)))) # apart by more than a burst reaches
+			var told := _play(w, 60, "attack")
+			var through: int = B.pierce + (B.lit_pierce if lit else 0) + (World.upgrade("piercing", n).pierce_bonus if n > 0 else 0)
+			var want := []
+			for i in line.size():
+				want.append(i <= through)
+			_expect(out, "piercing at level %d, %s: the ember burns %d in a line and stops" % [n, "in the light" if lit else "in the dark", through + 1], line.map(func(e): return e.hp < e.full_hp), want)
+			_expect(out, "piercing at level %d, %s: the ember bursts where it stops, and with piercing on each enemy it goes through" % [n, "in the light" if lit else "in the dark"], told.count("burst"), through + 1 if n > 0 else 1)
+	for n in [0, 1, 2]:
+		var reach: float = World.upgrade("kindle", n).kindle_reach if n > 0 else 0.0
+		for gap in [44.0, 70.0]: # how far beside the bat the other stands: within the first level's reach, within the second's only
+			w = _night(DARK, _times("kindle", n), "mage")
+			var bat = _still(_add(w, "bat", Vector2(30.0, 0.0)))
+			var other = _still(_add(w, "big_slime", Vector2(30.0, gap)))
+			var far = _still(_add(w, "big_slime", Vector2(30.0, -120.0)))
+			var thrown: bool = gap - other.T.radius < reach
+			var told := _play(w, 70, "attack")
+			_expect(out, "kindle at level %d, another enemy %d away: the bat the ember kills throws a spark at it only within its reach, and it burns for a spark's damage" % [n, gap],
+				[bat.dead, told.count("shot"), other.hp, far.hp, w.sparks.size()], [true, 1 if thrown else 0, other.full_hp - (Config.SPARK.damage if thrown else 0), far.full_hp, 0])
+	w = _night(DARK, ["kindle"], "mage")
+	_still(_add(w, "bat", Vector2(30.0, 0.0)))
+	var second = _still(_add(w, "bat", Vector2(30.0, 30.0)))
+	var third = _still(_add(w, "big_slime", Vector2(30.0, 62.0)))
+	var told := _play(w, 70, "attack")
+	_expect(out, "kindle: the spark kills the second bat, and a spark's kill throws no spark", [second.dead, told.count("shot"), third.hp], [true, 1, third.full_hp])
+	return out
+
+
+## The combined upgrades do what their rows say, and nothing without them. scorch: the ember ring burns an enemy's
+## last point away. beacon: an enemy the keeper's blow hits in the light is what the torch's sparks go for, and the
+## next comes sooner. bramble: a dash hurts each enemy it passes through, once. blast: logs put on the fire throw
+## back the enemies near the torch.
+static func _combined_rows() -> Array:
+	var out := []
+	for with in [false, true]:
+		var w = _night(DARK, ["ember_ring", "warm_glow"] + (["scorch"] if with else []))
+		var e = Enemy.new("slime", Config.TORCH.pos + Vector2(20.0, 0.0))
+		w.enemies.append(e)
+		var told := _play(w, roundi(w.mod("ember_every", 1.0) * 3.0 / Config.STEP))
+		_expect(out, "the ember ring %s: a slime in it for three burns %s" % ["with scorch" if with else "alone", "is burnt away, and scored" if with else "is left at 1"],
+			[e.dead, e.hp, told.has("kill"), w.score], [with, 0 if with else 1, with, Config.SCORE.kill if with else 0])
+	for who in Config.CHARACTERS:
+		for with in [false, true]:
+			var w = _night(Vector2(-70.0, 0.0) if who == "mage" else Vector2(40.0, 0.0), ["spark", "fire_blade"] + (["beacon"] if with else []), who)
+			w.fuel = Config.TORCH.max_fuel
+			var by_torch = _still(_add(w, "big_slime", Vector2.ZERO))
+			by_torch.pos = Config.TORCH.pos + Vector2(0.0, 24.0) # nearer the torch than the one the keeper strikes
+			var struck = _still(_add(w, "big_slime", Vector2(w.chop_ahead() if who == "woodcutter" else 40.0 if who == "mage" else NEAR.x, 0.0)))
+			var every: float = w.mod("spark_every", 0.0)
+			w.next_spark = every # as if the torch had just fired
+			_play(w, 30, "attack")
+			_expect(out, "%s's blow lands on the enemy in the light and leaves it alive (the beacon scene)" % who, [struck.hp < struck.full_hp, struck.dead, w.in_light(struck.pos)], [true, false, true])
+			_expect(out, "%s %s: the enemy its blow hit in the light is marked, and the next spark comes within mark_haste of the usual wait" % [who, "with beacon" if with else "without"],
+				[w.marked == struck, w.next_spark == every, w.next_spark <= w.time + every * World.upgrade("beacon", 1).mark_haste], [with, not with, with])
+			var steps := 30
+			while w.sparks.is_empty() and steps < 600:
+				_play(w, 1)
+				steps += 1
+			var from: Vector2 = Config.TORCH.pos + Config.SPARK.mouth
+			var aimed = struck if with else by_torch
+			_expect(out, "%s %s: the torch's next spark goes for %s" % [who, "with beacon" if with else "without", "the marked enemy" if with else "the enemy nearest the torch"],
+				[w.sparks.size(), snappedf(w.sparks[0].vel.normalized().dot((aimed.pos - from).normalized()), 0.01) if not w.sparks.is_empty() else 0.0, steps * Config.STEP < every * 0.75], [1, 1.0, with])
+			if with:
+				w._damage(struck, struck.hp, w.player.pos)
+				w.sparks = []
+				w.next_spark = w.time
+				_play(w, 1)
+				_expect(out, "%s: once the marked enemy is dead the spark goes for the nearest again" % who,
+					[w.sparks.size(), snappedf(w.sparks[0].vel.normalized().dot((by_torch.pos - from).normalized()), 0.01) if not w.sparks.is_empty() else 0.0], [1, 1.0])
+	var dark = _night(DARK, ["spark", "fire_blade", "beacon"])
+	var unlit = _still(_add(dark, "big_slime", NEAR))
+	_play(dark, SWING, "attack")
+	_expect(out, "beacon: an enemy hit outside the light is not marked", [unlit.hp < unlit.full_hp, dark.marked], [true, null])
+	for with in [false, true]:
+		var w = _night(LIT, ["dash", "thorns"] + (["bramble"] if with else []))
+		var dmg: int = World.upgrade("bramble", 1).dash_damage if with else 0
+		w.next_thorn = NEVER
+		var inway = _still(_add(w, "big_slime", Vector2(18.0, 0.0)))
+		var aside = _still(_add(w, "big_slime", Vector2(18.0, 40.0)))
+		_play(w, 1, "dash", "right")
+		while w.player.dash_t > 0.0:
+			_play(w, 1, "", "right")
+		_expect(out, "a dash through an enemy %s: it is hurt %d, once, the one aside not, and the dashing keeper not" % ["with bramble" if with else "without", dmg],
+			[w.player.pos.x > inway.pos.x + inway.T.radius, inway.hp, aside.hp, w.player.hp], [true, inway.full_hp - dmg, aside.full_hp, Config.PLAYER.hp])
+		_play(w, roundi(w.mod("dash_every", 1.0) / Config.STEP) + 2)
+		_play(w, 1, "dash", "left")
+		while w.player.dash_t > 0.0:
+			_play(w, 1, "", "left")
+		_expect(out, "a second dash back through it %s hurts it again" % ["with bramble" if with else "without"], [w.player.pos.x < inway.pos.x - inway.T.radius, inway.hp, w.player.hp], [true, inway.full_hp - 2 * dmg, Config.PLAYER.hp])
+	for with in [false, true]:
+		var L: Dictionary = World.upgrade("blast", 1)
+		var w = _night(Vector2.ZERO, ["big_logs", "woodpile"] + (["blast"] if with else []))
+		var on = _planted(w, "slime", Vector2(15.0, 0.0))
+		var edge = _planted(w, "slime", Vector2(0.0, L.feed_reach + 5.0)) # its body just inside feed_reach
+		var beyond = _planted(w, "slime", Vector2(-(L.feed_reach + 12.0), 0.0))
+		_play(w, 1)
+		var smothered: float = w.burn_rate()
+		w.player.take_log()
+		var told := _play(w, 1)
+		_expect(out, "a log on the fire %s: the slime on the torch and the one at the edge of feed_reach are thrown back from the torch, the one beyond is not, none is hurt" % ["with blast" if with else "without"],
+			[on.at_torch, told.count("fed"), told.count("wave"), on.knock.x > 0.0, edge.knock.y > 0.0, beyond.knock != Vector2.ZERO, on.hp], [true, 1, 1 if with else 0, with, with, false, on.full_hp])
+		if with:
+			var wave: Dictionary = w.events.filter(func(ev): return ev.kind == "wave")[0]
+			_expect(out, "blast tells the screen where and how far", [wave.pos, wave.radius, Effects.RINGS.has(wave.ring)], [Config.TORCH.pos, L.feed_reach, true])
+		_play(w, 30)
+		_expect(out, "a log on the fire %s: the slime that smothered the torch %s" % ["with blast" if with else "without", "is off it, and the fire burns freely" if with else "is still on it"],
+			[on.at_torch, w.burn_rate() < smothered], [not with, with])
 	return out
