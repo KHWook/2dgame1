@@ -25,7 +25,7 @@ const PLAYER := {
 ## choosing screen (src/ui.gd): bars are 1 to 5 of 5 pips, after one for hp that is worked out from stats.
 ## bolt (attack "shoot"): the ember it fires toward World.aim(). It flies speed pixels a second for range pixels,
 ## hits what its radius touches (World.in_bolt), does damage, lit_bonus more to an enemy in the torch's light, pushes
-## push of a blow's knockback and passes through pierce enemies before it stops; spread: radians between the embers
+## push of a blow's knockback and passes through pierce enemies before it stops (lit_pierce more in the light); spread: radians between the embers
 ## of a fan (the spin upgrade as the mage has it). Upgrade rows can read differently per character (UPGRADES' as).
 const CHARACTERS := {
 	"knight": {
@@ -37,15 +37,16 @@ const CHARACTERS := {
 		"name": "나무꾼", "text": "도끼는 느리지만 넓고 세게 벤다. 장작을 셋까지 들고, 장작 하나에 연료 +5",
 		"trait": "약점: 느린 휘두르기",
 		"bars": [["힘", 4], ["거리", 2], ["장작", 5]],
-		"stats": { "attack_time": 0.44, "attack_hit_at": 0.16, "attack_hit_until": 0.28, "reach": 23.0, "arc": -0.1,
-			"damage": 2, "push": 1.5, "carry": 3, "carry_speed": 70.0, "carry_slow": 6.0, "log_bonus": 5.0 },
+		"stats": { "attack_time": 0.38, "attack_hit_at": 0.13, "attack_hit_until": 0.2, "reach": 21.0, "arc": 0.0,
+			"damage": 2, "push": 1.2, "carry": 3, "carry_speed": 70.0, "carry_slow": 6.0, "log_bonus": 5.0 },
 	},
 	"mage": {
-		"name": "불씨 술사", "text": "겨눈 쪽으로 불씨를 쏜다. 횃불 빛 안의 적에게는 피해 +1",
+		"name": "불씨 술사", "text": "겨눈 쪽으로 불씨를 쏜다. 횃불 빛 안의 적에게는 피해 +1, 하나를 꿰뚫는다",
 		"trait": "약점: 체력 3",
-		"bars": [["힘", 2], ["거리", 5], ["장작", 2]],
-		"stats": { "hp": 3, "attack": "shoot", "attack_time": 0.38, "attack_hit_at": 0.06, "attack_hit_until": 0.06,
-			"bolt": { "speed": 200.0, "range": 100.0, "radius": 3.0, "damage": 1, "lit_bonus": 1, "push": 0.5, "pierce": 0, "spread": 0.3 } },
+		"bars": [["힘", 2], ["거리", 5], ["장작", 1]],
+		"stats": { "hp": 3, "attack": "shoot", "attack_time": 0.68, "attack_hit_at": 0.06, "attack_hit_until": 0.06,
+			"carry_speed": 50.0,
+			"bolt": { "speed": 200.0, "range": 100.0, "radius": 3.0, "damage": 1, "lit_bonus": 1, "push": 0.5, "pierce": 0, "lit_pierce": 1, "spread": 0.3 } },
 	},
 }
 

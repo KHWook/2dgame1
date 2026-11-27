@@ -1626,15 +1626,29 @@ static func _mage() -> Array:
 		e.T = e.T.duplicate()
 		e.T.speed = 0.0
 	_play(w, 40, "attack")
-	_expect(out, "the ember (pierce %d) burns the first enemy in line and not the one behind" % B.pierce, [first.hp < first.full_hp, second.hp], [true, second.full_hp])
+	_expect(out, "in the dark the ember (pierce %d) burns the first enemy in line and not the one behind" % B.pierce, [first.hp < first.full_hp, second.hp], [true, second.full_hp])
+	w = _night(Vector2(-50.0, 0.0), [], "mage") # in the light: it goes through lit_pierce more
+	var line := []
+	for i in B.lit_pierce + 2:
+		var e = _add(w, "big_slime", Vector2(25.0 + 22.0 * i, 0.0))
+		e.T = e.T.duplicate()
+		e.T.speed = 0.0
+		line.append(e)
+	_play(w, 40, "attack")
+	var burnt := line.map(func(e): return e.hp < e.full_hp)
+	var want := []
+	for i in line.size():
+		want.append(i <= B.pierce + B.lit_pierce)
+	_expect(out, "in the light the ember goes through lit_pierce (%d) more and stops at the next" % B.lit_pierce, burnt, want)
 	# The fan: the spin upgrade as the mage has it.
 	w = _night(DARK, ["spin"], "mage")
 	var shots := []
 	for i in 3:
 		_play(w, 1, "attack")
-		_play(w, roundi(w.stat("attack_time") / Config.STEP) + 1)
+		_play(w, roundi(w.stat("attack_hit_at") / Config.STEP) + 1)
 		shots.append(w.bolts.size())
 		w.bolts = []
+		_play(w, roundi(w.stat("attack_time") / Config.STEP))
 	_expect(out, "three embers in a fan on the third shot with the mage's spin", shots, [1, 1, 3])
 	# It aims as far as the ember flies: an enemy well past a sword's reach turns the shot.
 	w = _night(DARK, [], "mage")
@@ -1649,6 +1663,19 @@ static func _mage() -> Array:
 	var f = bot.frame(w)
 	_expect(out, "the bot as the mage shoots what comes close", f.pressed.has("attack"), true)
 	_expect(out, "the bot as the mage backs away from it", f.held.has("left") and not f.held.has("right"), true)
+	# With the torch low and wood about, it keeps hauling: shoots on its way, and never drops its log to fight
+	# something that is not right on it.
+	w = _night(Vector2(0.0, 60.0), [], "mage")
+	w.fuel = 0.3 * w.max_fuel()
+	w.logs = [w.player.pos + Vector2(-60.0, 0.0)]
+	_add(w, "slime", Vector2(30.0, 0.0))
+	f = bot.frame(w)
+	_expect(out, "a hungry torch: the bot as the mage shoots on its way to the wood", [f.pressed.has("attack"), f.held.has("left")], [true, true])
+	w.player.take_log()
+	w.logs = []
+	w.enemies[0].pos = w.player.pos + Vector2(Bot.SHOOT_DROP + 2.0, 0.0)
+	f = bot.frame(w)
+	_expect(out, "the bot as the mage does not drop its log for an enemy %.0f pixels off" % (Bot.SHOOT_DROP + 2.0), f.pressed.has("attack"), false)
 	return out
 
 

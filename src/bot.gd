@@ -18,6 +18,7 @@ const SHOOT_FROM := 70.0 # a shooter fights what comes this close
 const KITE := 46.0 # and backs off to keep it this far away
 const KITE_HOME := 0.6 # backing off leans this much toward the torch, so it does not back into a corner
 const SHOOT_DROP := 22.0 # a shooter carrying logs drops them to fight only what comes this close
+const SHOOT_HUNGRY := 0.75 # below this share of a full tank, with logs about, it does not stop to fight: it shoots on its way to the wood
 const STACK_NEAR := 60.0 # one that can carry more goes for another log this close, on its way to the torch
 const STACK_FUEL := 0.45 # while the torch holds at least this share of a full tank
 
@@ -65,11 +66,11 @@ func frame(w) -> InputFrame:
 			if out.dot(Config.TORCH.pos - p.pos) < 0.0:
 				out = -out
 		goal = on + out.normalized() * (_lane_width(lane) + CLEAR_OF)
-	elif shooter and foe != null and p.pos.distance_to(foe.pos) < (SHOOT_DROP if p.carrying else SHOOT_FROM):
+	elif shooter and foe != null and not _hungry_fire(w) and p.pos.distance_to(foe.pos) < (SHOOT_DROP if p.carrying else SHOOT_FROM):
 		goal = _kite(w, p, foe, f)
 	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE and foe.T.get("dark_proof", false) and not w.in_light(foe.pos):
 		pass # blows pass through it out here: walk back to the torch (the goal already) and fight it in the light
-	elif foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE:
+	elif not shooter and foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE:
 		var away: Vector2 = (p.pos - foe.pos).normalized()
 		goal = foe.pos + away * (foe.T.radius + Config.PLAYER.radius + KEEP) # stand off instead of walking into it
 		if p.carrying:
@@ -90,6 +91,8 @@ func frame(w) -> InputFrame:
 			goal += Vector2(Config.PLAYER.grab * 2.0, 0.0) # still standing on the log it put down: step off, then come back for it
 	elif not p.carrying and foe != null:
 		goal = foe.pos
+	if shooter and not p.carrying and foe != null and p.pos.distance_to(foe.pos) < SHOOT_FROM:
+		f.pressed["attack"] = true # a shooter shoots on its way, whatever it is doing (never while carrying: that drops the logs)
 	var d: Vector2 = goal - p.pos
 	var clear: bool = foe == null or p.pos.distance_to(foe.pos) > FIGHT_RANGE * 2.0
 	if w.mod("dash_every", 0.0) > 0.0 and clear and d.length() > DASH_FROM:
@@ -111,6 +114,11 @@ static func _kite(w, p, foe, f: InputFrame) -> Vector2:
 		return p.pos if not p.carrying else Config.TORCH.pos
 	var home: Vector2 = (Config.TORCH.pos - p.pos).normalized() * KITE_HOME
 	return p.pos + ((away / maxf(d, 0.01)) + home).normalized() * (KITE - d + CLEAR_OF)
+
+
+## Whether the torch wants wood more than a shooter wants to stand and shoot: low, with logs on the ground.
+static func _hungry_fire(w) -> bool:
+	return not w.logs.is_empty() and w.fuel < SHOOT_HUNGRY * w.max_fuel()
 
 
 ## Whether one already carrying a log should pick up another (a nearby one, while the torch can wait).

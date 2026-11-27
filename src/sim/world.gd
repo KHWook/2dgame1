@@ -569,7 +569,8 @@ static func in_bolt(a: Vector2, b: Vector2, radius: float, at: Vector2, r: float
 
 
 ## The keeper's embers fly straight for their range and burn what they touch: more in the light (bolt.lit_bonus,
-## and the fire blade as a shooter has it); one goes through pierce enemies, and stops at the next.
+## and the fire blade as a shooter has it); one goes through pierce enemies (lit_pierce more where the one it burns
+## stands in the light), and stops at the next.
 func _bolts() -> void:
 	if bolts.is_empty():
 		return
@@ -585,7 +586,7 @@ func _bolts() -> void:
 			b.hit.append(e)
 			var lit: bool = in_light(e.pos)
 			_damage(e, B.damage + ((B.lit_bonus + mod("lit_damage", 0)) if lit else 0), e.pos - b.dir, true, B.push)
-			if b.hit.size() > b.pierce:
+			if b.hit.size() > b.pierce + (B.lit_pierce if lit else 0):
 				b.left = 0.0
 				break
 	bolts = bolts.filter(func(b): return b.left > 0.0)
