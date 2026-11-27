@@ -347,24 +347,54 @@ static func _new_upgrades() -> Array:
 		bat.T.speed = 0.0
 		healed = _play(w, SWING + 10, "attack").has("healed")
 	_expect(out, "the vampire blade heals after enough sword kills, and says so", [w.player.hp, healed], [4, true])
-	# after a heal it rests vamp_wait seconds times the night: on the tenth night, kills in that time do not count
+	# the kills it wants grow with the night: vamp_kills up to night vamp_from, vamp_grow times as many each night
+	# after it; no rest
+	var V: Dictionary = Config.UPGRADES.vampire
+	_expect(out, "the vampire blade wants vamp_kills on the first night", w.vamp_need(), V.vamp_kills)
+	w.night = V.vamp_from
+	_expect(out, "and up to night vamp_from", w.vamp_need(), V.vamp_kills)
 	w.night = 10
-	w.vamp_ready = w.time + Config.UPGRADES.vampire.vamp_wait * w.night
+	var need: int = roundi(V.vamp_kills * pow(V.vamp_grow, 10 - V.vamp_from))
+	_expect(out, "and vamp_grow times as many on each night after (night 10)", [w.vamp_need(), need > V.vamp_kills * 3], [need, true])
+	w.night = 9
+	_expect(out, "one night less wants fewer", w.vamp_need() < need, true)
+	w.night = 10
 	w.player.hp = 3
-	for i in Config.UPGRADES.vampire.vamp_kills + 2:
+	w.blade_kills = 0
+	w.time = 0.0 # each run of kills below fits in one night
+	w.fuel = 1.0e6 # and the torch outlasts them all
+	for i in need:
+		_expect(out, "on night 10 it heals only on its %dth kill" % need, w.player.hp, 3)
 		var bat = _add(w, "bat", NEAR)
 		bat.T = bat.T.duplicate()
 		bat.T.speed = 0.0
 		_play(w, SWING + 10, "attack")
-	_expect(out, "the vampire blade does not heal while it rests (%.0f s on night 10)" % (Config.UPGRADES.vampire.vamp_wait * 10), [w.player.hp, w.blade_kills], [3, 0])
-	w.time = w.vamp_ready
-	for i in Config.UPGRADES.vampire.vamp_kills:
+	_expect(out, "on night 10 it heals after %d sword kills" % need, w.player.hp, 4)
+	w.time = 0.0
+	for i in need: # straight after a heal: kills count at once, there is no rest
 		var bat = _add(w, "bat", NEAR)
 		bat.T = bat.T.duplicate()
 		bat.T.speed = 0.0
 		_play(w, SWING + 10, "attack")
-	_expect(out, "once rested it heals again after enough kills", w.player.hp, 4)
-	_expect(out, "its rest grows with the night", [w.vamp_ready - w.time > Config.UPGRADES.vampire.vamp_wait * 10 - 5.0, World.upgrade("vampire", 2).vamp_wait < Config.UPGRADES.vampire.vamp_wait], [true, true])
+	_expect(out, "right after a heal the next kills count at once (no rest)", w.player.hp, 5)
+	w.player.hp = w.max_hp()
+	w.blade_kills = 0
+	w.time = 0.0
+	for i in need + 3:
+		var bat = _add(w, "bat", NEAR)
+		bat.T = bat.T.duplicate()
+		bat.T.speed = 0.0
+		_play(w, SWING + 10, "attack")
+	_expect(out, "kills at full health are kept for one heal, no more", w.blade_kills, need)
+	w.night = 1
+	w.picks = ["vampire", "vampire"]
+	var second: int = World.upgrade("vampire", 2).vamp_kills
+	_expect(out, "at level 2 it wants fewer kills, growing by the same share", [w.vamp_need(), second < V.vamp_kills], [second, true])
+	w.night = 10
+	_expect(out, "(level 2, night 10)", w.vamp_need(), roundi(second * pow(V.vamp_grow, 10 - V.vamp_from)))
+	w.night = 1
+	w.picks = []
+	_expect(out, "without the blade it wants nothing", w.vamp_need(), 0)
 	# big torch
 	w = _night(DARK, ["big_torch"])
 	w.fuel = Config.TORCH.max_fuel

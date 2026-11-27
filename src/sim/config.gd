@@ -180,9 +180,9 @@ const UPGRADES := {
 	"spark": { "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
 		"levels": [{ "text": "횃불이 1.6초마다 불씨를 쏜다", "spark_every": 1.6 },
 			{ "text": "횃불이 1.2초마다 불씨를 쏜다", "spark_every": 1.2 }] },
-	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1, 회복 뒤 쉬는 시간이 밤마다 2초씩 길어진다",
-		"vamp_kills": 8, "vamp_wait": 2.0,
-		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1, 쉬는 시간은 밤마다 1.5초씩", "vamp_kills": 5, "vamp_wait": 1.5 }] },
+	"vampire": { "name": "흡혈 칼날", "text": "칼로 8번 처치할 때마다 체력 1, 5번째 밤부터 필요한 처치 수가 밤마다 25%씩 늘어난다",
+		"vamp_kills": 8, "vamp_grow": 1.25, "vamp_from": 4,
+		"levels": [{ "text": "칼로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다", "vamp_kills": 5 }] },
 	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
 		"levels": [{ "text": "연료 최대치 +60, 새벽에 그만큼 더 채워진다", "fuel_bonus": 60.0 }] },
 }

@@ -722,6 +722,8 @@ func _held_item(w, id: String, words: bool) -> Control:
 	item.add_child(lines)
 	var name := _label(lines, SMALL, SIDE_COLOUR[Looks.side(id)])
 	name.text = u.name + (LEVEL % level if level > 1 else "") + (" (최대)" if words and level >= World.max_level(id) and World.max_level(id) > 1 else "")
+	if id == "vampire": # the kills it wants grow every night: say how far along tonight's count is
+		name.text += "  %d/%d" % [w.blade_kills, w.vamp_need()]
 	if words:
 		var text := _label(lines, SMALL, MUTED)
 		text.remove_theme_constant_override("outline_size")

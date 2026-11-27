@@ -49,7 +49,6 @@ var sparks: Array = [] # embers the torch fired: { pos, vel, life }
 var boss_due := false # a boss is still to come tonight
 var boss_from = null # where the boss will come from once its warning is given, until it comes; null otherwise
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
-var vamp_ready := 0.0 # night time from which the vampire blade counts kills again after a heal
 var events: Array = [] # what happened in the last step; see the top of this file
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
 var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)
@@ -86,7 +85,6 @@ func reset() -> void:
 	next_thorn = 0.0
 	sparks = []
 	blade_kills = 0
-	vamp_ready = 0.0
 	boss_due = _boss_night()
 	boss_from = null
 	player = Player.new()
@@ -338,7 +336,6 @@ func _dawn() -> void:
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
-	vamp_ready = 0.0
 	boss_due = _boss_night()
 	boss_from = null
 	player.hp = mini(max_hp(), player.hp + Config.DAWN.heal)
@@ -463,9 +460,7 @@ func melee(p) -> void:
 
 ## A blow of n lands on e, struck from from (by the sword when blade). The dark protects some enemies; a thief drops
 ## its log when it dies; a big slime breaks into smaller ones, which join the fight at the end of the step; with the
-## vampire upgrade enough sword kills heal you (kills made at full health wait for the next hurt), and after a heal
-## none count for vamp_wait seconds times the night: the crowds of late nights give kills in plenty, and the blade
-## would otherwise heal every few seconds.
+## vampire upgrade enough sword kills heal you (vamp_need(); kills made at full health wait for the next hurt).
 func _damage(e, n: int, from: Vector2, blade := false) -> void:
 	if e.dead:
 		return
@@ -478,12 +473,11 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 	if not e.dead:
 		return
 	score += e.T.get("score", Config.SCORE.kill)
-	var thirst: int = mod("vamp_kills", 0)
-	if blade and thirst > 0 and time >= vamp_ready:
+	var thirst := vamp_need()
+	if blade and thirst > 0:
 		blade_kills = mini(blade_kills + 1, thirst)
 		if blade_kills >= thirst and player.hp < max_hp() and not player.dead:
 			blade_kills = 0
-			vamp_ready = time + mod("vamp_wait", 0.0) * night
 			player.hp += 1
 			events.append({ "kind": "healed", "pos": player.pos })
 	if e.carrying:
@@ -495,6 +489,15 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 		born.append(half)
 		if player.attack_t >= 0.0:
 			player.struck.append(half) # the swing that broke it does not also cut its halves
+
+
+## How many sword kills the vampire blade wants for a heal tonight (0 without it): vamp_kills up to night vamp_from,
+## and vamp_grow times as many on each night after it (rounded), so it keeps up with crowds that grow by a share
+## every night: they give kills in plenty, and a want that grew by a fixed number would soon heal you every few
+## seconds again.
+func vamp_need() -> int:
+	var first: int = mod("vamp_kills", 0)
+	return 0 if first == 0 else roundi(first * pow(mod("vamp_grow", 1.0), maxi(0, night - mod("vamp_from", 0))))
 
 
 func _spawns() -> void:
