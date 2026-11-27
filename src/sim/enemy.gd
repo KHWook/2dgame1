@@ -19,6 +19,8 @@ extends RefCounted
 const Config := preload("res://src/sim/config.gd")
 const E := Config.ENEMY
 const KNOCK_KEEP: float = pow(E.knock_decay, Config.STEP) # share of its knockback a body keeps from one step to the next
+## The patterns a row can give (a kind has at most one), each with the key of the time it first waits (move_t).
+const PATTERNS := { "leap": "every", "lunge": "every", "charge": "every", "spit": "every", "drum": "beat" }
 
 var kind: String
 var tier := 1 # how strong it is, from 1 (Config.TIERS); T is its kind's row made that strong
@@ -46,6 +48,7 @@ var move := "" # a pattern: "" (walking), "warn" (about to strike), "air" (the k
 var move_t := 0.0 # time left in this part of the pattern, or, walking, until the next strike
 var move_from := Vector2.ZERO # where the leap took off
 var move_to := Vector2.ZERO # where it lands, or where the rush goes, or where a charge would end
+var pattern := "" # which pattern its row gives it (PATTERNS), "" for none: asked once, not on every step of a crowd
 var aim := Vector2.ZERO # the way a charger charges or a spitter spits, fixed when it starts to warn
 var run := 0.0 # how far the charge lined up or under way goes: charge.dist, or less where the torch is in the way
 var runs_left := 0 # a charger's charges still to come in this set, the one under way included
@@ -69,16 +72,10 @@ func _init(kind_: String, pos_: Vector2, tier_: int = 1) -> void:
 		summons = T.summon.count
 	if T.has("split"):
 		split_t = T.split.first
-	if T.has("leap"):
-		move_t = T.leap.every
-	if T.has("lunge"):
-		move_t = T.lunge.every
-	if T.has("charge"):
-		move_t = T.charge.every
-	if T.has("spit"):
-		move_t = T.spit.every
-	if T.has("drum"):
-		move_t = T.drum.beat
+	for key in PATTERNS:
+		if T.has(key):
+			pattern = key
+			move_t = T[key][PATTERNS[key]]
 
 
 ## A kind's row in Config.ENEMY_TYPES at a tier: the row itself at tier 1, made stronger by Config.TIERS above it.
@@ -108,20 +105,17 @@ func step(world) -> void:
 			fade(world)
 			return
 	var flying := move == "air" # through the step it lands on, too
-	if T.has("leap"):
-		_leap(world)
-	if T.has("lunge"):
-		_lunge(world)
-	if T.has("charge"):
-		_charge(world)
-	if T.has("spit"):
-		_spit(world)
-	if T.has("drum"):
-		_drum(world)
+	if pattern != "":
+		match pattern:
+			"leap": _leap(world)
+			"lunge": _lunge(world)
+			"charge": _charge(world)
+			"spit": _spit(world)
+			"drum": _drum(world)
 	if flying:
 		at_torch = false
 		knock = Vector2.ZERO
-		if T.has("summon"):
+		if summons > 0:
 			_summon(world)
 		return
 	var stop: float = Config.TORCH.reach + T.radius if T.target == "torch" else 0.0
@@ -155,9 +149,11 @@ func step(world) -> void:
 		to = aim
 		knock = Vector2.ZERO
 	# Most smotherers stop at the torch; the shade lord stops only while it warns and while it stays, so it can leave.
-	var halt: bool = move in ["warn", "stay", "rest", "split"] or (at_torch and not T.has("lunge"))
-	# A spitter stands off; a drummer stands at its place on the edge of the light.
-	halt = halt or (T.has("spit") and spits_from_here(world)) or (T.has("drum") and pos.distance_to(goal) < E.drum_slack)
+	var halt: bool = move in ["warn", "stay", "rest", "split"] or (at_torch and pattern != "lunge")
+	if pattern == "spit": # a spitter stands off
+		halt = halt or spits_from_here(world)
+	elif pattern == "drum": # a drummer stands at its place on the edge of the light
+		halt = halt or pos.distance_to(goal) < E.drum_slack
 	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to * speed)
 	knock *= KNOCK_KEEP
 	if knock.length() < E.knock_stop:
@@ -170,7 +166,7 @@ func step(world) -> void:
 		_daze()
 	if T.target == "log":
 		_thieve(world)
-	if T.has("summon"):
+	if summons > 0:
 		_summon(world)
 
 
@@ -466,7 +462,7 @@ func charge_end() -> Vector2:
 ## rushing the torch. A thief goes for the nearest log, shadows the player when there is none, and once it has
 ## one runs straight away from the torch.
 func _goal(world) -> Vector2:
-	if T.has("lunge") and move == "":
+	if pattern == "lunge" and move == "":
 		var out: Vector2 = pos - Config.TORCH.pos
 		var r: float = world.light_radius() + T.lunge.ring + T.radius
 		# aiming at a point on the ring ahead would cut inside it; aiming this much further out keeps it on the ring.
