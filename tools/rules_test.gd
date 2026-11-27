@@ -242,6 +242,12 @@ static func _splash() -> Array:
 		_planted(w, "big_slime", Vector2.from_angle(turn) * 60.0)
 	told = _play(w, 40, "attack")
 	_expect(out, "each ember of a fan bursts on its own", told.count("burst"), 3)
+	# The embers light the dark only to see by.
+	w = _night(DARK, [], "mage")
+	_play(w, 10, "attack")
+	var painter = Painter.new(1)
+	var lights: Array = painter.ember_lights(w)
+	_expect(out, "an ember in flight carries a light, and the rules' dark stays dark", [lights.size(), lights[0][0] if lights.size() > 0 else null, w.in_light(w.bolts[0].pos) if w.bolts.size() > 0 else true], [1, w.bolts[0].pos if w.bolts.size() > 0 else Vector2.ZERO, false])
 	return out
 
 

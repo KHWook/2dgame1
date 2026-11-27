@@ -147,6 +147,14 @@ const BOLT_TAIL := [[3.0, "F"], [5.0, "x"]] # effects.gd sheds the sparks furthe
 const BOLT_CORES := ["bolt", "bolt_c", "bolt_b", "bolt_c", "bolt", "bolt_b"] # the core's flicker, a frame a step
 const BOLT_INNER := [0.55, 0.7, 0.5, 0.65] # the hot middle's radius as a share of the disc's, flickering
 const BOLT_GLOW := 0.55 # how solid the disc (what it hits) is; the hot middle is solid
+## The embers light the dark around them as they fly, and a burst flares where one stops, so the mage sees what it
+## shoots at out past the torch. Only to see by, like the keeper's ember: the rules' light is the torch's alone
+## (world.in_light), so the lit bonus and the shade's dark are not changed by it. main.gd puts a light at each.
+const BOLT_LIGHT := 30.0 # pixels an ember in flight lights around it
+const BOLT_LIGHT_ENERGY := [0.75, 0.95] # flickering between these
+const BURST_LIGHT := 20.0 # pixels past the burst's radius its flare lights, fading as the ring goes out
+const BURST_LIGHT_ENERGY := 1.2
+const MAX_LIGHTS := 8 # main.gd keeps this many lights for embers and bursts; past it the newest are not lit
 const STACK_STEP := Vector2(0.0, -3.0) # each more log a keeper carries sits this far above the one under it
 
 ## An enemy faster in the dark (looks.gd's dark_glow) streaks its burning eyes behind it: this many copies, this many
@@ -648,6 +656,20 @@ func _bolts(c: CanvasItem, w) -> void:
 		var core := Sprites.texture(BOLT_CORES[beat % BOLT_CORES.size()])
 		c.draw_texture(core, (b.pos - core.get_size() / 2.0).round())
 	c.draw_set_transform(Vector2.ZERO)
+
+
+## The lights the embers carry right now, as [middle, radius, energy]: one per ember in flight, one per burst while
+## its ring goes out, at most MAX_LIGHTS.
+func ember_lights(w) -> Array:
+	var out := []
+	for i in w.bolts.size():
+		var beat: float = 0.5 + 0.5 * sin((w.steps + i * 7) * 0.9)
+		out.append([w.bolts[i].pos, BOLT_LIGHT, lerpf(BOLT_LIGHT_ENERGY[0], BOLT_LIGHT_ENERGY[1], beat)])
+	for r in effects.rings:
+		if r.kind == "burst":
+			var k := float(r.age) / Effects.RINGS.burst[0]
+			out.append([r.pos, r.radius + BURST_LIGHT, BURST_LIGHT_ENERGY * (1.0 - k)])
+	return out.slice(0, MAX_LIGHTS)
 
 
 ## The bosses on the field (not their decoys), in the order they came.
