@@ -342,7 +342,7 @@ func _init(seed_value: int) -> void:
 
 
 ## Lays the ground's scenery out from a run's seed, in place of what lay there, with a generator of its own, so it
-## never draws from world.rng. main.gd calls it again whenever a run starts, since each run has its own seed.
+## never draws from world.rng.
 func lay_ground(seed_value: int) -> void:
 	scenery = []
 	var rng := SimRng.new(seed_value)

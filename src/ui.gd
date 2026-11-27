@@ -150,7 +150,7 @@ const AGAIN_KEYS := "R 다시 하기"
 const AGAIN_TOUCH := "눌러서 다시 하기"
 const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
 const PAUSE_TOUCH := "눌러서 계속하기 · ? 설명 보기"
-const SEED := "시드 %d" # the run's seed (world.seed_value), small and quiet in a corner of the end and the pause screen
+const SEED := "시드 %d"
 const SEED_GAP := 10.0 # pixels kept between the seed and the title it shares a line with
 const INTRO_NAME := 34.0 # the width kept for a line's name, so what follows lines up
 const INTRO_BLINK := 3.0 # radians per second the button that goes on breathes
@@ -837,7 +837,7 @@ func _fill_pause(w) -> void:
 func _pause_rows(w, per_side: Dictionary, words: bool) -> void:
 	if per_side.values().all(func(a): return a.is_empty()):
 		var none := _label(pause_columns, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
-		none.size_flags_horizontal = Control.SIZE_EXPAND_FILL # across the box, which the title's line can make wider than this
+		none.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		none.text = "아직 고른 힘이 없다"
 		return
 	for side in Looks.SIDES:

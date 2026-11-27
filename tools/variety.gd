@@ -69,13 +69,13 @@ static func _runs() -> String:
 ## one, and compares what two keepers hold at the dusk of each of those nights.
 static func _builds() -> String:
 	var per_night: int = 1 + Config.NIGHT.picks_at.size()
-	var held := {} # night -> the picks of every run that got there
+	var held := {}
 	for n in BUILD_NIGHTS:
 		held[n] = []
 	for seed_value in range(1, BUILD_SEEDS + 1):
 		var w = World.new(seed_value)
 		var rng = SimRng.new(seed_value + 1000)
-		for i in per_night * (BUILD_NIGHTS[-1] - 1) + 1: # every offer up to the last dusk, also once the torch has no card left
+		for i in per_night * (BUILD_NIGHTS[-1] - 1) + 1:
 			if not w.offer.is_empty():
 				w._take(w.offer[rng.index(w.offer.size())])
 			for n in BUILD_NIGHTS:
@@ -120,7 +120,7 @@ static func _pacing() -> String:
 			w.begin_at(n, 1)
 			var run := _play(w, Bot.new(1), int(Config.NIGHT.length * 70.0), n)
 			if w.night == n:
-				continue # the bot fell before dawn: not a whole night
+				continue
 			var times: Array = run.arrivals.map(func(x): return x.time)
 			var most := 0
 			for t in times:

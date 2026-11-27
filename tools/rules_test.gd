@@ -1519,7 +1519,7 @@ static func _tier_looks() -> Array:
 ## The characters (Config.CHARACTERS): the knight is the keeper as it always was (Config.PLAYER untouched, every
 ## upgrade as its row reads); each character's numbers are PLAYER with its stats over them; every one has a name, a
 ## description, a weakness line and bars; a run starts again with another keeper by choose(), on the seed it is
-## handed (_seeds holds what the seed does).
+## handed.
 static func _characters() -> Array:
 	var out := []
 	var w = World.new(1)
@@ -2436,11 +2436,11 @@ static func _auto_attack() -> Array:
 ## and a thousand starts a microsecond apart get nearly a thousand seeds, spread over the whole range.
 static func _seeds() -> Array:
 	var out := []
-	var steps := 600 # ten seconds of the first night: enemies have come out of the dark and wood has fallen
+	var steps := 600
 	var made = World.new(5, "mage")
 	var chosen = World.new(1)
 	chosen.choose("mage", 5)
-	var played = World.new(9, "woodcutter") # a run under way with another keeper, on another seed
+	var played = World.new(9, "woodcutter")
 	var bot = Bot.new(1)
 	for i in steps:
 		played.step(bot.frame(played))
@@ -2475,7 +2475,6 @@ static func _seeds() -> Array:
 	_expect(out, "the ground laid out again from another seed is that seed's, with nothing left of the last", [painter.scenery == Painter.new(2).scenery, painter.scenery == first], [true, false])
 	painter.lay_ground(1)
 	_expect(out, "and the first seed's again when it is laid out from that one", painter.scenery == first, true)
-	# main.gd draws the seed of every run a person starts from two clocks, in microseconds (Main.fresh_seed).
 	var most: int = Main.SEED_MOST
 	_expect(out, "a seed has at most six digits, to read off the screen and to type", most, 999999)
 	var outside := []
@@ -2485,15 +2484,15 @@ static func _seeds() -> Array:
 			var s: int = Main.fresh_seed(a, b)
 			if s < 1 or s > most:
 				outside.append([a, b, s])
-	var clock := 1795766400123456 # a microsecond of an evening late in 2026
-	var ticks := 7654321 # seven seconds into the game
+	var clock := 1795766400123456
+	var ticks := 7654321
 	var seed_then: int = Main.fresh_seed(clock, ticks)
 	_expect(out, "fresh_seed is pure: the same two clocks give the same seed", Main.fresh_seed(clock, ticks), seed_then)
 	_expect(out, "a microsecond later on either clock, or on both, the seed is another",
 		[Main.fresh_seed(clock, ticks + 1) != seed_then, Main.fresh_seed(clock + 1, ticks) != seed_then, Main.fresh_seed(clock + 1, ticks + 1) != seed_then], [true, true, true])
-	for moving in [[0, 1], [1, 0], [1, 1]]: # the game's clock alone, the system's alone, both together
+	for moving in [[0, 1], [1, 0], [1, 1]]:
 		var seen := {}
-		var tenths := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] # how many of the seeds fall in each tenth of 1..most
+		var tenths := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 		for i in 1000:
 			var s: int = Main.fresh_seed(clock + i * moving[0], ticks + i * moving[1])
 			if s < 1 or s > most:

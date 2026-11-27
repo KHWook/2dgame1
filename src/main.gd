@@ -2,8 +2,7 @@
 ## world on Godot's fixed physics tick (D5), and shows the world by reading it (D4): src/art/painter.gd paints it.
 ## Words go in Control nodes such as Label, never into the world (C1): src/ui.gd holds them all.
 ## Touches become the same actions as keys in src/touch.gd, which main.gd merges in here.
-## It also says which seed each run is played on: a new one for every run a person starts (fresh_seed), so no two
-## runs are the same night. The simulation is handed the seed and never reads a clock (D2).
+## It also says which seed each run is played on: a new one for every run a person starts (fresh_seed).
 extends Node2D
 
 const World := preload("res://src/sim/world.gd")
@@ -51,9 +50,7 @@ var sky: CanvasModulate
 var overlay: Node2D # above the night and the lights: what glows by itself, and the HUD pictures
 var ui # src/ui.gd: every word on screen, and the offer cards
 var records # src/records.gd: the best runs on disk
-var seed_value := 1 # the seed of the run on screen, the world's own
-## Every run is played on seed_value: --seed=N gave it, or the bot plays (seed 1 without --seed=N, so a dev render is
-## the same every time). Otherwise each run draws a new one (_next_seed).
+var seed_value := 1
 var seed_fixed := false
 var torch_lights: Array = [] # one PointLight2D per ring of tongues (Painter.LIGHT_RINGS), turning against each other
 var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step made
@@ -109,7 +106,6 @@ func _ready() -> void:
 		push_warning("--char=%s is not a character (%s): the knight keeps the torch" % [character, ", ".join(Config.CHARACTERS.keys())])
 		character = "knight"
 	chosen_by_flag = character != ""
-	# The world made here is what shows behind the first screen and the choosing screen. A run starts in _take_character.
 	seed_value = _next_seed()
 	world = World.new(seed_value, character if chosen_by_flag else records.last_character())
 	painter = Painter.new(seed_value)
@@ -118,7 +114,7 @@ func _ready() -> void:
 			start_night = int(a.substr(8))
 			start_slot = slot
 			world.begin_at(start_night, slot)
-	if bot != null or chosen_by_flag: # nobody is asked who keeps the torch: the run starts now
+	if bot != null or chosen_by_flag:
 		_take_character(world.character)
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
 		world.step(bot.frame(world))
@@ -198,8 +194,7 @@ func _set_choosing(on: bool) -> void:
 
 
 ## A run starts with this keeper, on a new seed unless the seed is fixed: the offers are drawn for the keeper and the
-## ground is laid out from the seed. Every run starts here: as the game opens when nobody is asked who keeps the
-## torch (the bot, --char=ID), from the choosing screen, and from an ending when --char=ID chose.
+## ground is laid out from the seed.
 func _take_character(id: String) -> void:
 	seed_value = _next_seed()
 	world.choose(id, seed_value)
@@ -219,12 +214,7 @@ func _next_seed() -> int:
 
 ## A run's seed, 1 to SEED_MOST, from two clocks in microseconds: the system's, which tells one launch from another,
 ## and the time since the game began, which tells apart two starts inside one tick of the system's (on Windows it
-## moves a whole millisecond at a time). The engine's own random numbers are kept out of src/ (D1), so the seed
-## comes from the clocks, here where D2 allows them. Pure: the same two numbers give the same seed. All 63 bits of
-## each are stirred in, 31 at a time, so a start one microsecond later gets a seed that has nothing to do with the
-## one before, and starts close together do not get seeds close together (tools/rules_test.gd's _seeds). The sign
-## bit is left out first, so what is shifted is never negative: a clock never is, and a number that is not negative
-## shifts the same way everywhere.
+## moves a whole millisecond at a time). Pure: the same two numbers give the same seed.
 static func fresh_seed(clock_usec: int, ticks_usec: int) -> int:
 	var h := 0
 	for n in [clock_usec, ticks_usec]:
@@ -236,8 +226,7 @@ static func fresh_seed(clock_usec: int, ticks_usec: int) -> int:
 
 
 ## One turn of fresh_seed's mix: 31 bits in, 31 bits out, no two inputs giving the same output, and each bit that goes
-## in moving about half of those that come out. Two multiplications by odd numbers with the high bits folded down
-## around them, kept to 31 bits so the products stay inside an int.
+## in moving about half of those that come out.
 static func _stir(h: int) -> int:
 	h = ((h ^ (h >> 16)) * 0x7feb352d) & STIR_BITS
 	h = ((h ^ (h >> 15)) * 0x5bd1e995) & STIR_BITS
@@ -324,10 +313,10 @@ func _physics_process(_delta: float) -> void:
 	if paused or intro or choosing or touch.upright(): # presses made while paused are dropped; keys still held count again once it goes on
 		return
 	if f.pressed.has("restart") and Ui.ENDINGS.has(world.phase) and bot == null:
-		if chosen_by_flag: # --char=ID keeps the torch again, unasked as when the game opened
+		if chosen_by_flag:
 			_take_character(world.character)
 		else:
-			_set_choosing(true) # a new run: who keeps the torch this time (the last one in focus)
+			_set_choosing(true)
 		return
 	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
 	juice.frame()
