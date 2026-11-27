@@ -1,9 +1,5 @@
-// The field's ground as crayon on paper: slanted strokes whose pressure rises and falls along them, and a grain per
-// screen pixel. Sprites, the HUD and the words stay pixel art; only this one rectangle under them is drawn finer than
-// a game pixel. src/main.gd puts it under the field and sets day from Painter.daylight() every frame.
 shader_type canvas_item;
 
-// The ground's colour for each game pixel (Painter.ground_map): grass, and the bare earth round the torch.
 uniform sampler2D ground : filter_nearest, repeat_disable;
 uniform vec4 paper : source_color = vec4(1.0, 0.957, 0.863, 1.0);
 uniform float slant = -0.55; // radians the strokes lean
@@ -11,8 +7,6 @@ uniform float stroke = 1.0; // game pixels a stroke is wide
 uniform float stroke_length = 3.0; // game pixels over which the pressure changes along a stroke
 uniform float rough = 1.0; // game pixels the ground's colour is looked up within, so the earth's edge is not stepped
 uniform float skip = 0.3; // by day, how far toward the paper the gaps between strokes go
-// By night the gaps go dark instead, like scratch art: black under the colour. Strokes are lighter than the ground
-// and gaps darker by about as much, so the ground keeps its colour on average and the night is as dark as before.
 uniform float day = 1.0;
 uniform float gap_dark = 0.6; // a gap at night: the ground colour times this
 uniform float stroke_light = 1.4; // a stroke at night: the ground colour times this
@@ -30,11 +24,9 @@ float pressure(float t, float band) {
 }
 
 void fragment() {
-	// fwidth(UV) is how much UV one screen pixel covers, so the grain is one screen pixel at any window size and
-	// nobody has to tell the shader how big the window is.
 	vec2 px = floor(UV / fwidth(UV));
 	vec2 size = vec2(textureSize(ground, 0));
-	vec2 at = UV * size; // in game pixels
+	vec2 at = UV * size;
 	float along = at.x * cos(slant) + at.y * sin(slant);
 	float across = -at.x * sin(slant) + at.y * cos(slant);
 	float band = floor(across / stroke);

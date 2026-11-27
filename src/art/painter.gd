@@ -297,7 +297,7 @@ var effects # short-lived pictures that answer what happens in the world
 var scenery: Array = [] # [texture, top-left]
 var clearing: Texture2D
 var hedges := {} # side -> texture: the treetops along each screen edge
-var paper := false # set by main.gd: the ground is drawn under the field by src/art/ground.gdshader, not by paint()
+var paper := false
 var shake := Vector2.ZERO # set by main.gd: how far the field is drawn off its place right now (src/art/juice.gd)
 var scrim := 0.0 # set by main.gd's ui: how dark the dim over the field is, 0 to 1
 var hidden_pick := "" # set by the ui: an upgrade whose icon is still flying to its tile, drawn empty until it lands
@@ -443,7 +443,7 @@ func paint(c: CanvasItem, w) -> void:
 		for strip in margin_strips():
 			c.draw_rect(strip, Sprites.PALETTE["u"])
 	else:
-		c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"]) # the hedge goes on past the view, for a shake
+		c.draw_rect(Rect2(Vector2.ZERO, VIEW).grow(Juice.MARGIN), Sprites.PALETTE["u"])
 		c.draw_rect(Rect2(Vector2.ZERO, VIEW), GROUND)
 		c.draw_texture(clearing, clearing_at())
 	for s in scenery:

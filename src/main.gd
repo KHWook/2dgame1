@@ -48,7 +48,7 @@ var bot_looked := 0 # steps the demo bot has spent on the offer in front of it
 var held := {}
 var pending := {} # presses since the last step; each counts for exactly one step (D6)
 var sky: CanvasModulate
-var ground: ShaderMaterial = null # the paper ground under the field (src/art/ground.gdshader); null with --flat
+var ground: ShaderMaterial = null
 var overlay: Node2D # above the night and the lights: what glows by itself, and the HUD pictures
 var ui # src/ui.gd: every word on screen, and the offer cards
 var records # src/records.gd: the best runs on disk
@@ -69,7 +69,7 @@ var touch # src/touch.gd: the stick and buttons on a phone
 ## Dev flags for looking at and measuring late nights; the replay and the balance tool never pass through here.
 ## --night=N starts at the dusk of night N (World.begin_at); --crowd=K keeps K enemies on the field and the keeper and
 ## the torch from failing (World.crowd); --perf prints, once a second, the crowd, the time world.step takes, the frame
-## time and the draw calls. --flat paints the ground in flat colours, as it was before the paper ground.
+## time and the draw calls. --flat paints the ground in flat colours.
 var crowd := 0
 var perf := false
 var perf_frames := 0
