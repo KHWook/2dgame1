@@ -45,8 +45,9 @@ const HEDGE_DEPTH := 9
 ## picture runs through four stages, as shares of the keeper's attack_time (World.stats): it winds up past the start of the arc,
 ## strikes across it (the blow starts landing at PLAYER.attack_hit_at, in the middle of this), holds at the end while
 ## the trail fades, and goes back to rest in the hand. The trail shows until the blow stops landing
-## (attack_hit_until: _hold()), so while it is on screen, whatever it covers is struck. The woodcutter's axe swings
-## the same way (Looks.CHARACTERS says which weapon a character holds); the mage holds none and shoots embers.
+## (attack_hit_until: _hold()), so while it is on screen, whatever it covers is struck. The woodcutter's axe chops
+## instead (CHOP_* below; it sweeps like this only on a spin). Looks.CHARACTERS says which weapon a character holds;
+## the mage holds none and shoots embers.
 const SWING_WIND := 0.18
 const SWING_STRIKE := 0.46
 const WIND_BACK := 0.5 # radians the blade is pulled back past the start of the arc
@@ -83,6 +84,30 @@ const SMEAR_WIDE := 1.4
 const SMEAR_TAIL := 0.2 # a band's width at its tail, as a share of its width at the blade
 const SMEAR_HEAD := 2.0 # the bright pixel square at the blade's end of the smear, while it strikes
 const SWORD := "%s%s%s" # the weapon + "_long" with the long blade, + "_fire" while the fire blade burns
+## A chop (World stats attack "chop", unless the swing is a spin): the axe turns in the upright plane of the facing,
+## seen from above, so going up it shortens and climbs the screen. As shares of the time to the blow
+## (attack_hit_at): it rises behind and over the head (CHOP_UP radians back from pointing ahead along the ground)
+## until CHOP_RAISE, then falls, faster and faster, flat on the ground ahead by the blow, its head on the middle of the
+## round the simulation strikes (world.chop_centre()). It stays bitten in, quivering a pixel for CHOP_QUIVER steps,
+## while the blow lands, then goes back to rest. The keeper raises its arms (the _raise sprite) and leans back a
+## pixel while the axe goes up, and lunges a pixel into the blow.
+const CHOP_UP := 2.1
+const CHOP_RAISE := 0.72
+const CHOP_HEIGHT := 0.8 # how much of the axe's height above the ground shows as up on the screen
+const CHOP_QUIVER := 3
+const AXE_HEAD := 4.0 # pixels from the end of an axe sprite back to the middle of its head
+## Where the chop comes down (chop_marks()): while the blow lands, a dent with cracks running out from the middle
+## (CHOP_CRACKS of them, each of CRACK_JOINTS bends, reaching CRACK_REACH of the radius) and a ring of thrown dust whose
+## outer edge is the round's edge, world.chop_radius(); both fade over the blow. Effects adds dust flying out to the
+## same edge and chips. A burning axe's ring and cracks glow.
+const CHOP_CRACKS := 5
+const CRACK_JOINTS := 3
+const CRACK_REACH := 0.85
+const CRACK_BEND := 0.35 # radians a crack wanders at each bend
+const CHOP_DENT := ["N", 0.45] # PALETTE key and alpha of the dent
+const CHOP_RING := ["w", "F"] # the dust ring, and a burning axe's
+const CHOP_RING_WIDE := 2.0 # pixels wide for the first half of the blow (its outer edge stays the radius)
+const CHOP_CRACK := ["k", "x"]
 const SWORD_FLAMES := 4 # flames shed along the trail of a burning blade
 const FLAME_RISE := 7.0 # pixels they rise while the swing holds
 const FLAME_STEPS_FAST := 3 # simulation steps per frame of the flames on the blade
@@ -414,6 +439,7 @@ func paint(c: CanvasItem, w) -> void:
 		c.draw_texture(s[0], s[1])
 	_ember_ring(c, w)
 	_shadows(c, w)
+	_chop_ground(c, w)
 	var standing := _standing(w)
 	standing.sort()
 	for s in standing:
@@ -435,6 +461,7 @@ func paint_overlay(c: CanvasItem, w) -> void:
 	c.draw_set_transform(shake) # what glows in the field shakes with it (main.gd moves the field); the HUD does not
 	_telegraphs(c, w)
 	effects.paint(c)
+	_chop_ring(c, w)
 	_slash(c, w)
 	var night := 1.0 - daylight(w)
 	for i in w.enemies.size():
@@ -1091,7 +1118,8 @@ func _keeper(w) -> Array:
 		dir = "up"
 	var sprite: String = Looks.character(w.character).sprite
 	if _swinging(w):
-		return ["%s_%s_atk" % [sprite, dir], dir == "side" and p.face.x < 0.0, dir]
+		var pose := "raise" if _chopping(w) and _swing_share(w) < _blow(w) else "atk"
+		return ["%s_%s_%s" % [sprite, dir, pose], dir == "side" and p.face.x < 0.0, dir]
 	var walking: bool = p.vel.length() > 1.0 and p.hurt_t <= 0.0
 	var beat: int = (w.steps / WALK_STEPS) % 4 if walking else 0 # stand, step, stand, other step
 	var frame := "b" if beat % 2 == 1 else "a"
@@ -1113,6 +1141,17 @@ static func _hold(w) -> float:
 	return w.stat("attack_hit_until") / w.stat("attack_time")
 
 
+## The share of the swing at which the blow starts landing.
+static func _blow(w) -> float:
+	return w.stat("attack_hit_at") / w.stat("attack_time")
+
+
+## Whether the keeper's attack under way (or the next) is a chop, drawn as one: an axe that comes down in front
+## (attack "chop"); a spin still sweeps round.
+static func _chopping(w) -> bool:
+	return w.stats.attack == "chop" and not w.player.spin and _weapon(w) != ""
+
+
 ## The weapon the keeper swings ("sword", "axe"), and the pixel of its sprite held in the fist.
 static func _weapon(w) -> String:
 	return Looks.character(w.character).weapon
@@ -1130,6 +1169,10 @@ func _stage(k: float, from: float, to: float) -> float:
 ## How far the keeper leans into the blow: a pixel toward the facing while the swing strikes and holds.
 func _lean(w) -> Vector2:
 	var k := _swing_share(w)
+	if _chopping(w) and k >= 0.0 and k < _blow(w): # rocking back under the raised axe
+		return (-w.player.face * LUNGE).round() if k >= _blow(w) * CHOP_RAISE * 0.5 else Vector2.ZERO
+	if _chopping(w) and k >= 0.0 and k < _hold(w):
+		return (w.player.face * LUNGE).round()
 	if k < SWING_WIND or k >= _hold(w) or _weapon(w) == "":
 		return Vector2.ZERO
 	return (w.player.face * LUNGE).round()
@@ -1160,6 +1203,8 @@ func _blade(w) -> Array:
 	var arc := _arc(w)
 	if k < 0.0:
 		return _rest(w, arc[0]) + [0.0]
+	if _chopping(w):
+		return _chop_blade(w)
 	var shoulder: Vector2 = p.pos + _lean(w) + SHOULDER
 	var a: float
 	var out := 1.0 # how far the hand is from rest toward the arm's length out
@@ -1177,6 +1222,91 @@ func _blade(w) -> Array:
 		a = lerpf(rest[1], arc[1], out)
 	var rest_hand: Vector2 = _rest(w, a)[0]
 	return [rest_hand.lerp(shoulder + Vector2.from_angle(a) * ARM, out), a, out]
+
+
+## Where the axe is in a chop: [hand position, angle, how far the hand is out from rest, 0 to 1, x scale of the
+## sprite]. phi is the axe's angle up from lying flat ahead; its screen direction is ahead (from the hand down flat to
+## world.chop_centre(), about the facing) times cos(phi) and up times CHOP_HEIGHT sin(phi), so its sprite is drawn
+## that much shorter (at most its full length). Down flat, its head lies on the centre.
+func _chop_blade(w) -> Array:
+	var p = w.player
+	var k := _swing_share(w)
+	var blow := _blow(w)
+	var phi := 0.0
+	var out := 1.0
+	if k < blow * CHOP_RAISE:
+		out = ease(_stage(k, 0.0, blow * CHOP_RAISE), 0.4)
+		phi = CHOP_UP
+	elif k < blow:
+		phi = lerpf(CHOP_UP, 0.0, ease(_stage(k, blow * CHOP_RAISE, blow), 2.2)) # falling faster and faster
+	elif k >= _hold(w):
+		out = 1.0 - smoothstep(0.0, 1.0, _stage(k, _hold(w), 1.0))
+	var shoulder: Vector2 = p.pos + _lean(w) + SHOULDER
+	var sword := _sword_texture(w)
+	var to: Vector2 = w.chop_centre(p.pos, p.face) - (shoulder + p.face * ARM) # from the hand, down flat, to the centre
+	var ahead: Vector2 = to.normalized()
+	var seen: Vector2 = ahead * cos(phi) + Vector2.UP * CHOP_HEIGHT * sin(phi)
+	var length := minf(1.0, seen.length())
+	var a: float = seen.angle()
+	var hand: Vector2 = shoulder + seen.normalized() * ARM * length
+	var since: int = floori((p.attack_t - w.stat("attack_hit_at")) / Config.STEP + 0.0001)
+	if since >= 0 and since < CHOP_QUIVER and k < _hold(w): # bitten into the ground: it quivers
+		hand += (p.face.orthogonal() * (1.0 if since % 2 == 0 else -1.0)).round()
+	var chop: float = maxf(0.1, to.length() / (sword.get_width() - AXE_HEAD - _grip(w).x)) * length
+	var rest := _rest(w, a)
+	var rest_scale := _stretch(w, sword, 0.0)
+	return [rest[0].lerp(hand, out), lerpf(rest[1], a, out), out, lerpf(rest_scale, chop, out)]
+
+
+## The x scale the weapon sprite is drawn at for blade (_blade()): a chop's own, or the stretch toward the reach.
+func _scale(w, sword: Texture2D, blade: Array) -> float:
+	return blade[3] if blade.size() > 3 else _stretch(w, sword, blade[2])
+
+
+## Where the chop comes down, while its blow lands (from attack_hit_at to attack_hit_until): { centre, radius (the
+## dust ring's outer edge), cracks (polylines from the middle), fade (0 as it lands, toward 1 as the blow ends) }, or
+## empty. The centre and radius are the simulation's (world.chop_centre(), world.chop_radius()), and every crack lies
+## inside the round, so what the dent covers is struck (tools/rules_test.gd).
+func chop_marks(w) -> Dictionary:
+	var p = w.player
+	var k := _swing_share(w)
+	if p.dead or p.carrying or not _chopping(w) or k < 0.0 or p.attack_t < w.stat("attack_hit_at") or p.attack_t > w.stat("attack_hit_until"):
+		return {} # exactly while World.melee() strikes
+	var centre: Vector2 = w.chop_centre(p.pos, p.face)
+	var r: float = w.chop_radius()
+	var fade := _stage(k, _blow(w), _hold(w))
+	var spread := minf(1.0, 0.55 + fade * 2.0) # the cracks run out quickly
+	var cracks := []
+	for i in CHOP_CRACKS:
+		var a: float = p.face.angle() + TAU * (i + 0.5 * (_hash(p.swings, i) % 256) / 255.0) / CHOP_CRACKS
+		var line := PackedVector2Array([centre])
+		for j in range(1, CRACK_JOINTS + 1):
+			var bend: float = CRACK_BEND * ((_hash(p.swings * 7 + j, i) % 3) - 1)
+			line.append(centre + Vector2.from_angle(a + bend) * r * CRACK_REACH * spread * j / CRACK_JOINTS)
+		cracks.append(line)
+	return { "centre": centre, "radius": r, "cracks": cracks, "fade": fade }
+
+
+## The dent and its cracks, on the ground under everything that stands (the night darkens them as the ground).
+func _chop_ground(c: CanvasItem, w) -> void:
+	var m := chop_marks(w)
+	if m.is_empty():
+		return
+	var burning := _burning(w)
+	var left: float = 1.0 - m.fade * m.fade
+	c.draw_circle(m.centre, m.radius - 1.0, Color(Sprites.PALETTE[CHOP_DENT[0]], CHOP_DENT[1] * left))
+	for line in m.cracks:
+		c.draw_polyline(line, Color(Sprites.PALETTE[CHOP_CRACK[1 if burning else 0]], left), 1.0)
+
+
+## The ring of thrown dust at the round's edge, in the overlay so it reads out of the light too.
+func _chop_ring(c: CanvasItem, w) -> void:
+	var m := chop_marks(w)
+	if m.is_empty():
+		return
+	var colour: Color = Sprites.PALETTE[CHOP_RING[1 if _burning(w) else 0]]
+	var width := CHOP_RING_WIDE if m.fade < 0.5 else 1.0 # thick as it lands, thinning as the dust settles
+	c.draw_arc(m.centre, m.radius - width / 2.0, 0.0, TAU, 32, Color(colour, 0.9 * (1.0 - m.fade * m.fade)), width)
 
 
 ## True while the fire blade does its extra damage: it is held and the keeper stands in the light.
@@ -1200,7 +1330,7 @@ func _stretch(w, sword: Texture2D, out: float) -> float:
 func _sword(c: CanvasItem, w) -> void:
 	var blade := _blade(w)
 	var sword := _sword_texture(w)
-	c.draw_set_transform(blade[0].round(), blade[1], Vector2(_stretch(w, sword, blade[2]), 1.0))
+	c.draw_set_transform(blade[0].round(), blade[1], Vector2(_scale(w, sword, blade), 1.0))
 	c.draw_texture(sword, -_grip(w))
 	c.draw_set_transform(Vector2.ZERO)
 
@@ -1214,7 +1344,7 @@ func _sword(c: CanvasItem, w) -> void:
 func slash_lines(w) -> Array:
 	var p = w.player
 	var k := _swing_share(w)
-	if p.dead or p.carrying or _weapon(w) == "" or k < SWING_WIND or k >= _hold(w):
+	if p.dead or p.carrying or _weapon(w) == "" or _chopping(w) or k < SWING_WIND or k >= _hold(w):
 		return []
 	var arc := _arc(w)
 	var a: float = clampf(_blade(w)[1], arc[1], arc[0])
@@ -1236,7 +1366,7 @@ func slash_lines(w) -> Array:
 func smear(w) -> Array:
 	var p = w.player
 	var k := _swing_share(w)
-	if p.dead or p.carrying or _weapon(w) == "" or k < SWING_WIND or k >= _hold(w):
+	if p.dead or p.carrying or _weapon(w) == "" or _chopping(w) or k < SWING_WIND or k >= _hold(w):
 		return []
 	var look: Dictionary = SMEAR[_weapon(w)]
 	var arc := _arc(w)
@@ -1279,7 +1409,7 @@ func _slash(c: CanvasItem, w) -> void:
 	var blade := _blade(w)
 	if burning: # a flame licks the tip whenever the blade burns, swinging or not
 		var sword := _sword_texture(w)
-		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - _grip(w).x - 1.0) * _stretch(w, sword, blade[2])
+		var tip: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (sword.get_width() - _grip(w).x - 1.0) * _scale(w, sword, blade)
 		var lick := Sprites.texture("flame_s_%s" % ("a" if (w.steps / FLAME_STEPS_FAST) % 2 == 0 else "b"))
 		c.draw_texture(lick, (tip - Vector2(3.0, 5.0)).round())
 	var hold := _stage(_swing_share(w), SWING_STRIKE, _hold(w))
