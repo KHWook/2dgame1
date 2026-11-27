@@ -75,9 +75,8 @@ static func _runs() -> String:
 
 ## Takes a random upgrade at every offer (a filler only where the offer holds nothing else) up to the dusk of the
 ## last of BUILD_NIGHTS, through World.play_offers as World.begin_at takes a fixed one, and compares what two keepers
-## hold once the dusk card of each of those nights is taken. One line per character: each is offered its own rows
-## (a row's only), so the levels there are to hold differ; and how many of the keepers hold a row of their own and
-## a combined one (a row with needs).
+## hold once the dusk card of each of those nights is taken. One line per character, since each is offered its own
+## rows (a row's only); the line also says how many keepers hold a row of their own and how many a combined one.
 static func _builds(who: String) -> String:
 	var per_night: int = 1 + Config.NIGHT.picks_at.size()
 	var held := {}

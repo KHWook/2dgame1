@@ -251,7 +251,7 @@ const ENEMY_TYPES := {
 ## chop's (Config.CHARACTERS' chop) ahead and radius.
 ## from_night (optional): the torch offers it only from that night on (World.can_offer); before it, the offers are
 ## drawn as if the row were not there. A row with one goes last, so the rows before it keep their order, and it
-## takes no slot (BUILD); neither does a combined upgrade (needs).
+## takes no slot (BUILD).
 ## side: whose power it is, "torch" or "keeper": the side whose slots (BUILD) it takes one of, and the group the
 ## screen shows it in. rare (optional): it changes how the keeper plays, and is drawn less often (BUILD.rare_weight).
 ## only (optional): a character (CHARACTERS); the torch offers the row to that character and to no other.

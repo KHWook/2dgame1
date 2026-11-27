@@ -19,7 +19,7 @@ var dead := false
 var attack_t := -1.0 # time into the swing, or -1 when not swinging
 var struck: Array = [] # the enemies this swing has hit: each is hit once per swing
 var carrying := false # holding at least one log
-var held := 0 # how many logs it holds, at most P.carry
+var held := 0 # how many logs it holds, at most World.carry()
 var swings := 0 # swings started so far, for the spin upgrade
 var spin := false # this swing goes all the way round
 var dash_t := 0.0 # time left in a dash, or 0
@@ -54,7 +54,7 @@ func step(world, inp) -> void:
 			dir = Vector2.from_angle(TAU * inp.stick / Config.STICK_DIRECTIONS)
 		var slow: bool = carrying and not world.mod("carry_full", false)
 		var lit: float = world.mod("lit_speed_mult", 1.0) if world.in_light(pos) else 1.0 # the bright fire upgrade
-		var haste: float = world.mod("haste", 1.0) if world.time < world.haste_until else 1.0 # just after a kill
+		var haste: float = world.mod("haste", 1.0) if world.time < world.haste_until else 1.0
 		vel = dir * (carry_speed() if slow else P.speed) * lit * haste
 		if dir != Vector2.ZERO and attack_t < 0.0:
 			face = dir
@@ -101,10 +101,9 @@ func carry_speed() -> float:
 	return P.carry_speed - P.carry_slow * maxi(0, held - 1)
 
 
-## Takes one more log into its arms. False when they are full: most logs, its character's carry unless the world
-## says otherwise (World.carry()).
-func take_log(most := -1) -> bool:
-	if held >= (P.carry if most < 0 else most):
+## Takes one more log into its arms. False when they are full: they hold most logs (World.carry()).
+func take_log(most: int) -> bool:
+	if held >= most:
 		return false
 	held += 1
 	carrying = true

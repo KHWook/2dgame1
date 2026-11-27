@@ -17,7 +17,7 @@ const NEXT_KEYS := Chooser.NEXT_KEYS
 const BACK_KEYS := Chooser.BACK_KEYS
 
 ## The reroll button (the R key's): one under the cards for the mouse and a thumb. It is drawn at reroll_rect() and
-## answers REROLL_PAD past it, once the offer listens (as the key does: reroll_key) (so the tap that drew an offer again is not also the next
+## answers REROLL_PAD past it, once the offer listens (so the tap that drew an offer again is not also the next
 ## reroll). It sits in the middle, REROLL_BELOW under the cards' bottom edge with the line of keys between, so a
 ## thumb that lands low on a card, or just under one, takes neither.
 const REROLL_KEY := KEY_R

@@ -399,7 +399,7 @@ func step(inp) -> void:
 			reset()
 		return
 	if phase == "pick":
-		if inp.is_pressed("reroll") and can_reroll(): # one that cannot is not there: a pick pressed with it counts
+		if inp.is_pressed("reroll") and can_reroll(): # a reroll that cannot be taken is ignored: a pick pressed with it still counts
 			rerolls -= 1
 			_offer(offer)
 			return
@@ -462,7 +462,7 @@ static func takes_slot(id: String) -> bool:
 	return not (Config.UPGRADES[id].has("from_night") or Config.UPGRADES[id].has("needs"))
 
 
-## Whether this upgrade is one who can ever be offered: its row's only, when it has one, names that character.
+## Whether who can ever be offered this upgrade: its row's only, when it has one, names that character.
 static func open_to(id: String, who: String) -> bool:
 	return Config.UPGRADES[id].get("only", who) == who
 
@@ -826,9 +826,9 @@ func _bolts() -> void:
 			_damage(e, B.damage + ((B.lit_bonus + mod("lit_damage", 0)) if lit else 0), e.pos - b.dir, true, B.push)
 			if b.hit.size() > b.pierce + (B.lit_pierce if lit else 0):
 				b.left = 0.0
-				_splash(e) # it bursts where it stops: on the last enemy it burns, not on those it goes through
+				_splash(e) # it bursts where it stops: on the last enemy it burns (pierce_burst: on each it goes through too)
 				break
-			if mod("pierce_burst", false): # unless it is a piercing ember: that one bursts on each
+			if mod("pierce_burst", false):
 				_splash(e)
 	bolts = bolts.filter(func(b): return b.left > 0.0)
 

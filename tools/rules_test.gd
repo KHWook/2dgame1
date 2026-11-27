@@ -323,7 +323,7 @@ static func _thief() -> Array:
 	_play(w, SWING, "attack")
 	_expect(out, "a thief killed with a log drops it", [w.enemies.size(), w.logs.size()], [0, 1])
 	w = _night(DARK)
-	w.player.take_log()
+	w.player.take_log(w.carry())
 	thief = _add(w, "thief", Vector2(8.0, 0.0))
 	_play(w, 1)
 	_expect(out, "a thief snatches the log the player carries", [w.player.carrying, thief.carrying], [false, true])
@@ -499,7 +499,7 @@ static func _new_upgrades() -> Array:
 	# big torch
 	w = _night(DARK, ["big_torch"])
 	w.fuel = Config.TORCH.max_fuel
-	w.player.take_log()
+	w.player.take_log(w.carry())
 	w.player.pos = Config.TORCH.pos
 	_play(w, 1)
 	_expect(out, "a big torch takes fuel past the usual full tank", w.fuel > Config.TORCH.max_fuel, true)
@@ -1136,7 +1136,7 @@ static func _damage_once(w, e) -> void:
 static func _logs() -> Array:
 	var out := []
 	var w = _night(DARK)
-	w.player.take_log()
+	w.player.take_log(w.carry())
 	_play(w, 1, "attack")
 	_expect(out, "the attack key puts a carried log down", [w.player.carrying, w.logs.size()], [false, 1])
 	_play(w, SWING)
@@ -1278,7 +1278,7 @@ static func _omen_measure(w, key: String) -> float:
 			return w.next_spawn - w.time
 		"log_mult":
 			w.fuel = 10.0
-			w.player.take_log()
+			w.player.take_log(w.carry())
 			w.player.pos = Config.TORCH.pos + Vector2(0.0, Config.TORCH.reach)
 			var burnt: float = w.burn_rate() * Config.STEP
 			_play(w, 1)
@@ -2028,21 +2028,21 @@ static func _stack() -> Array:
 	for n in [1, 2, 3]:
 		var s = _night(Vector2(0.0, 80.0), [], "woodcutter")
 		for i in n:
-			s.player.take_log()
+			s.player.take_log(s.carry())
 		_play(s, 1, "", "right")
 		speeds.append(snappedf(s.player.vel.x, 0.01))
 	_expect(out, "the woodcutter walks slower with each log", speeds, [C.carry_speed, C.carry_speed - C.carry_slow, C.carry_speed - 2.0 * C.carry_slow])
 	_expect(out, "with his full stack he is no faster than the knight with one", speeds[2] <= Config.PLAYER.carry_speed, true)
 	var q = _night(Vector2(0.0, 80.0), ["quick_hands"], "woodcutter")
 	for i in 3:
-		q.player.take_log()
+		q.player.take_log(q.carry())
 	_play(q, 1, "", "right")
 	_expect(out, "quick hands: a full stack does not slow him", q.player.vel.x, C.speed)
 	# At the torch: all of them go in.
 	w = _night(Vector2(0.0, 30.0), [], "woodcutter")
 	w.fuel = 10.0
 	for i in 3:
-		w.player.take_log()
+		w.player.take_log(w.carry())
 	w.player.pos = Config.TORCH.pos + Vector2(0.0, Config.TORCH.reach)
 	var score: int = w.score
 	var told := _play(w, 1)
@@ -2052,7 +2052,7 @@ static func _stack() -> Array:
 	# A thief takes one.
 	w = _night(Vector2(0.0, 80.0), [], "woodcutter")
 	for i in 3:
-		w.player.take_log()
+		w.player.take_log(w.carry())
 	w.player.invuln = NEVER
 	var thief = _add(w, "thief", Vector2(3.0, 0.0))
 	_play(w, 1)
@@ -2159,7 +2159,7 @@ static func _mage() -> Array:
 	_add(w, "slime", Vector2(30.0, 0.0))
 	f = bot.frame(w)
 	_expect(out, "a hungry torch: the bot as the mage shoots on its way to the wood", [f.pressed.has("attack"), f.held.has("left")], [true, true])
-	w.player.take_log()
+	w.player.take_log(w.carry())
 	w.logs = []
 	w.enemies[0].pos = w.player.pos + Vector2(Bot.SHOOT_DROP + 2.0, 0.0)
 	f = bot.frame(w)
@@ -2212,7 +2212,7 @@ static func _character_upgrades() -> Array:
 			if "휘두르기" in u.name or "베" in u.name + u.text:
 				out.append("the woodcutter's %s at level %d still speaks of a sweep: %s / %s" % [id, n, u.name, u.text])
 	for who in Config.CHARACTERS:
-		for id in Config.UPGRADES.keys().filter(func(i): return World.open_to(i, who)): # another's own row is never on its cards
+		for id in Config.UPGRADES.keys().filter(func(i): return World.open_to(i, who)):
 			for n in range(1, World.max_level(id) + 1):
 				var u := World.upgrade(id, n, who)
 				if not (u.get("name", "") != "" and u.get("text", "") != ""):
@@ -2714,7 +2714,7 @@ static func _auto_attack() -> Array:
 		# Carrying: it never puts its logs down, nor attacks.
 		var c = _night(DARK, _times("swift", top), who)
 		for i in c.stats.carry:
-			c.player.take_log()
+			c.player.take_log(c.carry())
 		c.player.invuln = NEVER
 		_planted(c, "big_slime", near)
 		var held: int = c.player.held
@@ -3127,7 +3127,6 @@ static func _fillers() -> Array:
 	_expect(out, "a filler that only heals is never offered to an unhurt keeper (100 offers, each rerolled)", unhurt, 0)
 	_expect(out, "it is offered to a hurt one (100 offers)", hurt > 50, true)
 	_expect(out, "the fuel filler's card says it stops at a full torch", Config.FILLERS.values().filter(func(row): return row.has("fuel")).all(func(row): return "가득" in row.text), true)
-	# An offer answered without its night (play_offers) takes the card and gives nothing: there is no night to help.
 	w = _holding(1, done, 30)
 	w.fuel = 20.0
 	w.player.hp = 1
@@ -3214,8 +3213,6 @@ static func _rerolls() -> Array:
 	var fresh: int = mini(1, Config.FILLERS.size() - 1)
 	_expect(out, "with fewer upgrades than an offer holds, a reroll keeps them and draws other fillers where there are any",
 		[w.offer.slice(0, size - 1).all(func(id): return Config.UPGRADES.has(id) and shown.has(id)), w.offer.slice(size - 1).filter(func(id): return not shown.has(id)).size(), w.rerolls], [true, fresh, most - fresh])
-	# A reroll pressed that cannot be taken is not there: a card picked in the same step is taken. One that can be
-	# taken comes first, and nothing is picked.
 	var both := InputFrame.new()
 	both.pressed["reroll"] = true
 	both.pressed["pick_2"] = true
@@ -3411,8 +3408,8 @@ static func _own_rows() -> Array:
 		var G: Dictionary = World.upgrade("guard", maxi(n, 1))
 		var w = _night(LIT, _times("guard", n))
 		var hitter = _planted(w, "slime", Vector2(8.0, 0.0))
-		var near = _planted(w, "slime", Vector2(0.0, 34.0)) # its body within the first level's reach
-		var mid = _planted(w, "slime", Vector2(0.0, -46.0)) # within the second level's only
+		var near = _planted(w, "slime", Vector2(0.0, 34.0))
+		var mid = _planted(w, "slime", Vector2(0.0, -46.0))
 		var far = _planted(w, "slime", Vector2(-70.0, 0.0))
 		_expect(out, "the guard scene's slimes stand where the levels' reaches tell them apart",
 			[34.0 < World.upgrade("guard", 1).guard_reach + near.T.radius, 46.0 < World.upgrade("guard", 1).guard_reach + mid.T.radius, 46.0 < World.upgrade("guard", 2).guard_reach + mid.T.radius, 70.0 < World.upgrade("guard", 2).guard_reach + far.T.radius], [true, false, true, false])
@@ -3585,7 +3582,7 @@ static func _combined_rows() -> Array:
 		var beyond = _planted(w, "slime", Vector2(-(L.feed_reach + 12.0), 0.0))
 		_play(w, 1)
 		var smothered: float = w.burn_rate()
-		w.player.take_log()
+		w.player.take_log(w.carry())
 		var told := _play(w, 1)
 		_expect(out, "a log on the fire %s: the slime on the torch and the one at the edge of feed_reach are thrown back from the torch, the one beyond is not, none is hurt" % ["with blast" if with else "without"],
 			[on.at_torch, told.count("fed"), told.count("wave"), on.knock.x > 0.0, edge.knock.y > 0.0, beyond.knock != Vector2.ZERO, on.hp], [true, 1, 1 if with else 0, with, with, false, on.full_hp])

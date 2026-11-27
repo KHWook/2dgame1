@@ -36,7 +36,7 @@ const RED := Color("#ff5a4a") # danger: low fuel, a boss
 const FRESH := Color("#a6e36a") # an upgrade not held yet
 const SIDE_COLOUR := { "torch": Color("#ffb05a"), "keeper": Color("#9cc8ff") }
 const RARE: Color = Sprites.PALETTE["p"] # a rare card's edge, badge and word: the bats' violet, used for nothing else here
-const COMBO: Color = Sprites.PALETTE["L"] # a combined card's (a row with needs), and the line that says what combines into one: the cool flame's blue
+const COMBO: Color = Sprites.PALETTE["L"] # a combined card's edge, tag and combo_hint line: the cool flame's blue
 const SMALL := 10 # Galmuri9 is drawn for 10px
 const BIG := 12 # Galmuri11 Bold, 12px: the numbers and headings that should hit hardest
 const HUGE := 15 # Galmuri14, 15px
@@ -62,11 +62,11 @@ const OMEN_WORD := "오늘 밤"
 const OMEN_GAP := 6.0 # between the omen's name and the night, in the HUD
 
 ## The offer cards: size, gap, icon enlargement, colours.
-const CARD := Vector2(Chooser.CARD.x, 0.0) # as wide as a character's card, as tall as the tallest card's words
+const CARD := Vector2(Chooser.CARD.x, 0.0) # as tall as the tallest card's words
 const CARD_GAP := 6.0
 const CARD_ICON := 2.0
 const CARD_TEXT_WIDTH := CARD.x - 8.0
-const CARD_LINES := 4 # the most lines a card's words take, its combo_hint with them (an R1 scene holds it): the tallest offer still clears the HUD
+const CARD_LINES := 4 # the most lines a card's words and combo_hint take (an R1 scene holds it): the tallest offer still clears the HUD
 const CARD_BACK := Color(0.16, 0.12, 0.2, 0.97)
 const CARD_EDGE := Color("#c8862f")
 const CARD_TEXT := Color("#e6dcc6")
@@ -439,7 +439,7 @@ func after_step(w) -> void:
 	if w.score < shown_score: # a new run
 		shown_score = w.score
 		gain_age = -1.0
-	for ev in w.events: # a card taken ("took") plays out: an upgrade's icon then flies to its tile; a filler joins no build, and the line names it at once
+	for ev in w.events:
 		if ev.kind != "took":
 			continue
 		taken = last_offer.find(ev.id)
