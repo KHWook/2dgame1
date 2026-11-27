@@ -63,9 +63,8 @@ const TIER_NAMES := {
 }
 const TIER_HINTS := ["더 튼튼하고 빠르다", "훨씬 튼튼하고 빠르며, 칼에 덜 밀린다"]
 
-## Which side an upgrade works on, so the HUD, the pause screen and the end screen group them: the torch and its
-## fire, or the keeper (every upgrade not listed here). Order within a group is the order they were taken.
-const TORCH_SIDE := ["slow_burn", "big_logs", "ember_ring", "warm_glow", "woodpile", "bright", "spark", "big_torch"]
+## The two sides an upgrade can be on (its row's side in Config.UPGRADES), in the order the HUD, the pause screen
+## and the end screen group them: the torch and its fire, then the keeper. Order within a group is the order taken.
 const SIDES := ["torch", "keeper"]
 const SIDE_NAMES := { "torch": "횃불의 힘", "keeper": "{who}의 힘" }
 
@@ -173,7 +172,7 @@ static func particle(word: String, vowel_form: String) -> String:
 
 
 static func side(upgrade: String) -> String:
-	return "torch" if TORCH_SIDE.has(upgrade) else "keeper"
+	return Config.UPGRADES[upgrade].side
 
 
 ## The sprite an enemy shows on this simulation step. offset keeps a crowd from moving in step.
@@ -224,9 +223,11 @@ static func problems() -> Array:
 			if weapon != "":
 				for f in WEAPON_FRAMES:
 					wanted.append(f % weapon)
-	for id in TORCH_SIDE:
-		if not Config.UPGRADES.has(id):
-			out.append("TORCH_SIDE names '%s', which is not an upgrade. Fix: remove it from TORCH_SIDE in src/art/looks.gd." % id)
+	for id in Config.UPGRADES:
+		if not SIDES.has(Config.UPGRADES[id].get("side", "")):
+			out.append("Upgrade '%s' has no side the screen knows. Fix: give its row in Config.UPGRADES a side, one of %s." % [id, SIDES])
+	for id in Config.FILLERS:
+		wanted.append(ICON % id)
 	return out + Sprites.missing(wanted)
 
 

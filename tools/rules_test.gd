@@ -1510,7 +1510,7 @@ static func _surge_totals() -> Array:
 		var with := 0
 		var without := 0
 		var packed := 0
-		for seed_value in range(1, 9):
+		for seed_value in range(1, 17):
 			var a = _dusk_at(seed_value, night)
 			for s in a.surges_due:
 				packed += s.size
@@ -1520,7 +1520,7 @@ static func _surge_totals() -> Array:
 			b.surge_slow = 1.0
 			without += _arrivals(b)
 		if absf(with - without) > 0.1 * without:
-			out.append("night %d: over 8 seeds %d enemies come with surges and %d without: more than a tenth apart" % [night, with, without])
+			out.append("night %d: over 16 seeds %d enemies come with surges and %d without: more than a tenth apart" % [night, with, without])
 		_expect(out, "night %d: its packs are a real share of it, at most SURGE.share and a little" % night, [packed > 0.1 * without, packed <= (Config.SURGE.share + 0.05) * without], [true, true])
 	return out
 
@@ -2569,16 +2569,17 @@ static func _swift() -> Array:
 		var w = World.new(seed_value)
 		for n in [1, from - 1, from]:
 			w.night = n
-			var rng = SimRng.new(seed_value + 1000)
+			var twin = World.new(seed_value) # draws from a pool that never held swift, on the same rng
+			twin.rng = SimRng.new(seed_value + 1000)
 			w.rng = SimRng.new(seed_value + 1000)
 			w._offer()
-			var pool: Array = Config.UPGRADES.keys().filter(func(id): return id != "swift" and w.level(id) < World.max_level(id))
+			var pool: Array = Config.UPGRADES.keys().filter(func(id): return id != "swift")
 			var want := []
-			while want.size() < Config.NIGHT.offer_size and not pool.is_empty():
-				want.append(pool.pop_at(rng.index(pool.size())))
+			while want.size() < Config.NIGHT.offer_size:
+				want.append(twin._draw(pool))
 			if n < from:
 				before += w.offer.count("swift")
-				same = same and w.offer == want and w.rng.state() == rng.state()
+				same = same and w.offer == want and w.rng.state() == twin.rng.state()
 			else:
 				after += w.offer.count("swift")
 	_expect(out, "swift is never offered before night %d" % from, before, 0)
