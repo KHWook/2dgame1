@@ -11,6 +11,7 @@ extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
 const E := Config.ENEMY
+const KNOCK_KEEP: float = pow(E.knock_decay, Config.STEP) # share of its knockback a body keeps from one step to the next
 
 var kind: String
 var T: Dictionary
@@ -75,9 +76,9 @@ func step(world) -> void:
 		to = aim
 		knock = Vector2.ZERO
 	# Most smotherers stop at the torch; the shade lord stops only while it warns and while it stays, so it can leave.
-	var halt: bool = move in ["warn", "stay", "rest"] or (at_torch and not T.has("lunge"))
+	var halt: bool = move == "warn" or move == "stay" or move == "rest" or (at_torch and not T.has("lunge"))
 	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to * speed)
-	knock *= pow(E.knock_decay, Config.STEP)
+	knock *= KNOCK_KEEP
 	if knock.length() < E.knock_stop:
 		knock = Vector2.ZERO
 	pos += vel * Config.STEP

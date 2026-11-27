@@ -329,7 +329,7 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	guide_left_label = guide_left.get_child(0)
 	guide_box.visible = false
 	coach_arrow = TextureRect.new()
-	coach_arrow.texture = Sprites.texture("coach_arrow")
+	coach_arrow.texture = Sprites.alone("coach_arrow")
 	coach_arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	coach_arrow.visible = false
 	add_child(coach_arrow)
@@ -618,7 +618,7 @@ func _fill_cards(w) -> void:
 		var id: String = w.offer[i]
 		var next: int = w.level(id) + 1
 		var u: Dictionary = World.upgrade(id, next)
-		var icon: Texture2D = painter.icon(id)
+		var icon: Texture2D = painter.icon(id, true)
 		o.icon.texture = icon
 		o.icon.custom_minimum_size = icon.get_size() * CARD_ICON
 		o.name.text = u.name + (LEVEL % next if next > 1 else "")
@@ -715,7 +715,7 @@ func _held_item(w, id: String, words: bool) -> Control:
 	var item := HBoxContainer.new()
 	item.add_theme_constant_override("separation", 3)
 	var icon := _icon(item)
-	icon.texture = painter.icon(id)
+	icon.texture = painter.icon(id, true)
 	icon.custom_minimum_size = icon.texture.get_size()
 	var lines := VBoxContainer.new()
 	lines.add_theme_constant_override("separation", 0)
@@ -784,7 +784,7 @@ func _flight(w, delta: float) -> void:
 			var e := t * t * (3.0 - 2.0 * t)
 			var at := fly_from.lerp(to, e) + Vector2(0.0, -FLY_ARC * sin(e * PI))
 			var size := Painter.ICON_SIZE * lerpf(CARD_ICON, 1.0, e)
-			flier.texture = painter.icon(fly_id)
+			flier.texture = painter.icon(fly_id, true)
 			flier.size = Vector2(size, size)
 			flier.position = at - flier.size / 2.0
 	elif fly_id != "":
@@ -805,7 +805,7 @@ func _flight(w, delta: float) -> void:
 func _fill_told(w, id: String) -> void:
 	var level: int = w.level(id)
 	var u: Dictionary = World.upgrade(id, level)
-	told_icon.texture = painter.icon(id)
+	told_icon.texture = painter.icon(id, true)
 	told_icon.custom_minimum_size = told_icon.texture.get_size() * CARD_ICON
 	told_name.text = u.name + (LEVEL % level if level > 1 else "") + ("  얻었다!" if level == 1 else "  강해졌다!")
 	told_text.text = u.text
@@ -843,7 +843,7 @@ func _hints(w) -> void:
 			var cut := line.find(": ")
 			hint_name.text = line.substr(0, cut) if cut > 0 else ""
 			hint_text.text = line.substr(cut + 2) if cut > 0 else line
-			var tex := Sprites.texture("berry" if thing == "berry" else Looks.FRAMES[0] % thing)
+			var tex := Sprites.alone("berry" if thing == "berry" else Looks.FRAMES[0] % thing)
 			hint_icon.texture = tex
 			hint_icon.custom_minimum_size = tex.get_size() / (2.0 if tex.get_height() > 24 else 1.0)
 			hint_steps = HINT_STEPS
@@ -986,7 +986,7 @@ func _guide_row(parent: Node, line: Array) -> void:
 			_label(r, BIG, MUTED).text = sprite
 			continue
 		var picture := _icon(r)
-		var tex := Sprites.texture(sprite)
+		var tex := Sprites.alone(sprite)
 		picture.texture = tex
 		# a row of pictures only shows them at twice their size; beside words, in a 16-pixel square
 		picture.custom_minimum_size = tex.get_size() * 2.0 if line[1] == "" else Vector2(16.0, 16.0)

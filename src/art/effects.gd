@@ -35,6 +35,10 @@ const POOF_STEPS := 4 # simulation steps per poof frame
 const POOF_ANCHOR := Vector2(8.0, 9.0)
 const FLAME_MOUTH := Vector2(0.0, -6.0) # sparks leave from here, measured from the torch position
 const FLARE_TIME := 0.5 # seconds the fed torch burns brighter
+## The most flying pixels and puffs on screen at once. A crowd mown down by the ember ring throws out hundreds a
+## second; past these the oldest go first, so a big fight costs no more to show than a busy one.
+const MAX_BITS := 320
+const MAX_POOFS := 40
 
 var rng # its own generator, so effects never draw from world.rng
 var bits: Array = [] # flying pixels: { pos, vel, keep, age, life, colour }
@@ -73,14 +77,26 @@ func step(w) -> void:
 				poofs.append({ "pos": ev.pos, "age": 0 })
 			"healed":
 				_burst(BURSTS.heal, ev.pos + HEAD, Vector2.UP, HEAL)
+	if bits.size() > MAX_BITS:
+		bits = bits.slice(bits.size() - MAX_BITS)
+	if poofs.size() > MAX_POOFS:
+		poofs = poofs.slice(poofs.size() - MAX_POOFS)
+	var kept := 0
 	for b in bits:
 		b.pos += b.vel * Config.STEP
 		b.vel *= pow(b.keep, Config.STEP)
 		b.age += Config.STEP
-	bits = bits.filter(func(b): return b.age < b.life)
+		if b.age < b.life:
+			bits[kept] = b
+			kept += 1
+	bits.resize(kept)
+	kept = 0
 	for p in poofs:
 		p.age += 1
-	poofs = poofs.filter(func(p): return p.age < POOF.size() * POOF_STEPS)
+		if p.age < POOF.size() * POOF_STEPS:
+			poofs[kept] = p
+			kept += 1
+	poofs.resize(kept)
 	flare = maxf(0.0, flare - Config.STEP / FLARE_TIME)
 
 

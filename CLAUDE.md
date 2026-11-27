@@ -13,7 +13,7 @@ replay test report. Hooks run them for you (see `.claude/settings.json`).
 - A change meant to alter gameplay: `./verify --update-golden`, then add an entry to `docs/DECISIONS.md`. Never make the golden match by editing it.
 - A mistake that happened twice becomes a rule in `tools/checks.gd` (with the fix in its message and a `bad`/`good` selftest pair), not a new line here.
 - Decisions and their reasons go in `docs/DECISIONS.md`, nowhere else.
-- Run the game: `godot --path .` (editor: `godot -e --path .`; `-- --bot` lets the bot play, `-- --seed=N` picks the night, `-- --bot --skip=N` has the bot play N steps first, `-- --bot --slot=N` picks which offer it takes). Look at visual changes before calling them done; `godot --path . --write-movie /tmp/f.png --fixed-fps 60 --quit-after 200` renders frames to check.
+- Run the game: `godot --path .` (editor: `godot -e --path .`; `-- --bot` lets the bot play, `-- --seed=N` picks the night, `-- --bot --skip=N` has the bot play N steps first, `-- --bot --slot=N` picks which offer it takes, `-- --night=N` starts at night N, `-- --crowd=K --perf` keeps K enemies on the field and prints the cost once a second). Look at visual changes before calling them done; `godot --path . --write-movie /tmp/f.png --fixed-fps 60 --quit-after 200` renders frames to check.
 - Art is text: each sprite is a character grid in `src/art/sprites.gd` (one character = one pixel), and `src/art/painter.gd` decides what is painted where. After editing a sprite, look at it: `godot --headless --path . --script res://tools/art_sheet.gd -- /tmp/sprites.png`.
 
 ## pstack

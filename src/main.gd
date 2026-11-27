@@ -53,6 +53,19 @@ var paused := false
 var intro := false # the first screen is up (src/ui.gd, src/guide.gd): the world waits until its start button
 var player_light: PointLight2D
 var touch # src/touch.gd: the stick and buttons on a phone
+## Dev flags for looking at and measuring late nights; the replay and the balance tool never pass through here.
+## --night=N starts at the dusk of night N (World.begin_at); --crowd=K keeps K enemies on the field and the keeper and
+## the torch from failing (World.crowd); --perf prints, once a second, the crowd, the time world.step takes, the frame
+## time and the draw calls.
+var crowd := 0
+var perf := false
+var perf_frames := 0
+var perf_step_us := 0
+var perf_steps := 0
+var perf_frame_max := 0.0
+var perf_since := 0
+var perf_held := 0
+var perf_paint_us := 0
 
 func _ready() -> void:
 	var skip := 0
@@ -64,12 +77,18 @@ func _ready() -> void:
 			skip = int(a.substr(7))
 		if a.begins_with("--slot="): # which offer the bot always takes; --bot --seed=6 --slot=3 is the replay's night
 			slot = int(a.substr(7))
+		if a.begins_with("--crowd="):
+			crowd = int(a.substr(8))
+	perf = OS.get_cmdline_user_args().has("--perf")
 	if OS.get_cmdline_user_args().has("--bot"):
 		bot = Bot.new(slot)
 	# The window's title is the game's name on the first screen. project.godot keeps the old config/name, which on
 	# desktop names the folder user://records.json lives in; the web build's page title comes from config/name.web.
 	get_window().title = Ui.INTRO_TITLE
 	world = World.new(seed_value)
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--night="):
+			world.begin_at(int(a.substr(8)), slot)
 	records = Records.new()
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
 		world.step(bot.frame(world))
@@ -96,7 +115,10 @@ func _ready() -> void:
 	player_light.texture = glow
 	add_child(player_light)
 	overlay = Node2D.new()
-	overlay.draw.connect(func(): painter.paint_overlay(overlay, world))
+	overlay.draw.connect(func():
+		var t0 := Time.get_ticks_usec()
+		painter.paint_overlay(overlay, world)
+		perf_paint_us += Time.get_ticks_usec() - t0)
 	ui = Ui.new()
 	add_child(ui)
 	ui.setup(painter, records, overlay, bot.pick if bot != null else 0, world)
@@ -189,13 +211,19 @@ func _physics_process(_delta: float) -> void:
 	position = juice.offset # the field and its lights; the HUD is on its own layer and stays put
 	painter.shake = juice.offset
 	if holding:
+		perf_held += 1
 		overlay.queue_redraw()
 		return
 	bot_looked = bot_looked + 1 if bot != null and world.phase == "pick" else 0
 	ui.bot_looked = bot_looked
 	if bot_looked > 0 and bot_looked < BOT_LOOKS:
 		return
+	if crowd > 0:
+		world.crowd(crowd)
+	var t0 := Time.get_ticks_usec()
 	world.step(bot.frame(world) if bot != null else f)
+	perf_step_us += Time.get_ticks_usec() - t0
+	perf_steps += 1
 	if bot == null: # the demo bot's runs are not the player's records
 		records.step(world, seed_value, Time.get_datetime_string_from_system(false, true))
 	painter.step(world)
@@ -208,6 +236,8 @@ func _physics_process(_delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if perf:
+		_perf(delta)
 	touch.mode = "off" if intro else "paused" if paused else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
 	touch.dash_shown = world.mod("dash_every", 0.0) > 0.0
 	touch.guide_controls = intro and ui.guide.page == Guide.CONTROLS
@@ -230,5 +260,25 @@ func _process(delta: float) -> void:
 	player_light.position = world.player.pos
 
 
+## --perf: once a second, how big the crowd is and what it costs. The draw calls are the last frame's.
+func _perf(delta: float) -> void:
+	perf_frames += 1
+	perf_frame_max = maxf(perf_frame_max, delta)
+	var now := Time.get_ticks_msec()
+	if now - perf_since < 1000:
+		return
+	var calls := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME)
+	print("perf: night %d, %d enemies, %d fps, frame max %.1f ms, step %.2f ms (%d steps), %d held, paint %.2f ms/frame, process %.1f ms, physics %.1f ms, %d draw calls" % [world.night, world.enemies.size(), perf_frames * 1000 / maxi(1, now - perf_since), perf_frame_max * 1000.0, perf_step_us / 1000.0 / maxi(1, perf_steps), perf_steps, perf_held, perf_paint_us / 1000.0 / maxi(1, perf_frames), Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0, calls])
+	perf_since = now
+	perf_frames = 0
+	perf_frame_max = 0.0
+	perf_step_us = 0
+	perf_steps = 0
+	perf_held = 0
+	perf_paint_us = 0
+
+
 func _draw() -> void:
+	var t0 := Time.get_ticks_usec()
 	painter.paint(self, world)
+	perf_paint_us += Time.get_ticks_usec() - t0

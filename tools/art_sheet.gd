@@ -1,5 +1,7 @@
 ## Saves every sprite, enlarged, as one PNG, so the art can be looked at without running the game.
 ## godot --headless --path . --script res://tools/art_sheet.gd -- [out.png] [scale] [name-prefix]
+## With --atlas first, it saves the atlas the game draws from instead (src/art/sprites.gd), at 1:1:
+## godot --headless --path . --script res://tools/art_sheet.gd -- --atlas /tmp/atlas.png
 extends SceneTree
 
 const Sprites := preload("res://src/art/sprites.gd")
@@ -11,6 +13,13 @@ const COLUMNS := 8
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
+	if not args.is_empty() and args[0] == "--atlas":
+		var path: String = args[1] if args.size() > 1 else "res://docs/shots/atlas.png"
+		var atlas := Sprites.atlas_image()
+		atlas.save_png(path)
+		print("art_sheet: wrote the %dx%d atlas to %s" % [atlas.get_width(), atlas.get_height(), path])
+		quit(0)
+		return
 	var out: String = args[0] if args.size() > 0 else "res://docs/shots/sprites.png"
 	var scale: int = int(args[1]) if args.size() > 1 else 6
 	var prefix: String = args[2] if args.size() > 2 else ""

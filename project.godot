@@ -21,7 +21,7 @@ window/stretch/scale_mode="integer"
 [physics]
 
 common/physics_ticks_per_second=60
-common/max_physics_steps_per_frame=5
+common/max_physics_steps_per_frame=2
 
 [rendering]
 

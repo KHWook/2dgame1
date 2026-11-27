@@ -39,6 +39,7 @@ static func run() -> Array:
 	out.append_array(_company())
 	out.append_array(_setup())
 	out.append_array(_coaching())
+	out.append_array(_crowds())
 	return out
 
 
@@ -803,3 +804,66 @@ static func _coaching() -> Array:
 		c.step(w)
 	_expect(out, "something cut down: all done and off", [c.fight, c.on, c.now(w)], ["done", false, []])
 	return out
+
+
+## What keeps a crowd of hundreds cheap answers exactly what the slow way did. World.mod() is looked up from a table
+## made once per change of picks: for many random sets of picks, taken one by one and also swapped in whole, it gives
+## the very value the old loop over every upgrade gives (the same float: the product is taken in the same order).
+## The light's radius is kept until the fuel changes, and follows it when it does. Dropping the dead keeps the
+## living in their order, and the newly born go after them.
+static func _crowds() -> Array:
+	var out := []
+	var rng := RandomNumberGenerator.new() # check-ok: a test's own layouts, never the world's rng
+	rng.seed = 7
+	var keys := {}
+	for id in Config.UPGRADES:
+		for n in World.max_level(id):
+			for key in World.upgrade(id, n + 1):
+				keys[key] = true
+	var ids: Array = Config.UPGRADES.keys()
+	var wrong := 0
+	for trial in 40:
+		var w = _night(LIT)
+		for i in rng.randi_range(0, 20):
+			var id: String = ids[rng.randi() % ids.size()]
+			if w.level(id) < World.max_level(id):
+				if trial % 2 == 0:
+					w.picks.append(id) # one by one, as the offers do
+				else:
+					w.picks = w.picks + [id] # swapped in whole, as the scenes do
+			for key in keys:
+				var fast = w.mod(key, 1.0)
+				var slow = _mod_the_slow_way(w, key, 1.0)
+				if typeof(fast) != typeof(slow) or fast != slow:
+					wrong += 1
+	_expect(out, "mod() from its table equals the loop over every upgrade, for random picks", wrong, 0)
+	var w = _night(LIT, ["bright"])
+	w.fuel = 10.0
+	var dim: float = w.light_radius()
+	w.fuel = 90.0
+	_expect(out, "the light's radius follows the fuel", [w.light_radius() > dim, is_equal_approx(w.light_radius(), lerpf(Config.TORCH.light_min, Config.TORCH.light_max, 0.9) * 1.3)], [true, true])
+	w.picks = []
+	_expect(out, "and the picks", is_equal_approx(w.light_radius(), lerpf(Config.TORCH.light_min, Config.TORCH.light_max, 0.9)), true)
+	w = _night(DARK)
+	var a = _add(w, "slime", Vector2(0.0, 60.0))
+	var b = _add(w, "big_slime", NEAR)
+	var c = _add(w, "slime", Vector2(0.0, -60.0))
+	b.hp = 1
+	_play(w, SWING, "attack")
+	_expect(out, "a kill leaves the others in their order and its halves after them", w.enemies.map(func(e): return e.kind), ["slime", "slime", "slime", "slime"])
+	_expect(out, "(the same two first)", [is_same(w.enemies[0], a), is_same(w.enemies[1], c)], [true, true])
+	return out
+
+
+## World.mod() as it was before the table: a loop over every upgrade, merging its levels, at every call.
+static func _mod_the_slow_way(w, key: String, fallback):
+	var v = fallback
+	for id in Config.UPGRADES:
+		var n: int = w.picks.count(id)
+		if n == 0:
+			continue
+		var u: Dictionary = World.upgrade(id, n)
+		if not u.has(key):
+			continue
+		v = v * u[key] if key.ends_with("_mult") or key == "glow_slow" else u[key]
+	return v

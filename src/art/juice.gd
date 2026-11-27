@@ -11,7 +11,10 @@ const SimRng := preload("res://src/sim/rng.gd")
 
 ## Frames the game holds still after a thing happens. The largest wins; they do not add up.
 const STOP := { "kill": 3, "hurt": 5, "boss": 6, "boss_kill": 10, "landed": 4 }
-const KILL_STOP_APART := 15 # frames between two kill holds, so a ring of embers mowing a crowd does not stutter
+## Frames between two kill holds. Only the keeper's own blows hold the game (a kill while the swing is under way):
+## on a late night the ember ring, the sparks and the thorns kill several times a second, and holding for each of
+## those froze the game three frames in every eighteen, which read as stutter, not as a hit.
+const KILL_STOP_APART := 40
 ## How far the field shakes (pixels, at its start) and for how long (frames). Whole pixels only, at 480x270.
 const SHAKE := { "hurt": [2.0, 12], "boss": [3.0, 30], "boss_kill": [3.0, 24], "landed": [2.0, 16] }
 const SHAKE_EVERY := 2 # frames between new shake offsets: every frame is a buzz, this is a jolt
@@ -63,7 +66,7 @@ func step(w) -> void:
 				if Config.ENEMY_TYPES[ev.enemy].get("boss", false):
 					stop = maxi(stop, STOP.boss_kill)
 					_shake("boss_kill")
-				elif since_kill_stop >= KILL_STOP_APART:
+				elif since_kill_stop >= KILL_STOP_APART and p.attack_t >= 0.0:
 					stop = maxi(stop, STOP.kill)
 			"fed":
 				_sound("fed")

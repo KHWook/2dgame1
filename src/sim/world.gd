@@ -50,6 +50,11 @@ var boss_due := false # a boss is still to come tonight
 var boss_from = null # where the boss will come from once its warning is given, until it comes; null otherwise
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
 var events: Array = [] # what happened in the last step; see the top of this file
+var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
+var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)
+var _mods_count := -1 # and how many it held then
+var _light := 0.0 # light_radius() at _light_fuel
+var _light_fuel := NAN
 
 
 func _init(seed_value_: int = 1) -> void:
@@ -86,6 +91,35 @@ func reset() -> void:
 	_offer()
 
 
+## Start at the dusk of night n instead of the first, as if every night before it had been kept: the offers those
+## nights would have made are drawn and the one in slot is taken each time (the last slot when fewer are offered),
+## the keeper is rested and the torch topped up. For looking at and measuring late nights (the balance tool's
+## --late, main.gd's --night=N); a normal run never calls it.
+func begin_at(n: int, slot: int) -> void:
+	for i in (n - 1) * (1 + N.picks_at.size()):
+		if offer.is_empty():
+			break
+		_take(offer[mini(slot, offer.size()) - 1])
+		_offer()
+	night = n
+	boss_due = _boss_night()
+	player.hp = max_hp()
+	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
+
+
+## For measuring crowds (main.gd's --crowd=K): bring the field up to k enemies of tonight's kinds, from the edges,
+## heal the keeper and fill the torch, and keep the night from reaching dawn. A normal run never calls it.
+func crowd(k: int) -> void:
+	if phase != "night":
+		return
+	while enemies.size() < k:
+		enemies.append(Enemy.new(_who(_night_row().who), _edge_point()))
+	player.hp = max_hp()
+	fuel = max_fuel()
+	if time > N.length * 0.9:
+		time = N.length * 0.6
+
+
 ## Run fn after delay night seconds. Never use engine timers in the simulation.
 func later(delay: float, fn: Callable) -> void:
 	schedule.append({ "at": time + delay, "fn": fn })
@@ -93,17 +127,36 @@ func later(delay: float, fn: Callable) -> void:
 
 ## The value an upgrade sets for key, at the level you have it, or fallback when no picked upgrade sets it.
 ## Multipliers from different upgrades stack by product.
+## Every enemy asks this every step (its light, its speed), so what the picks set is worked out once per change of
+## picks (_mods) and only looked up here; the product is taken in the same order as ever, so it is the same float.
 func mod(key: String, fallback):
+	if not is_same(picks, _mods_for) or picks.size() != _mods_count:
+		_remod()
+	var set_by = _mods.get(key)
+	if set_by == null:
+		return fallback
+	if not (key.ends_with("_mult") or key == "glow_slow"):
+		return set_by[-1]
 	var v = fallback
+	for f in set_by:
+		v = v * f
+	return v
+
+
+## For every key a picked upgrade sets: the values it is set to, in the order of Config.UPGRADES.
+func _remod() -> void:
+	_mods_for = picks
+	_mods_count = picks.size()
+	_mods = {}
 	for id in Config.UPGRADES:
 		var n := level(id)
 		if n == 0:
 			continue
 		var u := upgrade(id, n)
-		if not u.has(key):
-			continue
-		v = v * u[key] if key.ends_with("_mult") or key == "glow_slow" else u[key]
-	return v
+		for key in u:
+			if not _mods.has(key):
+				_mods[key] = []
+			_mods[key].append(u[key])
 
 
 ## How many times you have taken this upgrade: its level, 0 when you do not have it.
@@ -129,9 +182,13 @@ func max_fuel() -> float:
 	return T.max_fuel + mod("fuel_bonus", 0.0)
 
 
+## Every enemy asks in_light() every step, so the radius is kept until the fuel or the picks change.
 func light_radius() -> float:
-	# A big torch's extra fuel is a reserve: the light is as bright as it gets at the usual full tank.
-	return lerpf(T.light_min, T.light_max, clampf(fuel / T.max_fuel, 0.0, 1.0)) * mod("light_mult", 1.0)
+	if fuel != _light_fuel or not is_same(picks, _mods_for) or picks.size() != _mods_count:
+		# A big torch's extra fuel is a reserve: the light is as bright as it gets at the usual full tank.
+		_light = lerpf(T.light_min, T.light_max, clampf(fuel / T.max_fuel, 0.0, 1.0)) * mod("light_mult", 1.0)
+		_light_fuel = fuel
+	return _light
 
 
 func in_light(p: Vector2) -> bool:
@@ -189,10 +246,11 @@ func step(inp) -> void:
 				break
 		return
 	time += Config.STEP
-	var due := schedule.filter(func(s): return s.at <= time)
-	schedule = schedule.filter(func(s): return s.at > time)
-	for s in due:
-		s.fn.call()
+	if not schedule.is_empty():
+		var due := schedule.filter(func(s): return s.at <= time)
+		schedule = schedule.filter(func(s): return s.at > time)
+		for s in due:
+			s.fn.call()
 	player.step(self, inp)
 	_haul()
 	_forage()
@@ -207,10 +265,23 @@ func step(inp) -> void:
 	_prickle()
 	_torch()
 	_sparks()
-	enemies = enemies.filter(func(e): return not e.dead and not e.gone) + born
-	born = []
+	_sweep()
 	_spawns()
 	_end_or_offer()
+
+
+## Drop the enemies that died or left this step and add the ones born in it, in place: a crowd of hundreds would
+## otherwise make two new arrays every step.
+func _sweep() -> void:
+	var kept := 0
+	for e in enemies:
+		if not e.dead and not e.gone:
+			enemies[kept] = e
+			kept += 1
+	enemies.resize(kept)
+	if not born.is_empty():
+		enemies.append_array(born)
+		born.clear()
 
 
 ## Put three upgrades on the table, ones you don't have yet or the next level of ones you do, and stop the clock.
@@ -347,8 +418,9 @@ func _prickle() -> void:
 	if every <= 0.0 or time < next_thorn or player.dead:
 		return
 	next_thorn = time + every
+	var reach: float = Config.PLAYER.radius + mod("thorn_reach", 0.0)
 	for e in enemies:
-		if not e.dead and e.pos.distance_to(player.pos) < e.T.radius + Config.PLAYER.radius + mod("thorn_reach", 0.0):
+		if not e.dead and e.pos.distance_to(player.pos) < e.T.radius + reach:
 			_damage(e, 1, player.pos)
 
 

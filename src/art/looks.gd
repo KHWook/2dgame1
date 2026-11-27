@@ -69,7 +69,12 @@ static func side(upgrade: String) -> String:
 
 ## The sprite an enemy shows on this simulation step. offset keeps a crowd from moving in step.
 static func frame(kind: String, steps: int, offset: int = 0) -> String:
-	return FRAMES[(steps / enemy(kind).steps + offset) % 2] % kind
+	return FRAMES[frame_index(kind, steps, offset)] % kind
+
+
+## Which of FRAMES that is.
+static func frame_index(kind: String, steps: int, offset: int = 0) -> int:
+	return (steps / enemy(kind).steps + offset) % 2
 
 
 ## Rule A2: messages for every sprite the rules' data asks for by name that is not drawn, for every enemy kind

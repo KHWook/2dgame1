@@ -1236,7 +1236,22 @@ const VARIANTS := {
 }
 
 
-static var _textures := {} # sprite name plus its flip and white marks -> texture, made the first time it is asked for
+## Every picture the game paints comes out of one shared texture, the atlas, packed at the start from the grids
+## above (art stays text: nothing is saved as a file). Godot draws runs of pictures from the same texture as one
+## batch, so a crowd sorted by depth with kinds mixed costs a few draw calls instead of one or more per enemy.
+## Each sprite is there four times (as is, mirrored, white, mirrored white) and with its rim; pictures asked for
+## later (an enemy's eyes, the painter's hedges and clearing) go into room kept free under them.
+const ATLAS_WIDTH := 1024
+const ATLAS_SPARE := 256 # rows kept free under what is packed at the start
+const ATLAS_PAD := 1 # empty pixels round each picture, so none samples its neighbour
+
+static var _textures := {} # picture key -> its region of the atlas (an AtlasTexture), or its own texture when the atlas is full
+static var _atlas: Image
+static var _alone := {} # sprite -> its own texture (alone())
+static var _feet := {} # sprite -> foot(), found once
+static var _atlas_texture: ImageTexture
+static var _shelf := Vector2i.ZERO # where the next picture goes on the shelf being filled
+static var _shelf_height := 0
 
 
 static func names() -> Array:
@@ -1265,32 +1280,22 @@ static func image(sprite: String) -> Image:
 
 ## A sprite as a texture: mirrored left to right when flip, in its hit-flash white when white.
 static func texture(sprite: String, flip := false, white := false) -> Texture2D:
-	var key := "%s%s%s" % [sprite, "<" if flip else "", "!" if white else ""]
-	if not _textures.has(key):
-		var img := image(sprite)
-		if flip:
-			img.flip_x()
-		_textures[key] = ImageTexture.create_from_image(whitened(img) if white else img)
-	return _textures[key]
+	return picture("%s%s%s" % [sprite, "<" if flip else "", "!" if white else ""])
+
+
+## A sprite as a texture of its own, outside the atlas, for the words' layer (src/ui.gd): a Control there scales its
+## picture to sizes that fall between screen pixels, and only a texture of its own samples its edge exactly as it
+## always has. The field and the HUD pictures, drawn on whole pixels, come from the atlas.
+static func alone(sprite: String) -> Texture2D:
+	if not _alone.has(sprite):
+		_alone[sprite] = ImageTexture.create_from_image(image(sprite))
+	return _alone[sprite]
 
 
 ## A one-pixel ring just outside a sprite's shape, in white, one pixel bigger on every side: the painter tints it and
 ## draws it where the night does not dim it, so a thing on the ground keeps its silhouette in the dark.
 static func rim(sprite: String) -> Texture2D:
-	var key := sprite + "#rim"
-	if not _textures.has(key):
-		var img := image(sprite)
-		var out := Image.create_empty(img.get_width() + 2, img.get_height() + 2, false, Image.FORMAT_RGBA8)
-		for y in out.get_height():
-			for x in out.get_width():
-				if _solid(img, x - 1, y - 1):
-					continue
-				for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-					if _solid(img, x - 1 + d.x, y - 1 + d.y):
-						out.set_pixel(x, y, Color.WHITE)
-						break
-		_textures[key] = ImageTexture.create_from_image(out)
-	return _textures[key]
+	return picture(sprite + "#rim")
 
 
 ## Only the pixels of a sprite drawn with one PALETTE key, in white: the painter tints them and draws them where the
@@ -1298,25 +1303,136 @@ static func rim(sprite: String) -> Texture2D:
 static func only(sprite: String, key: String, flip := false) -> Texture2D:
 	var id := "%s#%s%s" % [sprite, key, "<" if flip else ""]
 	if not _textures.has(id):
-		var grid := rows(sprite)
-		var img := Image.create_empty(grid[0].length(), grid.size(), false, Image.FORMAT_RGBA8)
-		for y in grid.size():
-			for x in grid[y].length():
-				if grid[y][x] == key:
-					img.set_pixel(x, y, Color.WHITE)
-		if flip:
-			img.flip_x()
-		_textures[id] = ImageTexture.create_from_image(img)
+		prepare_only([[sprite, key, flip]])
 	return _textures[id]
+
+
+## Packs the only() pictures of these [sprite, key, flip] all at once, so the atlas is sent to the screen once at the
+## start instead of once for each the first time it shows.
+static func prepare_only(wanted: Array) -> void:
+	var images := {}
+	for w in wanted:
+		images["%s#%s%s" % [w[0], w[1], "<" if w[2] else ""]] = _only_image(w[0], w[1], w[2])
+	pack(images)
+
+
+## A picture already packed (pack(), or a sprite's key: name, then "<" mirrored, "!" white, or "#rim").
+static func picture(key: String) -> Texture2D:
+	if _atlas == null:
+		_start_atlas()
+	return _textures[key]
+
+
+## Packs more pictures into the atlas's free room, under their keys, and sends the atlas to the screen once. One
+## that does not fit gets a texture of its own: right, only not batched.
+static func pack(images: Dictionary) -> void:
+	if _atlas == null:
+		_start_atlas()
+	images = images.duplicate()
+	for key in images.keys():
+		if _textures.has(key): # packed before (a second painter asks for the same hedges)
+			images.erase(key)
+	if images.is_empty():
+		return
+	var spots := _shelve(images)
+	for key in images:
+		var img: Image = images[key]
+		var spot: Vector2i = spots[key]
+		if spot.y + img.get_height() + ATLAS_PAD > _atlas.get_height():
+			_textures[key] = ImageTexture.create_from_image(img)
+			continue
+		_atlas.blit_rect(img, Rect2i(Vector2i.ZERO, img.get_size()), spot)
+		_textures[key] = _region(spot, img.get_size())
+	_atlas_texture.update(_atlas)
+
+
+## The atlas as an image: what pack() has put where so far (tools/art_sheet.gd saves it to look at).
+static func atlas_image() -> Image:
+	if _atlas == null:
+		_start_atlas()
+	return _atlas
+
+
+## Every sprite four ways and its rim, in names() order, shelf by shelf.
+static func _start_atlas() -> void:
+	var images := {}
+	for sprite in names():
+		var img := image(sprite)
+		var mirrored: Image = img.duplicate()
+		mirrored.flip_x()
+		images[sprite] = img
+		images[sprite + "<"] = mirrored
+		images[sprite + "!"] = whitened(img)
+		images[sprite + "<!"] = whitened(mirrored)
+		images[sprite + "#rim"] = _rim_image(img)
+	var spots := _shelve(images)
+	var height := _shelf.y + _shelf_height + ATLAS_SPARE
+	_atlas = Image.create_empty(ATLAS_WIDTH, height, false, Image.FORMAT_RGBA8)
+	for key in images:
+		var img: Image = images[key]
+		_atlas.blit_rect(img, Rect2i(Vector2i.ZERO, img.get_size()), spots[key])
+	_atlas_texture = ImageTexture.create_from_image(_atlas)
+	for key in images:
+		_textures[key] = _region(spots[key], images[key].get_size())
+
+
+## Where each picture goes: left to right along a shelf, a new shelf under it when the row is full.
+static func _shelve(images: Dictionary) -> Dictionary:
+	var spots := {}
+	for key in images:
+		var size: Vector2i = images[key].get_size() + Vector2i(ATLAS_PAD, ATLAS_PAD) * 2
+		if _shelf.x + size.x > ATLAS_WIDTH:
+			_shelf = Vector2i(0, _shelf.y + _shelf_height)
+			_shelf_height = 0
+		spots[key] = _shelf + Vector2i(ATLAS_PAD, ATLAS_PAD)
+		_shelf.x += size.x
+		_shelf_height = maxi(_shelf_height, size.y)
+	return spots
+
+
+static func _region(at: Vector2i, size: Vector2i) -> AtlasTexture:
+	var t := AtlasTexture.new()
+	t.atlas = _atlas_texture
+	t.region = Rect2(at, size)
+	return t
+
+
+static func _rim_image(img: Image) -> Image:
+	var out := Image.create_empty(img.get_width() + 2, img.get_height() + 2, false, Image.FORMAT_RGBA8)
+	for y in out.get_height():
+		for x in out.get_width():
+			if _solid(img, x - 1, y - 1):
+				continue
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				if _solid(img, x - 1 + d.x, y - 1 + d.y):
+					out.set_pixel(x, y, Color.WHITE)
+					break
+	return out
+
+
+static func _only_image(sprite: String, key: String, flip: bool) -> Image:
+	var grid := rows(sprite)
+	var img := Image.create_empty(grid[0].length(), grid.size(), false, Image.FORMAT_RGBA8)
+	for y in grid.size():
+		for x in grid[y].length():
+			if grid[y][x] == key:
+				img.set_pixel(x, y, Color.WHITE)
+	if flip:
+		img.flip_x()
+	return img
 
 
 ## How many rows down a sprite's lowest drawn pixel is, plus one: where it stands on the ground.
 static func foot(sprite: String) -> int:
+	if _feet.has(sprite):
+		return _feet[sprite]
 	var grid := rows(sprite)
+	_feet[sprite] = grid.size()
 	for y in range(grid.size() - 1, -1, -1):
 		if grid[y].count(".") < grid[y].length():
-			return y + 1
-	return grid.size()
+			_feet[sprite] = y + 1
+			break
+	return _feet[sprite]
 
 
 static func _solid(img: Image, x: int, y: int) -> bool:
