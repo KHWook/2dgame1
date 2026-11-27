@@ -38,9 +38,10 @@ const ENEMIES := {
 const DECOYS := { "shade_lord": "shade_decoy" }
 
 ## One line that says what a thing does, shown the first time it turns up in a game. One per enemy kind, and "berry".
+## {who} in a line is the keeper being played (say()), never a name written out.
 const HINTS := {
 	"slime": "슬라임: 횃불에 붙어 불을 덮는다",
-	"bat": "박쥐: 기사를 쫓아온다, 빛 밖에서는 더 빠르다",
+	"bat": "박쥐: {who}를 쫓아온다, 빛 밖에서는 더 빠르다",
 	"thief": "도둑 비버: 장작을 물고 달아난다",
 	"shade": "그림자: 횃불 빛 안에서만 벨 수 있다",
 	"big_slime": "큰 슬라임: 죽으면 둘로 갈라진다",
@@ -66,7 +67,7 @@ const TIER_HINTS := ["더 튼튼하고 빠르다", "훨씬 튼튼하고 빠르�
 ## fire, or the keeper (every upgrade not listed here). Order within a group is the order they were taken.
 const TORCH_SIDE := ["slow_burn", "big_logs", "ember_ring", "warm_glow", "woodpile", "bright", "spark", "big_torch"]
 const SIDES := ["torch", "keeper"]
-const SIDE_NAMES := { "torch": "횃불의 힘", "keeper": "기사의 힘" }
+const SIDE_NAMES := { "torch": "횃불의 힘", "keeper": "{who}의 힘" }
 
 ## How each character (Config.CHARACTERS) looks. sprite: the prefix of its pictures, each drawn as <sprite>_<down,
 ## up, side>_<a,b> walking, _lift_<a,b> with logs overhead, _atk while it attacks, and <sprite>_dead (CHARACTER_FRAMES).
@@ -105,10 +106,10 @@ static func thing(kind: String, tier: int) -> String:
 	return kind if tier <= 1 else "%s~%d" % [kind, tier]
 
 
-## The line a first sighting shows ("name: what it does"), or "" for a thing that has none.
-static func hint(what: String) -> String:
+## The line a first sighting shows ("name: what it does") to one playing who, or "" for a thing that has none.
+static func hint(what: String, who: String = "knight") -> String:
 	if not "~" in what:
-		return HINTS.get(what, "")
+		return say(HINTS.get(what, ""), who)
 	var t := int(what.get_slice("~", 1)) - 2
 	return "%s: %s" % [TIER_NAMES[what.get_slice("~", 0)][t], TIER_HINTS[t]]
 
@@ -135,7 +136,35 @@ static func icon(upgrade: String, who: String = "knight") -> String:
 
 ## The name the HUD gives a side for a character: the torch's, or the character's own ("나무꾼의 힘").
 static func side_name(side_id: String, who: String = "knight") -> String:
-	return SIDE_NAMES[side_id] if side_id == "torch" else "%s의 힘" % Config.CHARACTERS[who].name
+	return say(SIDE_NAMES[side_id], who)
+
+
+## Korean particles that change with the word before them: [after a vowel, after a final consonant]. 로 is the odd
+## one: a word ending in ㄹ takes 로 too (particle()).
+const PARTICLES := [["를", "을"], ["가", "이"], ["는", "은"], ["와", "과"], ["로", "으로"]]
+const WHO := "{who}"
+
+
+## A line as one playing who reads it: {who} is that character's name (Config.CHARACTERS), and a particle written
+## right after it (in its after-a-vowel form, PARTICLES) is put in the form that name takes: {who}를 reads 을 after
+## 나무꾼, 를 after 불씨 술사.
+static func say(line: String, who: String = "knight") -> String:
+	var name: String = Config.CHARACTERS[who].name
+	for pair in PARTICLES:
+		line = line.replace(WHO + pair[0], name + particle(name, pair[0]))
+	return line.replace(WHO, name)
+
+
+## The particle (given in its after-a-vowel form, one of PARTICLES) that goes after word: 을, 이, 은, 과, 으로 after
+## a final consonant, 를, 가, 는, 와, 로 after a vowel (and 로 after ㄹ as well). A word that does not end in a
+## Korean syllable is read as ending in a vowel.
+static func particle(word: String, vowel_form: String) -> String:
+	var forms: Array = PARTICLES.filter(func(p): return p[0] == vowel_form)[0]
+	var last := word.unicode_at(word.length() - 1) if word != "" else 0
+	if last < 0xAC00 or last > 0xD7A3:
+		return forms[0]
+	var coda := (last - 0xAC00) % 28 # the final consonant: 0 none, 8 ㄹ
+	return forms[1] if coda != 0 and not (coda == 8 and vowel_form == "로") else forms[0]
 
 
 static func side(upgrade: String) -> String:

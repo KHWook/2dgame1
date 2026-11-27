@@ -8,7 +8,7 @@ const InputFrame := preload("res://src/sim/input_frame.gd")
 const Config := preload("res://src/sim/config.gd")
 
 const FIGHT_RANGE := 26.0
-const SWING_EVERY := 12 # steps between swing presses
+const SWING_EVERY := 12 # steps between swing presses (shortened as the swing is: swift)
 const DEADZONE := 2.0
 const KEEP := 2.0 # how far outside a foe's touch the bot stands while it fights it
 const DASH_FROM := 60.0 # with the dash upgrade, the bot dashes toward a goal at least this far away
@@ -75,7 +75,7 @@ func frame(w) -> InputFrame:
 		goal = foe.pos + away * (foe.T.radius + Config.PLAYER.radius + KEEP) # stand off instead of walking into it
 		if p.carrying:
 			f.pressed["attack"] = true # drop the log to fight
-		elif w.steps % SWING_EVERY == 0:
+		elif w.steps % maxi(1, roundi(SWING_EVERY * w.mod("attack_mult", 1.0))) == 0: # a quicker swing (swift), a quicker beat
 			f.pressed["attack"] = true
 	elif smotherer != null and shooter and not p.carrying:
 		goal = _kite(w, p, smotherer, f) # shoot it off the torch from a step away

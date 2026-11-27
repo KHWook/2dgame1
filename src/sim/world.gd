@@ -82,8 +82,11 @@ static func character_stats(id: String) -> Dictionary:
 	return out
 
 
-## One of the keeper's numbers this run (stats).
+## One of the keeper's numbers this run (stats), as the upgrades have it now: the times of its attack
+## (Config.ATTACK_TIMES) shortened by attack_mult.
 func stat(key: String):
+	if Config.ATTACK_TIMES.has(key):
+		return stats[key] * mod("attack_mult", 1.0)
 	return stats[key]
 
 
@@ -126,6 +129,7 @@ func begin_at(n: int, slot: int) -> void:
 		if offer.is_empty():
 			break
 		_take(offer[mini(slot, offer.size()) - 1])
+		night = 1 + (i + 1) / (1 + N.picks_at.size()) # the night this next offer is made on (an upgrade's from_night)
 		_offer()
 	night = n
 	bosses_due = _plan_bosses()
@@ -227,6 +231,11 @@ static func _merge(into: Dictionary, from: Dictionary) -> void:
 			into.erase(key)
 		else:
 			into[key] = from[key]
+
+
+## Whether the torch may offer this upgrade on night n (its row's from_night, the first night when it has none).
+static func offered_on(id: String, n: int) -> bool:
+	return n >= Config.UPGRADES[id].get("from_night", 1)
 
 
 static func max_level(id: String) -> int:
@@ -369,9 +378,10 @@ func _sweep() -> void:
 		born.clear()
 
 
-## Put three upgrades on the table, ones you don't have yet or the next level of ones you do, and stop the clock.
+## Put three upgrades on the table, ones you don't have yet or the next level of ones you do (and that may come
+## tonight: from_night), and stop the clock.
 func _offer() -> void:
-	var pool: Array = Config.UPGRADES.keys().filter(func(id): return level(id) < max_level(id))
+	var pool: Array = Config.UPGRADES.keys().filter(func(id): return level(id) < max_level(id) and offered_on(id, night))
 	offer = []
 	while offer.size() < N.offer_size and not pool.is_empty():
 		offer.append(pool.pop_at(rng.index(pool.size())))
@@ -525,6 +535,15 @@ func _sparks() -> void:
 				sp.life = 0.0
 				break
 	sparks = sparks.filter(func(sp): return sp.life > 0.0)
+
+
+## Whether a living enemy's body comes within attack_range() of from: what the auto_attack upgrade attacks.
+func foe_in_reach(from: Vector2) -> bool:
+	var r: float = attack_range()
+	for e in enemies:
+		if not e.dead and from.distance_to(e.pos) - e.T.radius < r:
+			return true
+	return false
 
 
 ## A swing turns toward the nearest enemy within aim range, so backing off and swinging works. Otherwise it keeps face.

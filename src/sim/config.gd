@@ -208,6 +208,11 @@ const ENEMY_TYPES := {
 ## over the row, so a level names only what it changes). Effects are read by the rules through World.mod(); add a
 ## row here and handle its key there. as (optional): how the upgrade reads for a character, merged over the row (a
 ## key set to null is taken out; levels are merged one by one), for the characters whose attack is not the sword's.
+## auto_attack (swift's last level): the keeper attacks by itself whenever its attack is ready, an enemy is within
+## World.attack_range() and it carries nothing (the attack key would put the logs down), turned to the nearest as a
+## pressed attack is (World.aim). With nothing in reach it does not swing at the air. The key still works as before.
+## from_night (optional): the torch offers it only from that night on (World._offer); before it, the offers are
+## drawn as if the row were not there. A row with one goes last, so the rows before it keep their order.
 const UPGRADES := {
 	"slow_burn": { "name": "느린 불꽃", "text": "연료가 25% 천천히 탄다", "burn_mult": 0.75,
 		"levels": [{ "text": "연료가 40% 천천히 탄다", "burn_mult": 0.6 }] },
@@ -262,4 +267,16 @@ const UPGRADES := {
 				"levels": [{ "text": "불씨로 5번 처치할 때마다 체력 1, 5번째 밤부터 밤마다 25%씩 늘어난다" }] } } },
 	"big_torch": { "name": "큰 횃불", "text": "연료 최대치 +30, 새벽에 그만큼 더 채워진다", "fuel_bonus": 30.0,
 		"levels": [{ "text": "연료 최대치 +60, 새벽에 그만큼 더 채워진다", "fuel_bonus": 60.0 }] },
+	"swift": { "name": "빠른 칼놀림", "text": "베기 간격이 30% 짧아진다", "attack_mult": 0.7, "from_night": 10,
+		"levels": [{ "text": "베기 간격이 45% 짧아진다", "attack_mult": 0.55 },
+			{ "text": "베기 간격 60% 짧게, 최대: 닿는 적을 저절로 벤다", "attack_mult": 0.4, "auto_attack": true }],
+		"as": { "woodcutter": { "name": "빠른 도끼질", "text": "도끼질 간격이 30% 짧아진다",
+				"levels": [{ "text": "도끼질 간격이 45% 짧아진다" }, { "text": "도끼질 간격 60% 짧게, 최대: 닿는 적을 저절로 찍는다" }] },
+			"mage": { "name": "잦은 불씨", "text": "불씨를 쏘는 간격이 20% 짧아진다", "attack_mult": 0.8,
+				"levels": [{ "text": "불씨를 쏘는 간격이 35% 짧아진다", "attack_mult": 0.65 },
+					{ "text": "쏘는 간격 절반으로, 최대: 닿는 적에게 저절로 쏜다", "attack_mult": 0.5 }] } } },
 }
+
+## The keeper's numbers that time its attack (PLAYER): the attack_mult upgrade (swift) shortens them all alike, so a
+## faster swing lands at the same share of it (World.stat).
+const ATTACK_TIMES := ["attack_time", "attack_hit_at", "attack_hit_until"]
