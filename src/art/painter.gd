@@ -172,25 +172,48 @@ const EMBER_CATCH := 0.7 # reaching the torch cooler than this share, it flares 
 const EMBER_FLARE := 0.35 # seconds that flare lasts
 const EMBER_FLARE_GLOW := 0.6 # how much brighter its light is at the start of the flare
 
-## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing: a ring at the shock
-## that fills in as the landing nears, blinking, with the king crouched and flashing while it waits and lifted off
-## its shadow in the air. The shade lord, about to rush, flashes and lays a dashed line from itself to the torch.
+## A boss's pattern, warned before it strikes (src/sim/enemy.gd). The slime king's marked landing (mark_radius(): the
+## shock): the king's shadow grows on the ground from the middle to the shock as it falls, cracks run out through it,
+## a dashed ring at the shock turns, and dust trickles down inside it; the king crouches and flashes while it waits
+## and is lifted off its shadow in the air. The shade lord, about to rush, flashes and lays a dashed line from itself
+## to the torch.
 const MARK := "i" # PALETTE key of the marked landing and the rush line
-const MARK_FILL := 0.35 # how solid the ring's inside is the moment it lands
+const MARK_RING := Color("#ff7a5c") # the turning ring at the shock: warm, softer than the hearts' red
+const MARK_SHADOW := Color("#0b0814") # the falling king's shadow
+const MARK_SHADOW_MOST := 0.55 # how dark it is as the king lands
+const MARK_SHADOW_FROM := 0.25 # share of the shock the shadow starts at
+const MARK_DASHES := 12 # dashes round the ring
+const MARK_TURN := 1.5 # radians per second the ring turns
+const MARK_CRACKS := 6 # cracks running out from the middle
+const MARK_CRACK_KINKS := 3 # bends in each
+const MARK_CRACK := Color("#2a1e18")
+const MARK_DUST := 5 # dust pixels trickling inside the ring
 const MARK_BLINK_STEPS := 4
 const LEAP_HEIGHT := 26.0 # pixels the king rises at the top of its leap
 const RUSH_DASH := 4.0 # pixels per dash of the rush line, and per gap
-## The shade lord about to split: it flashes inside a red ring, and as many rings of smoke as it will have decoys
-## slide round from it along its ring to where they will appear.
+## The shade lord about to split: it flashes inside a turning dashed ring, and as many wisps of smoke as it will have
+## decoys (a little turning ring of smoke pixels each) slide round from it along its ring to where they will appear.
 const SPLIT_SMOKE := "7"
-## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) on a
-## red band laid from itself to where the charge ends, as wide as the charge hurts (charge_band: Enemy.lane_half()
-## each side of its line, round at the ends): outside the band is safe. The band fills from the boar toward its end
-## as the wind-up runs out, and stays, solid, under the charge. Dazed after, stars turn over its head.
-const LANE_FAINT := 0.12 # how solid the band is the moment it is drawn
-const LANE_FULL := 0.45 # how solid the filled part is (and the whole band while it charges)
-const LANE_EDGE := 0.75 # its outline, blinking
+const SPLIT_WISP := 8 # smoke pixels in each wisp
+## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro,
+## kicking up dust) on a soft warm band laid from itself to where the charge ends, as wide as the charge hurts
+## (charge_band: Enemy.lane_half() each side of its line, round at the ends): outside the band is safe, and its edge
+## line is the strongest part of it. The band fills from the boar toward its end as the wind-up runs out, chevrons
+## slide along it toward the end (faster as the wind-up runs out: chevrons()), and stays under the charge, which
+## leaves a trail of dust; where it stops it skids in a puff. Dazed after, stars turn over its head.
+const LANE := Color("#e8956a") # a soft warm orange: a warning, not a wall of red
+const LANE_FAINT := 0.06 # how solid the band is the moment it is drawn
+const LANE_FULL := 0.15 # how solid the filled part is (and the whole band while it charges)
+const LANE_EDGE := 0.6 # its outline, blinking down to 0.7 of this
 const LANE_ROUND := 8 # points on each round end
+const CHEVRON_GAP := 12.0 # pixels between chevrons along the band
+const CHEVRON_SIZE := 3.0 # pixels from a chevron's tip back to its arms
+const CHEVRON_SPEED := [12.0, 70.0] # pixels a second they slide: as the wind-up starts, as it ends
+const CHEVRON := 0.55 # how solid they are
+const PAW_DUST := 3 # dust pixels kicked up behind it while it paws
+const TRAIL_DUST := 10 # dust pixels left along the way behind it while it charges
+const TRAIL_LENGTH := 28.0 # pixels behind it the trail reaches
+const DUST := ["m", "M", "c"] # PALETTE keys of dust thrown up off the ground
 const PAW_STEPS := 3 # simulation steps per shuffle while it paws
 const DAZED_AT := Vector2(-3.0, -13.0) # the stars' top-left, from the charger's position
 const DAZED_STEPS := 8 # simulation steps per turn of the stars
@@ -198,6 +221,8 @@ const DAZED_STEPS := 8 # simulation steps per turn of the stars
 const COMING_BAND := Vector2(70.0, 4.0) # along the edge, into the field
 const COMING_ARROW := 7.0 # pixels from the arrow's tip to its back
 const COMING_IN := 12.0 # from the edge to the arrow's tip
+const COMING_SMOKE := 14 # smoke pixels curling in over the edge it comes from
+const COMING_SMOKE_KEY := "A" # half of them pale, so they show on the black past the light
 const COMING_BLINK_STEPS := 8
 ## An enemy coming in from beyond the field (under the treetops, or not yet on screen): a small arrow on that edge,
 ## inside the treetops, points out at it until it is on the field.
@@ -756,31 +781,122 @@ func _telegraphs(c: CanvasItem, w) -> void:
 	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
 	for e in w.enemies:
 		if e.T.has("leap") and e.move in ["warn", "air"]:
-			var L: Dictionary = e.hop()
-			var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
-			var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
-			var at: Vector2 = e.move_to.round()
-			c.draw_circle(at, L.shock, Color(colour, MARK_FILL * k))
-			c.draw_arc(at, L.shock, 0.0, TAU, 32, Color(colour, 1.0 if blink else 0.6), 1.0)
-			c.draw_arc(at, L.shock * (1.0 - k), 0.0, TAU, 24, Color(colour, 0.8), 1.0) # closes in on the edge as it falls
+			_landing_mark(c, w, e)
 		elif e.T.has("lunge") and e.move == "warn":
 			_dashes(c, e.pos, e.move_to, Color(colour, 0.9 if blink else 0.5))
-		elif e.move == "split": # rings of smoke spread out from it toward where its decoys will stand
+		elif e.move == "split": # wisps of smoke spread out from it toward where its decoys will stand
 			var k: float = clampf(1.0 - e.split_t / e.T.split.warn, 0.0, 1.0)
 			var smoke: Color = Sprites.PALETTE[SPLIT_SMOKE]
 			for i in e.T.split.count:
 				var at: Vector2 = Config.TORCH.pos + (e.pos - Config.TORCH.pos).rotated(TAU * (i + 1) / (e.T.split.count + 1) * k)
-				c.draw_arc(at.round(), e.T.radius * (0.6 + 0.6 * k), 0.0, TAU, 20, Color(smoke, 0.5 + 0.4 * k), 1.0)
-			c.draw_arc(e.pos.round(), e.T.radius + 4.0 + 4.0 * k, 0.0, TAU, 24, Color(colour, 0.9 if blink else 0.5), 1.0)
+				_wisp(c, w, at, e.T.radius * (0.6 + 0.6 * k), Color(smoke, 0.5 + 0.4 * k), i)
+			_dashed_ring(c, e.pos.round(), e.T.radius + 4.0 + 4.0 * k, w.steps * Config.STEP * MARK_TURN, Color(MARK_RING, 0.9 if blink else 0.55))
 		elif e.T.has("charge") and e.move in ["warn", "charge"]:
-			var band := charge_band(e)
-			var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
-			c.draw_colored_polygon(band, Color(colour, LANE_FAINT))
-			if k > 0.0:
-				c.draw_colored_polygon(charge_band(e, k), Color(colour, LANE_FULL - LANE_FAINT))
-			band.append(band[0])
-			c.draw_polyline(band, Color(colour, LANE_EDGE if blink else LANE_EDGE * 0.5), 1.0)
+			_charge_mark(c, w, e, blink)
+		elif e.T.has("charge") and e.move == "rest":
+			var since: int = roundi((e.T.charge.rest - e.move_t) / Config.STEP) # a skid puff where it stopped
+			if since < Effects.POOF.size() * Effects.POOF_STEPS:
+				c.draw_texture(Sprites.texture(Effects.POOF[since / Effects.POOF_STEPS]), (e.pos + e.aim * 4.0 - Effects.POOF_ANCHOR).round(), Color(1.0, 0.92, 0.8, 0.8))
 
+
+## The radius the slime king's marked landing is drawn at: the shock of the leap (or hop) under way, where it hurts.
+static func mark_radius(e) -> float:
+	return e.hop().shock
+
+
+## The marked landing: the king's shadow growing to the shock as it falls, cracks running out through it, a dashed
+## ring turning at the shock (mark_radius) and dust trickling down inside it.
+func _landing_mark(c: CanvasItem, w, e) -> void:
+	var L: Dictionary = e.hop()
+	var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
+	var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
+	var at: Vector2 = e.move_to.round()
+	var r := mark_radius(e)
+	c.draw_circle(at, r * lerpf(MARK_SHADOW_FROM, 1.0, k), Color(MARK_SHADOW, MARK_SHADOW_MOST * (0.4 + 0.6 * k)))
+	var seed_ := _hash(int(at.x), int(at.y))
+	for i in MARK_CRACKS:
+		var a := TAU * (i + (seed_ % 7) / 7.0) / MARK_CRACKS
+		var from := at
+		for j in MARK_CRACK_KINKS:
+			var bend := ((_hash(seed_ + i, j) % 9) - 4) * 0.08
+			var to := at + Vector2.from_angle(a + bend) * r * k * 0.9 * (j + 1) / MARK_CRACK_KINKS
+			c.draw_line(from.round(), to.round(), Color(MARK_CRACK, 0.85), 1.0)
+			from = to
+	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
+	_dashed_ring(c, at, r, w.steps * Config.STEP * MARK_TURN, Color(MARK_RING, 0.95 if blink else 0.65))
+	for i in MARK_DUST: # dust shaken loose, falling a few pixels and starting again
+		var h := _hash(seed_ + 31 * i, w.steps / 12)
+		var spot := at + Vector2.from_angle(TAU * (h % 64) / 64.0) * r * (0.3 + 0.6 * (h % 10) / 10.0)
+		var fall := float((w.steps + i * 5) % 12) / 2.0
+		c.draw_rect(Rect2((spot + Vector2(0.0, fall - 6.0)).round(), Vector2.ONE), Color(Sprites.PALETTE[DUST[i % DUST.size()]], 0.8))
+
+
+## A ring of dashes at radius r round at, turned by turn radians.
+static func _dashed_ring(c: CanvasItem, at: Vector2, r: float, turn: float, colour: Color) -> void:
+	var step := TAU / MARK_DASHES
+	for i in MARK_DASHES:
+		var a0 := turn + i * step
+		c.draw_arc(at, r, a0, a0 + step * 0.55, 4, colour, 1.0)
+
+
+## A little turning ring of smoke pixels at at, radius r.
+static func _wisp(c: CanvasItem, w, at: Vector2, r: float, colour: Color, i: int) -> void:
+	var turn: float = w.steps * Config.STEP * (2.0 + i)
+	for j in SPLIT_WISP:
+		var p := at + Vector2.from_angle(turn + TAU * j / SPLIT_WISP) * r * (0.8 + 0.2 * (j % 2))
+		var size := 2.0 if j % 3 == 0 else 1.0
+		c.draw_rect(Rect2(p.round(), Vector2(size, size)), colour)
+
+
+## A charger's band: soft and see-through with its edge (where safe begins) the clearest part, filling toward its end
+## as the wind-up runs out; chevrons sliding along it toward the end; dust at its feet while it paws, and behind it
+## while it charges.
+func _charge_mark(c: CanvasItem, w, e, blink: bool) -> void:
+	var band := charge_band(e)
+	var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
+	c.draw_colored_polygon(band, Color(LANE, LANE_FAINT))
+	if k > 0.0:
+		c.draw_colored_polygon(charge_band(e, k), Color(LANE, LANE_FULL - LANE_FAINT))
+	band.append(band[0])
+	c.draw_polyline(band, Color(LANE, LANE_EDGE if blink else LANE_EDGE * 0.7), 1.0)
+	var side: Vector2 = e.aim.orthogonal()
+	for tip in chevrons(e):
+		var back: Vector2 = tip - e.aim * CHEVRON_SIZE
+		c.draw_line(tip.round(), (back + side * CHEVRON_SIZE).round(), Color(LANE, CHEVRON), 1.0)
+		c.draw_line(tip.round(), (back - side * CHEVRON_SIZE).round(), Color(LANE, CHEVRON), 1.0)
+	var seed_ := _hash(int(e.move_to.x), int(e.move_to.y))
+	if e.move == "warn":
+		for i in PAW_DUST:
+			var h := _hash(seed_ + i, w.steps / PAW_STEPS)
+			var rise := float((w.steps + i * 2) % (PAW_STEPS * 3))
+			var spot: Vector2 = e.pos - e.aim * (e.T.radius + 1.0 + h % 4) + side * ((h % 9) - 4.0) + Vector2(0.0, 3.0 - rise)
+			c.draw_rect(Rect2(spot.round(), Vector2.ONE), Color(Sprites.PALETTE[DUST[h % DUST.size()]], 0.85))
+	else:
+		for i in TRAIL_DUST:
+			var h := _hash(seed_ + i, w.steps / 2)
+			var back := TRAIL_LENGTH * (i + 0.5) / TRAIL_DUST
+			var spot: Vector2 = e.pos - e.aim * back + side * ((h % 7) - 3.0) + Vector2(0.0, 3.0 - (h % 3))
+			c.draw_rect(Rect2(spot.round(), Vector2.ONE * (2.0 if i < 3 else 1.0)), Color(Sprites.PALETTE[DUST[h % DUST.size()]], 0.8 * (1.0 - back / TRAIL_LENGTH)))
+
+
+## Where the chevrons on a charger's band are right now, by their tips: CHEVRON_GAP apart along its line from the
+## charger to where its band ends, sliding toward the end at CHEVRON_SPEED (from the first to the second as the
+## wind-up runs out; none under the charge itself), each well inside the band (its arms reach CHEVRON_SIZE to the sides).
+static func chevrons(e) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	var length: float = e.pos.distance_to(e.charge_end())
+	if e.move != "warn": # under the charge itself the dust trail says enough
+		return out
+	var s: Array = CHEVRON_SPEED
+	var warn: float = e.T.charge.warn
+	var t: float = warn - e.move_t
+	var gone: float = s[0] * t + 0.5 * (s[1] - s[0]) * t * t / warn # how far they have slid since the band was laid
+	var first := fmod(gone, CHEVRON_GAP) + CHEVRON_SIZE
+	var d := first
+	while d <= length:
+		out.append(e.pos + e.aim * d)
+		d += CHEVRON_GAP
+	return out
 
 ## Where a charger's charge hurts, as a polygon: a band from it to Enemy.charge_end(), Enemy.lane_half() each side
 ## of its line, round at both ends (every point within lane_half of the line it runs). share: only the first part of
@@ -878,6 +994,12 @@ func _coming_at(c: CanvasItem, w, f: Vector2) -> void:
 	var band_at := spot - band_size / 2.0 - out * band_size / 2.0
 	var band := Rect2(band_at, band_size).intersection(Rect2(Vector2.ZERO, VIEW))
 	c.draw_rect(band, Color(colour, 0.85 if on else 0.4))
+	var along := out.orthogonal()
+	for i in COMING_SMOKE: # smoke curling in over the edge where it will break through
+		var h := _hash(int(f.x) + i * 13, w.steps / 6)
+		var drift := float((w.steps + i * 7) % 30) / 30.0
+		var p: Vector2 = spot - out * (2.0 + drift * 14.0) + along * (((h % 41) - 20.0) * COMING_BAND.x / 45.0)
+		c.draw_rect(Rect2(p.round(), Vector2.ONE * (2.0 if h % 3 == 0 else 1.0)), Color(Sprites.PALETTE[COMING_SMOKE_KEY if h % 2 == 0 else SPLIT_SMOKE], 0.8 * (1.0 - drift)))
 	var tip: Vector2 = (spot - out * COMING_IN).clamp(Vector2(COMING_IN, COMING_IN), VIEW - Vector2(COMING_IN, COMING_IN))
 	var back: Vector2 = tip - out * COMING_ARROW
 	var side: Vector2 = out.orthogonal() * COMING_ARROW * 0.7

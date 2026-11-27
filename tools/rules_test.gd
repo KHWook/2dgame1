@@ -13,6 +13,7 @@ const Coach := preload("res://src/coach.gd")
 const Sprites := preload("res://src/art/sprites.gd")
 const Looks := preload("res://src/art/looks.gd")
 const Bot := preload("res://src/bot.gd")
+const Effects := preload("res://src/art/effects.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -999,6 +1000,7 @@ static func _charger() -> Array:
 	_play(w, 1)
 	_expect(out, "the boar does not charge from beyond the field", boar.move, "")
 	out.append_array(_charge_band())
+	out.append_array(_fx_sizes())
 	return out
 
 
@@ -1700,4 +1702,64 @@ static func _character_upgrades() -> Array:
 				if who == "woodcutter" and "칼" in u.name + u.text:
 					out.append("the woodcutter's %s at level %d still speaks of a sword: %s / %s" % [id, n, u.name, u.text])
 	_expect(out, "the knight's card texts are the rows'", World.upgrade("vampire", 2, "knight").text, Config.UPGRADES.vampire.levels[0].text)
+	return out
+
+
+
+## The dressed-up warnings keep the sizes the rules hurt at: the slime king's marked landing is drawn at the shock of
+## the leap or hop under way (Painter.mark_radius), the debris its landing throws out ends at that shock (the "landed"
+## event carries it), and the chevrons on a boar's band slide along its line, from the boar to where the charge ends,
+## inside the band, toward its end and faster as the wind-up runs out.
+static func _fx_sizes() -> Array:
+	var out := []
+	var L: Dictionary = Config.ENEMY_TYPES.slime_king.leap
+	var w = _night(DARK)
+	var king = _add(w, "slime_king", Vector2(-40.0, 0.0))
+	_expect(out, "a leap's mark is drawn at its shock", Painter.mark_radius(king), L.shock)
+	king.hops_left = 2
+	_expect(out, "a hop's mark is drawn at the hop's shock", Painter.mark_radius(king), L.hops.shock)
+	king.hops_left = 0
+	king.move = "air"
+	king.move_t = Config.STEP * 0.5
+	king.move_to = king.pos + Vector2(10.0, 0.0)
+	king.move_from = king.pos
+	w.player.invuln = NEVER
+	_play(w, 1)
+	var landed: Array = w.events.filter(func(ev): return ev.kind == "landed")
+	_expect(out, "a landing tells its shock", landed.map(func(ev): return ev.get("shock")), [L.shock])
+	var fx = Effects.new(1)
+	fx.step(w)
+	_expect(out, "a landing throws one ring of debris", fx.rings.size(), 1)
+	if fx.rings.size() == 1:
+		var r: Dictionary = fx.rings[0]
+		var radii := []
+		for i in Effects.RINGS.debris[0]:
+			radii.append(Effects.ring_radius(r))
+			r.age += 1
+		_expect(out, "the debris ends at the shock", snappedf(radii[-1], 0.001), L.shock)
+		_expect(out, "the debris never goes past the shock", radii.all(func(x): return x <= L.shock + 0.001), true)
+	var C: Dictionary = Config.ENEMY_TYPES.boar.charge
+	w = _night(Vector2(-100.0, 30.0))
+	w.fuel = 1.0e6
+	var boar = _add(w, "boar", Vector2(-60.0, 0.0))
+	boar.move_t = 0.0
+	_play(w, 1)
+	var first := []
+	var slid := []
+	for at in [2, 3, int(C.warn / Config.STEP) - 3, int(C.warn / Config.STEP) - 2]:
+		while roundi((C.warn - boar.move_t) / Config.STEP) < at:
+			_play(w, 1)
+		var tips: PackedVector2Array = Painter.chevrons(boar)
+		var length: float = boar.pos.distance_to(boar.charge_end())
+		_expect(out, "there are chevrons on the band", tips.size() > 0, true)
+		for t in tips:
+			var along: float = (t - boar.pos).dot(boar.aim)
+			if absf((t - boar.pos).dot(boar.aim.orthogonal())) > 0.01 or along < Painter.CHEVRON_SIZE - 0.01 or along > length + 0.01:
+				out.append("a chevron's tip is off the band's line: %s" % (t - boar.pos))
+				break
+		first.append(((tips[0] - boar.pos).dot(boar.aim)) if tips.size() > 0 else 0.0)
+	_expect(out, "a chevron's arms stay inside the band", Painter.CHEVRON_SIZE < boar.lane_half(), true)
+	var early: float = fposmod(first[1] - first[0], Painter.CHEVRON_GAP)
+	var late: float = fposmod(first[3] - first[2], Painter.CHEVRON_GAP)
+	_expect(out, "the chevrons slide toward the end, faster as the wind-up runs out", early > 0.0 and late > early, true)
 	return out
