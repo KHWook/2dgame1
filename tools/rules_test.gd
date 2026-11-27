@@ -67,6 +67,7 @@ static func run() -> Array:
 	out.append_array(_swift())
 	out.append_array(_auto_attack())
 	out.append_array(_seeds())
+	out.append_array(_ground_map())
 	return out
 
 
@@ -2504,6 +2505,43 @@ static func _seeds() -> Array:
 		if tenths.min() < 50:
 			out.append("1000 starts a microsecond apart (clocks moving by %s) got seeds that cluster: %s in the tenths of the range, want at least 50 in each" % [moving, tenths])
 	_expect(out, "fresh_seed stays in 1..%d: for 0, 1, -1, the ends of an int and between, and for every start above ([clock, ticks, seed] outside)" % most, outside, [])
+	return out
+
+
+## The picture the paper ground's shader takes its colours from (Painter.ground_map) is the ground paint() paints
+## without it: the view's size, GROUND out to the corners, and the clearing's own pixels where the clearing lies, so
+## the earth under the torch is earth. The strips painted past it for a shake, with the view, fill the grown view.
+static func _ground_map() -> Array:
+	var out := []
+	var map: Image = Painter.ground_map()
+	_expect(out, "the ground map is the view's size", map.get_size(), Vector2i(Config.VIEW))
+	var corners := []
+	for at in [Vector2i.ZERO, Vector2i(Config.VIEW) - Vector2i.ONE]:
+		corners.append(map.get_pixelv(at).to_html())
+	_expect(out, "the ground map's far corners are GROUND", corners, [Painter.GROUND.to_html(), Painter.GROUND.to_html()])
+	var earth: Image = Painter._clearing_image()
+	var from := Vector2i(Painter.clearing_at())
+	var wrong := []
+	var bare := 0
+	for y in Painter.CLEARING.y:
+		for x in Painter.CLEARING.x:
+			var own: Color = earth.get_pixel(x, y)
+			var want: Color = own if own.a > 0.0 else Painter.GROUND
+			bare += 1 if own.a > 0.0 else 0
+			if map.get_pixelv(from + Vector2i(x, y)).to_html() != want.to_html() and wrong.size() < 5:
+				wrong.append([x, y])
+	_expect(out, "the ground map has the clearing's own colours where the clearing lies, GROUND round it (pixels of the clearing that differ)", wrong, [])
+	var dirt := [Sprites.PALETTE["M"].to_html(), Sprites.PALETTE["m"].to_html(), Sprites.PALETTE["N"].to_html()]
+	var under: String = map.get_pixelv(Vector2i(Config.TORCH.pos + Painter.CLEARING_DROP)).to_html()
+	_expect(out, "under the torch the ground map is bare earth (%s is one of %s), and the clearing has earth in it" % [under, dirt], [dirt.has(under), bare > 0], [true, true])
+	var view := Rect2(Vector2.ZERO, Config.VIEW)
+	var area := view.get_area()
+	var overlap := false
+	for strip in Painter.margin_strips():
+		area += strip.get_area()
+		overlap = overlap or strip.intersects(view) or not view.grow(Juice.MARGIN).encloses(strip)
+	_expect(out, "the strips past the view and the view fill the view grown by the shake's margin, the strips outside the view",
+		[area, overlap], [view.grow(Juice.MARGIN).get_area(), false])
 	return out
 
 
