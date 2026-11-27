@@ -14,7 +14,8 @@
 ## for a boss that came out of the dark; "coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
 ## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), "landed" { pos, enemy } for the slime
 ## king coming down from a leap or a hop, "decoy" { pos, enemy } where the shade lord's decoy appears and "faded"
-## { pos, enemy } where one breaks or fades (src/sim/enemy.gd).
+## { pos, enemy } where one breaks or fades (src/sim/enemy.gd); "pack_coming" { enemy, pos, count } Config.SURGE.warn
+## seconds before a surge comes, from there, and "pack" { enemy, pos, count } when it does.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -53,11 +54,15 @@ var sparks: Array = [] # embers the torch fired: { pos, vel, life }
 var bolts: Array = [] # embers the keeper fired: { pos, dir, left (pixels it still flies), radius, pierce, hit (enemies it went through) }
 var bosses_due: Array = [] # tonight's bosses still to come, first first: { kind, at (night time), from }; from is
 						 # where it comes from once its warning is given (Config.BOSS.warn before at), null until then
+var omen := "" # tonight's omen (Config.OMENS), "" on a night without one
+var surges_due: Array = [] # tonight's surges still to come, first first: { kind, at, size, from }, as bosses_due
+var surge_slow := 1.0 # what the gap between the trickle's enemies is multiplied by tonight, to make up for the surges
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
 var events: Array = [] # what happened in the last step; see the top of this file
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
 var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)
 var _mods_count := -1 # and how many it held then
+var _mods_omen := "" # and the omen of that night
 var _light := 0.0 # light_radius() at _light_fuel
 var _light_fuel := NAN
 
@@ -108,14 +113,14 @@ func reset() -> void:
 	picks_done = 0
 	next_spawn = N.first_spawn
 	next_wood = Config.WOOD.first
-	next_berry = Config.BERRY.first
 	next_ember = 0.0
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
 	bolts = []
 	blade_kills = 0
-	bosses_due = _plan_bosses()
+	omen = ""
+	_dusk()
 	stats = character_stats(character)
 	player = Player.new(stats)
 	_offer()
@@ -133,7 +138,7 @@ func begin_at(n: int, slot: int) -> void:
 		night = 1 + (i + 1) / (1 + N.picks_at.size()) # the night this next offer is made on (an upgrade's from_night)
 		_offer()
 	night = n
-	bosses_due = _plan_bosses()
+	_dusk()
 	player.invuln_for = keeper_invuln()
 	player.hp = max_hp()
 	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
@@ -145,7 +150,7 @@ func crowd(k: int) -> void:
 	if phase != "night":
 		return
 	while enemies.size() < k:
-		enemies.append(Enemy.new(_who(_night_row().who), _edge_point(), _tier()))
+		enemies.append(Enemy.new(_who(who()), _edge_point(), _tier()))
 	player.hp = max_hp()
 	fuel = max_fuel()
 	if time > N.length * 0.9:
@@ -157,12 +162,12 @@ func later(delay: float, fn: Callable) -> void:
 	schedule.append({ "at": time + delay, "fn": fn })
 
 
-## The value an upgrade sets for key, at the level you have it, or fallback when no picked upgrade sets it.
-## Multipliers from different upgrades stack by product.
-## Every enemy asks this every step (its light, its speed), so what the picks set is worked out once per change of
-## picks (_mods) and only looked up here; the product is taken in the same order as ever, so it is the same float.
+## The value an upgrade sets for key, at the level you have it, or tonight's omen does, or fallback when neither
+## sets it. Multipliers from different upgrades, and the omen's, stack by product.
+## Every enemy asks this every step (its light, its speed), so what the picks and the omen set is worked out once per
+## change of either (_mods) and only looked up here; the product is taken in the same order as ever, so it is the same float.
 func mod(key: String, fallback):
-	if not is_same(picks, _mods_for) or picks.size() != _mods_count:
+	if not is_same(picks, _mods_for) or picks.size() != _mods_count or omen != _mods_omen:
 		_remod()
 	var set_by = _mods.get(key)
 	if set_by == null:
@@ -175,16 +180,22 @@ func mod(key: String, fallback):
 	return v
 
 
-## For every key a picked upgrade sets: the values it is set to, in the order of Config.UPGRADES.
+## For every key a picked upgrade or tonight's omen sets: the values it is set to, in the order of Config.UPGRADES,
+## the omen's last. The light's radius is worked out again after it.
 func _remod() -> void:
 	_mods_for = picks
 	_mods_count = picks.size()
+	_mods_omen = omen
+	_light_fuel = NAN
 	_mods = {}
+	var rows := []
 	for id in Config.UPGRADES:
 		var n := level(id)
-		if n == 0:
-			continue
-		var u := upgrade(id, n, character)
+		if n > 0:
+			rows.append(upgrade(id, n, character))
+	if omen != "":
+		rows.append(Config.OMENS[omen])
+	for u in rows:
 		for key in u:
 			if not _mods.has(key):
 				_mods[key] = []
@@ -248,9 +259,9 @@ func max_fuel() -> float:
 	return T.max_fuel + mod("fuel_bonus", 0.0)
 
 
-## Every enemy asks in_light() every step, so the radius is kept until the fuel or the picks change.
+## Every enemy asks in_light() every step, so the radius is kept until the fuel, the picks or the omen change.
 func light_radius() -> float:
-	if fuel != _light_fuel or not is_same(picks, _mods_for) or picks.size() != _mods_count:
+	if fuel != _light_fuel or not is_same(picks, _mods_for) or picks.size() != _mods_count or omen != _mods_omen:
 		# A big torch's extra fuel is a reserve: the light is as bright as it gets at the usual full tank.
 		_light = lerpf(T.light_min, T.light_max, clampf(fuel / T.max_fuel, 0.0, 1.0)) * mod("light_mult", 1.0)
 		_light_fuel = fuel
@@ -459,13 +470,12 @@ func _dawn() -> void:
 	picks_done = 0
 	next_spawn = N.first_spawn
 	next_wood = Config.WOOD.first
-	next_berry = Config.BERRY.first
 	next_ember = 0.0
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
 	bolts = []
-	bosses_due = _plan_bosses()
+	_dusk()
 	player.invuln_for = keeper_invuln()
 	var heal: int = max_hp() if night >= Config.HARDEN.from else Config.DAWN.heal
 	player.hp = mini(max_hp(), player.hp + heal)
@@ -481,7 +491,8 @@ func _haul() -> void:
 		p.dropped = null
 	if p.carrying and p.pos.distance_to(T.pos) < T.reach + stats.radius:
 		for i in p.held: # every log held goes on the fire, each counted
-			fuel = minf(max_fuel(), fuel + T.log_fuel + mod("log_bonus", 0.0) + stats.log_bonus)
+			var k: float = mod("log_mult", 1.0) # each part by itself: with no omen the sum is the very float it was
+			fuel = minf(max_fuel(), fuel + T.log_fuel * k + mod("log_bonus", 0.0) * k + stats.log_bonus * k)
 			score += Config.SCORE.log
 			events.append({ "kind": "fed", "pos": T.pos })
 		p.held = 0
@@ -718,14 +729,13 @@ func _spawns() -> void:
 	if time >= next_spawn:
 		var row := _night_row()
 		next_spawn = time + spawn_gap()
-		var kind := _who(row.who)
+		var kind := _who(who())
 		var at := _edge_point()
 		var tier := _tier()
 		enemies.append(Enemy.new(kind, at, tier))
-		var along := _along_edge(at)
 		var company: Array = row.get("with", {}).get(kind, [])
-		for i in company.size(): # beside it on the edge, one each side in turn
-			enemies.append(Enemy.new(company[i], at + along * Config.ENEMY.with_gap * (i / 2 + 1) * (1.0 if i % 2 == 0 else -1.0), tier))
+		for i in company.size():
+			enemies.append(Enemy.new(company[i], _beside(at, i), tier))
 	for b in bosses_due:
 		if b.from == null and time >= b.at - Config.BOSS.warn:
 			b.from = _edge_point()
@@ -735,6 +745,17 @@ func _spawns() -> void:
 		var boss = _boss(b.kind, b.from)
 		enemies.append(boss)
 		events.append({ "kind": "boss", "enemy": boss.kind, "pos": boss.pos })
+	for s in surges_due:
+		if s.from == null and time >= s.at - Config.SURGE.warn:
+			s.from = _edge_point()
+			events.append({ "kind": "pack_coming", "enemy": s.kind, "pos": s.from, "count": s.size })
+	while not surges_due.is_empty() and surges_due[0].from != null and time >= surges_due[0].at:
+		var s: Dictionary = surges_due.pop_front()
+		var tier := _tier()
+		enemies.append(Enemy.new(s.kind, s.from, tier))
+		for i in s.size - 1:
+			enemies.append(Enemy.new(s.kind, _beside(s.from, i), tier))
+		events.append({ "kind": "pack", "enemy": s.kind, "pos": s.from, "count": s.size })
 	if time >= next_wood:
 		next_wood = time + Config.WOOD.every * minf(1.0, Config.WOOD.pace / burn()) * mod("wood_mult", 1.0)
 		if logs.size() < Config.WOOD.max_on_ground + mod("wood_extra", 0):
@@ -742,19 +763,120 @@ func _spawns() -> void:
 			if spot != null:
 				logs.append(spot)
 	if time >= next_berry:
-		next_berry = time + Config.BERRY.every
+		next_berry = time + Config.BERRY.every * mod("berry_mult", 1.0)
 		if berries.size() < Config.BERRY.max_on_ground:
 			var spot = _free_spot(Config.BERRY.keep_away)
 			if spot != null:
 				berries.append(spot)
 
 
-## Seconds from one enemy to the next at this point of tonight: the row's gap (from dusk to just before dawn),
-## shorter on every night past the table, but never under LATER_NIGHTS.min_gap; on a boss night, further apart.
+## Seconds from one of the trickle's enemies to the next right now: tonight's gap (_gap_at), further apart on a
+## night with surges (surge_slow) and as the omen has it (gap_mult).
 func spawn_gap() -> float:
+	return _gap_at(time) * surge_slow * mod("gap_mult", 1.0)
+
+
+## Tonight's gap at t seconds into the night, before surges and omens: the row's (from dusk to just before dawn),
+## shorter on every night past the table, but never under LATER_NIGHTS.min_gap; on a boss night, further apart.
+func _gap_at(t: float) -> float:
 	var row := _night_row()
-	var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(time / N.length, 0.0, 1.0)) * pow(Config.LATER_NIGHTS.spawn, _nights_past())
+	var apart: float = lerpf(row.spawn[0], row.spawn[1], clampf(t / N.length, 0.0, 1.0)) * pow(Config.LATER_NIGHTS.spawn, _nights_past())
 	return maxf(apart, Config.LATER_NIGHTS.min_gap) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
+
+
+## Dusk: what tonight brings is settled. Its omen is drawn, then the night is planned under it.
+func _dusk() -> void:
+	omen = _draw_omen()
+	_plan_night()
+
+
+## Tonight under its omen: when the first berry comes, its bosses, its surges.
+func _plan_night() -> void:
+	next_berry = Config.BERRY.first * mod("berry_mult", 1.0)
+	bosses_due = _plan_bosses()
+	_plan_surges()
+
+
+## Tonight's omen: one roll over the omens that may come (not last night's, and none before its own from). Before
+## Config.OMEN.from there is none, and nothing is rolled.
+func _draw_omen() -> String:
+	if night < Config.OMEN.from:
+		return ""
+	var last := omen
+	var pool: Array = Config.OMENS.keys().filter(func(id): return id != last and night >= Config.OMENS[id].get("from", 0))
+	return pool[rng.index(pool.size())]
+
+
+## Tonight's share of each enemy kind: its row's who, each kind the omen names multiplied by what it says.
+func who() -> Dictionary:
+	var shares: Dictionary = _night_row().who
+	var bent: Dictionary = mod("kinds", {})
+	if bent.is_empty():
+		return shares
+	var out := {}
+	for kind in shares:
+		out[kind] = shares[kind] * bent.get(kind, 1.0)
+	return out
+
+
+## How many packs come tonight and the most one holds (Config.SURGE.packs): [count, most], [0, 0] before from.
+func surge_packs() -> Array:
+	var out := [0, 0]
+	for r in Config.SURGE.packs:
+		if night >= maxi(r.from, Config.SURGE.from):
+			out = [r.count, r.most]
+	return out
+
+
+## Plans tonight's surges (surges_due) and how much further apart the trickle comes for them (surge_slow: it gives
+## up Config.SURGE.makes_up of what the packs hold). Each pack's kind and time are rolled here; its edge when it is
+## warned of, its tier when it comes.
+func _plan_surges() -> void:
+	surges_due = []
+	surge_slow = 1.0
+	var S: Dictionary = Config.SURGE
+	var packs := surge_packs()
+	var shares := who()
+	var kinds := {}
+	for kind in shares:
+		if S.kinds.has(kind):
+			kinds[kind] = shares[kind]
+	var count: int = packs[0]
+	if count == 0 or kinds.is_empty():
+		return
+	var bodies := _bodies_tonight()
+	var size: int = mini(packs[1], roundi(S.share * bodies / count))
+	if size < 2:
+		return
+	var part: float = N.length * (S.at[1] - S.at[0]) / count
+	for i in count:
+		var kind := _who(kinds)
+		var at: float = N.length * S.at[0] + part * (i + rng.next())
+		surges_due.append({ "kind": kind, "at": at, "size": size, "from": null })
+	surge_slow = bodies / (bodies - size * count * S.makes_up)
+
+
+## How many enemies the trickle alone would bring tonight, were there no surges: one every gap from the first,
+## each with its company (the row's with) at tonight's shares.
+func _bodies_tonight() -> float:
+	var spawns := 0
+	var t: float = N.first_spawn
+	while t < N.length:
+		spawns += 1
+		t += _gap_at(t) * mod("gap_mult", 1.0)
+	var with: Dictionary = _night_row().get("with", {})
+	var shares := who()
+	var total := 0.0
+	var each := 0.0
+	for kind in shares:
+		total += shares[kind]
+		each += shares[kind] * (1 + with.get(kind, []).size())
+	return spawns * each / total
+
+
+## Surges on their way that the screen has been told of: [{ kind, at, size, from }], from where each will come.
+func surges_coming() -> Array:
+	return surges_due.filter(func(s): return s.from != null)
 
 
 ## Whether bosses come tonight.
@@ -867,6 +989,12 @@ func _who(shares: Dictionary) -> String:
 func _along_edge(at: Vector2) -> Vector2:
 	var f := Config.FIELD.grow(Config.ENEMY.edge)
 	return Vector2.RIGHT if is_equal_approx(at.y, f.position.y) or is_equal_approx(at.y, f.end.y) else Vector2.DOWN
+
+
+## Where the i-th (from 0) of those that come beside an enemy at at appears: along its edge, Config.ENEMY.with_gap
+## apart, one each side in turn.
+func _beside(at: Vector2, i: int) -> Vector2:
+	return at + _along_edge(at) * Config.ENEMY.with_gap * (i / 2 + 1) * (1.0 if i % 2 == 0 else -1.0)
 
 
 ## A point just outside a random screen edge.
