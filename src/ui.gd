@@ -2,7 +2,7 @@
 ## that are dealt in, lift the one in focus (src/picker.gd: moved by ← → or the mouse; or the slot the demo bot is
 ## about to take), and fly the taken icon
 ## to its HUD tile; a line naming what was just taken; a line about each new thing the first time it turns up; the
-## pause screen and the end screen, which list the upgrades held by name.
+## pause screen and the end screen, which list the upgrades held by name and say which seed the run is played on.
 ## View only (D4): it reads the world and never writes to it. main.gd owns it, calls after_step() after each world
 ## step and frame() every drawn frame, and presses a card's key when chosen is emitted (a click on a card).
 ## Its motion runs on real time, not on simulation steps: it never holds the world, so the bot and the replay never
@@ -150,6 +150,8 @@ const AGAIN_KEYS := "R 다시 하기"
 const AGAIN_TOUCH := "눌러서 다시 하기"
 const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
 const PAUSE_TOUCH := "눌러서 계속하기 · ? 설명 보기"
+const SEED := "시드 %d" # the run's seed (world.seed_value), small and quiet in a corner of the end and the pause screen
+const SEED_GAP := 10.0 # pixels kept between the seed and the title it shares a line with
 const INTRO_NAME := 34.0 # the width kept for a line's name, so what follows lines up
 const INTRO_BLINK := 3.0 # radians per second the button that goes on breathes
 const INTRO_SCRIM := 0.7
@@ -220,9 +222,12 @@ var held_head: Label
 var held_flow: HFlowContainer
 var board: Label
 var again: Label
+var end_seed: Label
 
 var pause_box: PanelContainer
+var pause_title: Label
 var pause_columns: HBoxContainer
+var pause_seed: Label
 
 var told_box: PanelContainer
 var told_icon: TextureRect
@@ -304,6 +309,7 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	lines.add_child(held_flow)
 	board = _label(lines, SMALL, CARD_TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	again = _label(lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	end_seed = _seed_label(box)
 	box.visible = false
 
 	told_box = _panel(self)
@@ -322,12 +328,13 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	var pause_lines := VBoxContainer.new()
 	pause_lines.add_theme_constant_override("separation", 3)
 	pause_box.add_child(pause_lines)
-	var pause_title := _label(pause_lines, HUGE, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
+	pause_title = _label(pause_lines, HUGE, CREAM, HORIZONTAL_ALIGNMENT_CENTER)
 	pause_title.text = "일시정지"
 	pause_keys = _label(pause_lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	pause_columns = HBoxContainer.new()
 	pause_columns.add_theme_constant_override("separation", 10)
 	pause_lines.add_child(pause_columns)
+	pause_seed = _seed_label(pause_box)
 	pause_box.visible = false
 
 	guide_box = _panel(self, PAUSE_PANEL, 8.0)
@@ -551,7 +558,7 @@ func _offer(w, delta: float) -> void:
 	heading.visible = true
 	row.visible = cards_on and not ended
 	press.visible = row.visible
-	for n in [foot, held_head, held_flow, board, again]:
+	for n in [foot, held_head, held_flow, board, again, end_seed]:
 		n.visible = ended
 	if ended:
 		_fill_end(w)
@@ -740,7 +747,8 @@ func _card(i: int) -> Dictionary:
 		"side": side, "text": text, "focus": 0.0, "base": Vector2.ZERO }
 
 
-## The end: how it ended, the night and score and where it landed, the upgrades held by name, the best runs.
+## The end: how it ended, the night and score and where it landed, the upgrades held by name, the best runs, and in
+## the corner the run's seed.
 func _fill_end(w) -> void:
 	heading.text = ENDINGS[w.phase]
 	heading.add_theme_font_size_override("font_size", HUGE)
@@ -762,6 +770,22 @@ func _fill_end(w) -> void:
 	board.text = _board()
 	board.visible = board.text != ""
 	again.modulate.a = 0.65 + 0.35 * cos(clock_time * 4.0)
+	_write_seed(end_seed, heading, w)
+
+
+## A label for the run's seed: small and quiet, lying over a box's lines in its top right corner, beside the title in
+## the middle of the box's first line. It takes no line of its own, so the box is no taller for it.
+func _seed_label(over: PanelContainer) -> Label:
+	var l := _label(over, SMALL, MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
+	l.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	return l
+
+
+## Writes the run's seed in its label (_seed_label), which shares a line with title. The label asks for the width of
+## the title with the seed at both its ends, so the box is always wide enough that the two do not meet.
+func _write_seed(label: Label, title: Label, w) -> void:
+	label.text = SEED % w.seed_value
+	label.custom_minimum_size.x = _width(title) + 2.0 * (_width(label) + SEED_GAP)
 
 
 ## An upgrade held, as a small row: its icon, its name and level in its side's colour, and (wide) what it does.
@@ -787,8 +811,10 @@ func _held_item(w, id: String, words: bool) -> Control:
 	return item
 
 
-## The pause screen: the upgrades held, one column per side, with what each does (just the names when there are many).
+## The pause screen: the upgrades held, one column per side, with what each does (just the names when there are many),
+## and in the corner the run's seed.
 func _fill_pause(w) -> void:
+	_write_seed(pause_seed, pause_title, w)
 	for c in pause_columns.get_children():
 		pause_columns.remove_child(c)
 		c.queue_free()
@@ -811,6 +837,7 @@ func _fill_pause(w) -> void:
 func _pause_rows(w, per_side: Dictionary, words: bool) -> void:
 	if per_side.values().all(func(a): return a.is_empty()):
 		var none := _label(pause_columns, SMALL, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+		none.size_flags_horizontal = Control.SIZE_EXPAND_FILL # across the box, which the title's line can make wider than this
 		none.text = "아직 고른 힘이 없다"
 		return
 	for side in Looks.SIDES:
