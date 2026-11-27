@@ -20,7 +20,7 @@ const MET_STEPS := 60 * 600 # as the balance tool: a bot still standing after th
 
 
 static func run() -> String:
-	return "\n".join([_runs(), _builds(), _pacing(), _met()])
+	return "\n".join([_runs()] + Config.CHARACTERS.keys().map(_builds) + [_pacing(), _met()])
 
 
 ## Steps a bot's run until it ends, the night is no longer only (0: any night) or steps run out. Returns every enemy
@@ -75,14 +75,15 @@ static func _runs() -> String:
 
 ## Takes a random upgrade at every offer (a filler only where the offer holds nothing else) up to the dusk of the
 ## last of BUILD_NIGHTS, through World.play_offers as World.begin_at takes a fixed one, and compares what two keepers
-## hold once the dusk card of each of those nights is taken.
-static func _builds() -> String:
+## hold once the dusk card of each of those nights is taken. One line per character, since each is offered its own
+## rows (a row's only); the line also says how many keepers hold a row of their own and how many a combined one.
+static func _builds(who: String) -> String:
 	var per_night: int = 1 + Config.NIGHT.picks_at.size()
 	var held := {}
 	for n in BUILD_NIGHTS:
 		held[n] = []
 	for seed_value in range(1, BUILD_SEEDS + 1):
-		var w = World.new(seed_value)
+		var w = World.new(seed_value, who)
 		var rng = SimRng.new(seed_value + 1000)
 		var done := 0
 		for n in BUILD_NIGHTS:
@@ -100,7 +101,7 @@ static func _builds() -> String:
 			continue
 		var pool := 0
 		for id in Config.UPGRADES:
-			if World.offered_on(id, n):
+			if World.offered_on(id, n) and World.open_to(id, who):
 				pool += World.max_level(id)
 		var share := 0.0
 		for i in BUILD_PAIRS:
@@ -112,8 +113,11 @@ static func _builds() -> String:
 			share += float(both) / maxi(1, a.size())
 		var sizes: Array = runs.map(func(r): return r.size())
 		sizes.sort()
-		parts.append("night %d: %d of %d levels held, two keepers share %.0f%% of them" % [n, sizes[sizes.size() / 2], pool, 100.0 * share / BUILD_PAIRS])
-	return "variety: builds at dusk, a random upgrade at every offer over %d seeds: %s" % [BUILD_SEEDS, "; ".join(parts)]
+		var own: int = runs.filter(func(r): return r.any(func(id): return Config.UPGRADES[id].has("only"))).size()
+		var combined: int = runs.filter(func(r): return r.any(func(id): return Config.UPGRADES[id].has("needs"))).size()
+		parts.append("night %d: %d of %d levels held, two keepers share %.0f%% of them, %.0f%% hold a row of their own, %.0f%% a combined one" % [
+			n, sizes[sizes.size() / 2], pool, 100.0 * share / BUILD_PAIRS, 100.0 * own / runs.size(), 100.0 * combined / runs.size()])
+	return "variety: builds (%s) at dusk, a random upgrade at every offer over %d seeds: %s" % [who, BUILD_SEEDS, "; ".join(parts)]
 
 
 ## Whole nights the bot keeps, started at their dusk: how many enemies come out of the dark, and how many of them in

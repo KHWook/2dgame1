@@ -47,6 +47,12 @@ func reroll_at(pos: Vector2, across: float, bottom: float) -> bool:
 	return listening() and reroll_rect(across, bottom).grow(REROLL_PAD).has_point(pos)
 
 
+## Whether this key, pressed now, draws the offer again: the reroll key, once the offer listens (so the R that
+## restarted a run from its end screen, pressed twice, does not also spend a reroll on the new run's first offer).
+func reroll_key(keycode: int) -> bool:
+	return listening() and keycode == REROLL_KEY
+
+
 ## A new offer of n cards: the middle one in focus, deaf for WAIT seconds.
 func show(n: int) -> void:
 	open = n > 0

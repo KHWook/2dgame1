@@ -135,6 +135,8 @@ func step(w) -> void:
 				_burst(BURSTS.heal, ev.pos + HEAD, Vector2.UP, _keys(HEAL))
 			"burst":
 				_ring("burst", ev.pos, ev.radius)
+			"wave":
+				_ring(ev.ring, ev.pos, ev.radius)
 	_follow(w)
 	if landed(w, _was_t):
 		var at: Vector2 = w.chop_centre(w.player.pos, w.player.face)

@@ -93,7 +93,7 @@ func frame(w) -> InputFrame:
 		pass # the shade lord is about to rush the torch, where it can be cut: be there (the goal already)
 	elif not p.carrying and p.hp <= HUNGRY and not w.berries.is_empty():
 		goal = _nearest_point(p.pos, w.berries)
-	elif p.held < w.stats.carry and not w.logs.is_empty() and (not p.carrying or _stack_more(w, p)):
+	elif p.held < w.carry() and not w.logs.is_empty() and (not p.carrying or _stack_more(w, p)):
 		goal = _nearest_point(p.pos, w.logs)
 		if goal == p.dropped:
 			goal += Vector2(Config.PLAYER.grab * 2.0, 0.0) # still standing on the log it put down: step off, then come back for it

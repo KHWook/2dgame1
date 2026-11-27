@@ -16,7 +16,8 @@
 ## king coming down from a leap or a hop, "decoy" { pos, enemy } where the shade lord's decoy appears and "faded"
 ## { pos, enemy } where one breaks or fades (src/sim/enemy.gd); "pack_coming" { enemy, pos, count } Config.SURGE.warn
 ## seconds before a surge comes, from there, and "pack" { enemy, pos, count } when it does; "took" { id } for a card
-## taken from the offer (an upgrade or a filler).
+## taken from the offer (an upgrade or a filler); "wave" { pos, radius, ring } for enemies thrown back from pos out to
+## radius (ring: the ring the screen throws out there, one of Effects.RINGS).
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -50,6 +51,7 @@ var next_spawn := 0.0
 var next_wood := 0.0
 var next_berry := 0.0
 var next_ember := 0.0
+var next_scorch := 0.0
 var next_spark := 0.0
 var next_thorn := 0.0
 var sparks: Array = [] # embers the torch fired: { pos, vel, life }
@@ -60,6 +62,8 @@ var omen := "" # tonight's omen (Config.OMENS), "" on a night without one
 var surges_due: Array = [] # tonight's surges still to come, first first: { kind, at, size, from }, as bosses_due
 var surge_slow := 1.0 # what the gap between the trickle's enemies is multiplied by tonight, to make up for the surges
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
+var haste_until := 0.0 # the night time until which the keeper walks and attacks faster for a kill (haste, haste_attack)
+var next_beacon := 0.0 # the night time from which a blow in the light makes the torch fire again (beacon_every)
 var events: Array = [] # what happened in the last step; see the top of this file
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
 var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)
@@ -91,10 +95,10 @@ static func character_stats(id: String) -> Dictionary:
 
 
 ## One of the keeper's numbers this run (stats), as the upgrades have it now: the times of its attack
-## (Config.ATTACK_TIMES) shortened by attack_mult.
+## (Config.ATTACK_TIMES) shortened by attack_mult, and by haste_attack for a while after a kill (haste_until).
 func stat(key: String):
 	if Config.ATTACK_TIMES.has(key):
-		return stats[key] * mod("attack_mult", 1.0)
+		return stats[key] * mod("attack_mult", 1.0) * (mod("haste_attack", 1.0) if time < haste_until else 1.0)
 	return stats[key]
 
 
@@ -117,11 +121,14 @@ func reset() -> void:
 	next_spawn = N.first_spawn
 	next_wood = Config.WOOD.first
 	next_ember = 0.0
+	next_scorch = 0.0
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
 	bolts = []
 	blade_kills = 0
+	haste_until = 0.0
+	next_beacon = 0.0
 	omen = ""
 	_dusk()
 	stats = character_stats(character)
@@ -135,7 +142,6 @@ func reset() -> void:
 ## --late, main.gd's --night=N); a normal run never calls it.
 func begin_at(n: int, slot: int) -> void:
 	play_offers((n - 1) * (1 + N.picks_at.size()), func(cards: Array) -> int: return mini(slot, cards.size()) - 1)
-	logs = [] # what the fillers taken on the way left lying
 	_dusk()
 	player.invuln_for = keeper_invuln()
 	player.hp = max_hp()
@@ -145,12 +151,13 @@ func begin_at(n: int, slot: int) -> void:
 ## Answers the offer on the table and the count - 1 after it without playing the nights between them, and leaves the
 ## next one on the table: each is the offer its dusk or its hour of the night would have made (night and picks_done
 ## move on as if every night were kept), and choose (the cards on the table -> which one, from 0) takes a card from
-## it. Nothing else of a night happens: no omen is drawn, nothing comes. For begin_at and the tools that measure
-## builds (tools/variety.gd); a normal run never calls it.
+## it. Nothing else of a night happens: no omen is drawn, nothing comes, and a filler taken gives nothing (there is
+## no night for it to help). For begin_at and the tools that measure builds (tools/variety.gd); a normal run never
+## calls it.
 func play_offers(count: int, choose: Callable) -> void:
 	for i in count:
 		if phase == "pick":
-			_take(offer[clampi(choose.call(offer), 0, offer.size() - 1)])
+			_take(offer[clampi(choose.call(offer), 0, offer.size() - 1)], false)
 		picks_done += 1
 		if picks_done > N.picks_at.size():
 			picks_done = 0
@@ -288,6 +295,11 @@ func max_hp() -> int:
 	return stats.hp + mod("hp_bonus", 0) + hardened_hp()
 
 
+## How many logs the keeper can hold at once: its character's, and the big pack's.
+func carry() -> int:
+	return stats.carry + mod("carry_bonus", 0)
+
+
 ## The hearts the keeper has gained by tonight (Config.HARDEN): hp_first on night from and one every hp_every nights after.
 func hardened_hp() -> int:
 	var H: Dictionary = Config.HARDEN
@@ -389,10 +401,9 @@ func step(inp) -> void:
 			reset()
 		return
 	if phase == "pick":
-		if inp.is_pressed("reroll"):
-			if can_reroll():
-				rerolls -= 1
-				_offer(offer)
+		if inp.is_pressed("reroll") and can_reroll(): # a reroll that cannot be taken is ignored: a pick pressed with it still counts
+			rerolls -= 1
+			_offer(offer)
 			return
 		for i in offer.size():
 			if inp.is_pressed("pick_%d" % (i + 1)):
@@ -406,8 +417,10 @@ func step(inp) -> void:
 		for s in due:
 			s.fn.call()
 	player.step(self, inp)
+	_trample()
 	_haul()
 	_forage()
+	var hp_was: int = player.hp
 	for e in enemies:
 		if e.dead:
 			continue
@@ -416,6 +429,8 @@ func step(inp) -> void:
 			var thorns: int = mod("thorns", 0)
 			if thorns > 0:
 				_damage(e, thorns, player.pos)
+	if player.hp < hp_was:
+		_guard()
 	_prickle()
 	_torch()
 	_sparks()
@@ -444,9 +459,14 @@ static func side(id: String) -> String:
 
 
 ## Whether holding this upgrade uses one of its side's slots (Config.BUILD.slots): one the torch offers only from a
-## later night (from_night) uses none.
+## later night (from_night) uses none, nor does a combined one (needs).
 static func takes_slot(id: String) -> bool:
-	return not Config.UPGRADES[id].has("from_night")
+	return not (Config.UPGRADES[id].has("from_night") or Config.UPGRADES[id].has("needs"))
+
+
+## Whether who can ever be offered this upgrade: its row's only, when it has one, names that character.
+static func open_to(id: String, who: String) -> bool:
+	return Config.UPGRADES[id].get("only", who) == who
 
 
 static func slots(side_id: String) -> int:
@@ -461,17 +481,44 @@ func slots_used(side_id: String) -> int:
 	return used
 
 
-## Whether the torch may put this upgrade on the table now: it has a level left and may come tonight (from_night),
-## and it is held already, takes no slot, or its side has a slot free.
+## Whether the torch may put this upgrade on the table now: it is this keeper's to have (only), both upgrades it
+## combines are held (needs), it has a level left and may come tonight (from_night), and it is held already, takes
+## no slot, or its side has a slot free.
 func can_offer(id: String) -> bool:
+	if not open_to(id, character) or not Config.UPGRADES[id].get("needs", []).all(func(part): return level(part) > 0):
+		return false
 	if level(id) >= max_level(id) or not offered_on(id, night):
 		return false
 	return level(id) > 0 or not takes_slot(id) or slots_used(side(id)) < slots(side(id))
 
 
-## A card's chance of being drawn, against 1: Config.BUILD.rare_weight for a rare upgrade.
+## Whether the torch may put this filler on the table now: it would give something (Config.FILLERS).
+func can_fill(id: String) -> bool:
+	var row: Dictionary = Config.FILLERS[id]
+	return row.has("fuel") or row.has("logs") or row.has("score") or player.hp < max_hp()
+
+
+## Whether this keeper can still come to hold this combined upgrade (a row with needs): it is not held, it and both
+## upgrades it needs are this keeper's to have (only), and those of the two not held yet still fit their sides' free
+## slots. What an ingredient's card and its line on the pause screen ask before they name it (Ui.combo_hint).
+func can_combine(made: String) -> bool:
+	var needs: Array = Config.UPGRADES[made].needs
+	if level(made) > 0 or not (needs + [made]).all(func(id): return open_to(id, character)):
+		return false
+	for side_id in Config.BUILD.slots:
+		var wanted: int = needs.filter(func(id): return level(id) == 0 and takes_slot(id) and side(id) == side_id).size()
+		if wanted > 0 and slots_used(side_id) + wanted > slots(side_id):
+			return false
+	return true
+
+
+## A card's chance of being drawn, against 1: Config.BUILD.combo_weight for a combined upgrade, rare_weight for a
+## rare one.
 static func weight(id: String) -> float:
-	return Config.BUILD.rare_weight if Config.UPGRADES.get(id, {}).get("rare", false) else 1.0
+	var row: Dictionary = Config.UPGRADES.get(id, {})
+	if row.has("needs"):
+		return Config.BUILD.combo_weight
+	return Config.BUILD.rare_weight if row.get("rare", false) else 1.0
 
 
 ## Takes one card out of pool and returns it: one roll over the cards' weights.
@@ -488,11 +535,11 @@ func _draw(pool: Array) -> String:
 
 
 ## Put Config.NIGHT.offer_size cards on the table and stop the clock: upgrades the torch may offer now (can_offer),
-## drawn by weight, and where those run short, fillers (Config.FILLERS). shown: the cards of the offer this one
-## replaces (a reroll); they come back only where there are not enough others.
+## drawn by weight, and where those run short, the fillers that would give something (Config.FILLERS, can_fill).
+## shown: the cards of the offer this one replaces (a reroll); they come back only where there are not enough others.
 func _offer(shown: Array = []) -> void:
 	offer = []
-	for table in [Config.UPGRADES.keys().filter(can_offer), Config.FILLERS.keys()]:
+	for table in [Config.UPGRADES.keys().filter(can_offer), Config.FILLERS.keys().filter(can_fill)]:
 		for again in [false, true]:
 			var pool: Array = table.filter(func(id): return shown.has(id) == again)
 			while offer.size() < N.offer_size and not pool.is_empty():
@@ -508,17 +555,19 @@ func can_reroll() -> bool:
 	var cards: Array = Config.UPGRADES.keys().filter(can_offer)
 	if cards.any(func(id): return not offer.has(id)):
 		return true
-	return cards.size() < N.offer_size and Config.FILLERS.keys().any(func(id): return not offer.has(id))
+	return cards.size() < N.offer_size and Config.FILLERS.keys().filter(can_fill).any(func(id): return not offer.has(id))
 
 
 ## Take an offered card. An upgrade joins the build: most only change what mod() answers; hp_bonus also heals by as
-## much as it grew, now. A filler (Config.FILLERS) does what it says once and is gone.
-func _take(id: String) -> void:
+## much as it grew, now. A filler (Config.FILLERS) does what it says once and is gone (nothing, when not act: an
+## offer answered without its night, play_offers).
+func _take(id: String, act := true) -> void:
 	offer = []
 	phase = "night"
 	events.append({ "kind": "took", "id": id })
 	if Config.FILLERS.has(id):
-		_fill(Config.FILLERS[id])
+		if act:
+			_fill(Config.FILLERS[id])
 		return
 	var before: int = upgrade(id, level(id)).get("hp_bonus", 0) if level(id) > 0 else 0
 	picks.append(id)
@@ -528,6 +577,7 @@ func _take(id: String) -> void:
 func _fill(row: Dictionary) -> void:
 	fuel = minf(max_fuel(), fuel + row.get("fuel", 0.0))
 	player.hp = mini(max_hp(), player.hp + row.get("heal", 0))
+	score += row.get("score", 0)
 	var count: int = row.get("logs", 0)
 	for i in count:
 		logs.append(T.pos + Vector2(row.log_at, 0.0).rotated(TAU * i / count))
@@ -563,8 +613,11 @@ func _dawn() -> void:
 	next_spawn = N.first_spawn
 	next_wood = Config.WOOD.first
 	next_ember = 0.0
+	next_scorch = 0.0
 	next_spark = 0.0
 	next_thorn = 0.0
+	haste_until = 0.0
+	next_beacon = 0.0
 	sparks = []
 	bolts = []
 	_dusk()
@@ -589,14 +642,51 @@ func _haul() -> void:
 			events.append({ "kind": "fed", "pos": T.pos })
 		p.held = 0
 		p.carrying = false
-	elif p.held < stats.carry:
+		var blast: float = mod("feed_reach", 0.0)
+		if blast > 0.0:
+			_shove(T.pos, blast, mod("feed_push", 1.0), "burst")
+	elif p.held < carry():
 		for i in logs.size():
 			# You pick a log up by walking onto it, so the one you just put down stays down until you step off it.
 			# One a step, until the arms are full.
 			if logs[i] != p.dropped and p.pos.distance_to(logs[i]) < stats.grab:
 				logs.remove_at(i)
-				p.take_log()
+				p.take_log(carry())
 				break
+
+
+## Throws back every enemy whose body comes within reach of from, as a blow of dmg would (push: share of a blow's
+## knockback; one of no damage only throws), and tells the screen (the "wave" event; ring: what it throws out there).
+func _shove(from: Vector2, reach: float, push: float, ring: String, dmg := 0) -> void:
+	events.append({ "kind": "wave", "pos": from, "radius": reach, "ring": ring })
+	for e in enemies:
+		if e.dead or e.pos.distance_to(from) >= reach + e.T.radius:
+			continue
+		if dmg > 0:
+			_damage(e, dmg, from, false, push)
+		else:
+			e.hit(0, from, push)
+
+
+## The sturdy shield (guard_reach): a hit just taken keeps the keeper from the next one longer and throws back what
+## stands round it, hurt.
+func _guard() -> void:
+	var reach: float = mod("guard_reach", 0.0)
+	if reach <= 0.0 or player.dead:
+		return
+	player.invuln += mod("guard_invuln", 0.0)
+	_shove(player.pos, reach, mod("guard_push", 1.0), "dust", mod("guard_damage", 0))
+
+
+## The thorn dash (dash_damage): while the keeper dashes, each enemy it touches is hurt, once a dash.
+func _trample() -> void:
+	var dmg: int = mod("dash_damage", 0)
+	if dmg <= 0 or player.dash_t <= 0.0:
+		return
+	for e in enemies:
+		if not e.dead and not player.dashed.has(e) and e.touches(player):
+			player.dashed.append(e)
+			_damage(e, dmg, player.pos - player.dash_dir)
 
 
 func drop_log(at: Vector2) -> void:
@@ -632,20 +722,47 @@ func _torch() -> void:
 	if ring > 0.0 and time >= next_ember:
 		next_ember = time + mod("ember_every", 1.0)
 		for e in enemies:
-			# The ring scorches but never kills: the last point is left for you to strike.
-			if e.hp > 1 and e.pos.distance_to(T.pos) <= ring:
+			# The ring scorches but never kills: the last point is left for you to strike (or for scorch, below).
+			if not e.dead and e.hp > 1 and e.pos.distance_to(T.pos) <= ring:
+				_damage(e, 1, T.pos)
+	var finish: float = mod("scorch_every", 0.0)
+	if ring > 0.0 and finish > 0.0 and time >= next_scorch:
+		next_scorch = time + finish
+		for e in enemies:
+			if not e.dead and e.hp <= 1 and not e.T.get("boss", false) and e.pos.distance_to(T.pos) <= ring:
 				_damage(e, 1, T.pos)
 	var every: float = mod("spark_every", 0.0)
-	if every > 0.0 and time >= next_spark:
-		var target = null # the nearest enemy in the light
-		for e in enemies:
-			if not e.dead and in_light(e.pos) and (target == null or e.pos.distance_to(T.pos) < target.pos.distance_to(T.pos)):
-				target = e
-		if target != null:
-			next_spark = time + every
-			var from: Vector2 = T.pos + Config.SPARK.mouth
-			sparks.append({ "pos": from, "vel": (target.pos - from).normalized() * Config.SPARK.speed, "life": Config.SPARK.life })
-			events.append({ "kind": "shot", "pos": from })
+	if every > 0.0 and time >= next_spark and _spark_at(_nearest(light_radius())):
+		next_spark = time + every
+
+
+## The living enemy nearest the torch, no further from it than within, or null.
+func _nearest(within: float):
+	var best = null
+	for e in enemies:
+		if not e.dead and e.pos.distance_to(T.pos) <= within and (best == null or e.pos.distance_to(T.pos) < best.pos.distance_to(T.pos)):
+			best = e
+	return best
+
+
+## The torch fires a spark (Config.SPARK) at target. False, and nothing fired, when there is none.
+func _spark_at(target) -> bool:
+	if target == null:
+		return false
+	var from: Vector2 = T.pos + Config.SPARK.mouth
+	sparks.append({ "pos": from, "vel": (target.pos - from).normalized() * Config.SPARK.speed, "life": Config.SPARK.life })
+	events.append({ "kind": "shot", "pos": from })
+	return true
+
+
+## The beacon (beacon_every): the keeper's own blow has just landed on e in the torch's light, so the torch fires a
+## spark at once, at e if it still lives and else at the enemy nearest the torch that a spark flies far enough to
+## reach (in the light or not), at most once every beacon_every seconds. The torch's own sparks (spark_every) come as
+## they would without it.
+func _beacon(e) -> void:
+	var every: float = mod("beacon_every", 0.0)
+	if every > 0.0 and time >= next_beacon and in_light(e.pos) and _spark_at(_nearest(Config.SPARK.speed * Config.SPARK.life) if e.dead else e):
+		next_beacon = time + every
 
 
 ## The thorn cloak pricks every enemy pressed up against you every so often, besides hurting the ones that hit you.
@@ -719,7 +836,7 @@ func shoot(p) -> void:
 		fan = [-stats.bolt.spread, 0.0, stats.bolt.spread]
 	for turn in fan:
 		bolts.append({ "pos": p.pos, "dir": p.face.rotated(turn), "left": bolt_range(), "radius": bolt_radius(),
-			"pierce": stats.bolt.pierce, "hit": [] })
+			"pierce": stats.bolt.pierce + mod("pierce_bonus", 0), "hit": [] })
 	events.append({ "kind": "cast", "pos": p.pos })
 
 
@@ -732,7 +849,7 @@ static func in_bolt(a: Vector2, b: Vector2, radius: float, at: Vector2, r: float
 
 ## The keeper's embers fly straight for their range and burn what they touch: more in the light (bolt.lit_bonus,
 ## and the fire blade as a shooter has it); one goes through pierce enemies (lit_pierce more where the one it burns
-## stands in the light), and stops at the next.
+## stands in the light), and stops at the next, where it bursts (pierce_burst: on each it goes through as well).
 func _bolts() -> void:
 	if bolts.is_empty():
 		return
@@ -750,8 +867,10 @@ func _bolts() -> void:
 			_damage(e, B.damage + ((B.lit_bonus + mod("lit_damage", 0)) if lit else 0), e.pos - b.dir, true, B.push)
 			if b.hit.size() > b.pierce + (B.lit_pierce if lit else 0):
 				b.left = 0.0
-				_splash(e) # it bursts where it stops: on the last enemy it burns, not on those it goes through
+				_splash(e) # it bursts where it stops: on the last enemy it burns (pierce_burst: on each it goes through too)
 				break
+			if mod("pierce_burst", false):
+				_splash(e)
 	bolts = bolts.filter(func(b): return b.left > 0.0)
 
 
@@ -787,9 +906,15 @@ func _damage(e, n: int, from: Vector2, blade := false, push := 1.0) -> void:
 		return
 	e.hit(n, from, push)
 	events.append({ "kind": "kill" if e.dead else "hit", "pos": e.pos, "dir": dir, "enemy": e.kind, "tier": e.tier })
+	if blade:
+		_beacon(e)
 	if not e.dead:
 		return
 	score += e.T.get("score", Config.SCORE.kill)
+	if mod("haste_time", 0.0) > 0.0:
+		haste_until = time + mod("haste_time", 0.0)
+	if blade:
+		_spoils(e)
 	var thirst := vamp_need()
 	if blade and thirst > 0:
 		blade_kills = mini(blade_kills + 1, thirst)
@@ -806,6 +931,24 @@ func _damage(e, n: int, from: Vector2, blade := false, push := 1.0) -> void:
 		born.append(half)
 		if player.attack_t >= 0.0:
 			player.struck.append(half) # the swing that broke it does not also cut its halves
+
+
+## What the keeper's own blow leaves where it killed e: now and then a log (log_chance, rolled only by one who has
+## it), and a spark thrown at the nearest other enemy within kindle_reach of it (the torch's kind of spark: it burns
+## the first enemy it touches, and its kills throw none).
+func _spoils(e) -> void:
+	var chance: float = mod("log_chance", 0.0)
+	if chance > 0.0 and rng.chance(chance):
+		logs.append(e.pos.clamp(Config.FIELD.position, Config.FIELD.end))
+	var reach: float = mod("kindle_reach", 0.0)
+	var target = null
+	for o in enemies if reach > 0.0 else []:
+		var d: float = o.pos.distance_to(e.pos) - o.T.radius
+		if o != e and not o.dead and d < reach and (target == null or d < target.pos.distance_to(e.pos) - target.T.radius):
+			target = o
+	if target != null:
+		sparks.append({ "pos": e.pos, "vel": (target.pos - e.pos).normalized() * Config.SPARK.speed, "life": Config.SPARK.life })
+		events.append({ "kind": "shot", "pos": e.pos })
 
 
 ## How many sword kills the vampire blade wants for a heal tonight (0 without it): vamp_kills up to night vamp_from,

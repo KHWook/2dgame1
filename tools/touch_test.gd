@@ -478,6 +478,17 @@ static func _reroll() -> Array:
 			out.append("the reroll button (cards %d tall) answers too early, on or just under a card, not on itself, or with no offer up: %s" % [tall, [early, cards, on]])
 	if Picker.REROLL_KEY != KEY_R or Picker.hears(KEY_R) or Main.KEYS.get(KEY_R, "") != "restart":
 		out.append("R is not the reroll key while the offer is up and the restart key otherwise")
+	# The key waits as the button does: the second R of a double press on an end screen lands on the new run's first
+	# offer before it listens, and must not spend a reroll there.
+	var keys = Picker.new()
+	var closed: bool = keys.reroll_key(KEY_R)
+	keys.show(Config.NIGHT.offer_size)
+	var early_key: bool = keys.reroll_key(KEY_R)
+	keys.frame(Picker.WAIT)
+	if [closed, early_key, keys.reroll_key(KEY_R), keys.reroll_key(KEY_1)] != [false, false, true, false]:
+		out.append("the R key rerolls with no offer up, before the offer listens, not once it does, or another key does: %s" % [[closed, early_key, keys.reroll_key(KEY_R), keys.reroll_key(KEY_1)]])
+	if not FileAccess.get_file_as_string("res://src/main.gd").contains("ui.picker.reroll_key(k.keycode)"):
+		out.append("main.gd does not ask the picker whether the R key rerolls now (Picker.reroll_key): a key pressed before the offer listens would spend a reroll")
 	return out
 
 
