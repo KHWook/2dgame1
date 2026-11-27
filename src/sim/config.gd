@@ -63,8 +63,9 @@ const NIGHTS := [
 		"with": { "thief": ["shade", "shade"], "boar": ["bat", "bat"], "big_slime": ["boar"] } },
 ]
 ## Per night past the table: fuel per second added, spawn gap multiplied. min_gap: the gap never gets shorter than
-## this (seconds), however late, so the nights keep getting harder without the count running away into a wall.
-const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.88, "min_gap": 0.2 }
+## this (seconds), however late. It first bites at the very end of night 19, so the crowds up to there grow freely;
+## past twenty it keeps the count (and the frame time) from running away.
+const LATER_NIGHTS := { "burn": 0.3, "spawn": 0.82, "min_gap": 0.1 }
 
 ## Dawn: the sun clears the field, you rest (heal), and the torch is topped up to at least its starting fuel (its
 ## start_fuel share of the tank, so a big torch is topped up further).

@@ -902,6 +902,8 @@ static func _late_nights() -> Array:
 	w.night = 61 # not a boss night
 	w.time = Config.NIGHT.length
 	_expect(out, "however late, they never come closer than min_gap", w.spawn_gap(), Config.LATER_NIGHTS.min_gap)
+	w.night = 18 # the floor is a guard for the nights past twenty, not a cap on the crowds before them
+	_expect(out, "up to night 18 the floor never shortens a gap", w.spawn_gap() > Config.LATER_NIGHTS.min_gap, true)
 	w.night = 60
 	_expect(out, "and a boss night's come further apart than that", is_equal_approx(w.spawn_gap(), Config.LATER_NIGHTS.min_gap * Config.BOSS.spawn_mult), true)
 	return out
