@@ -118,7 +118,8 @@ const SCRIM := Color(0.03, 0.02, 0.07)
 ## The night's progress towards dawn, under the clock that main.gd writes at the top in the middle.
 const NIGHT_BAR := Rect2(195.0, 18.0, 90.0, 3.0)
 const CLOCK_PANEL := Rect2(185.0, 1.0, 110.0, 23.0)
-const BOSS_BAR := Rect2(140.0, 254.0, 200.0, 5.0) # a boss's health, along the bottom; main.gd writes its name above
+const BOSS_BAR := Rect2(140.0, 254.0, 200.0, 5.0) # the first boss's health, along the bottom; the ui writes its name left of it
+const BOSS_BAR_STEP := 10.0 # each next boss's bar is this much higher: they stack up from the bottom
 const BOSS_BAR_COLOUR := "i"
 
 ## The dash: copies of the keeper trail behind while it dashes, fading, this far apart along the dash.
@@ -174,6 +175,9 @@ const MARK_FILL := 0.35 # how solid the ring's inside is the moment it lands
 const MARK_BLINK_STEPS := 4
 const LEAP_HEIGHT := 26.0 # pixels the king rises at the top of its leap
 const RUSH_DASH := 4.0 # pixels per dash of the rush line, and per gap
+## The shade lord about to split: it flashes inside a red ring, and as many rings of smoke as it will have decoys
+## slide round from it along its ring to where they will appear.
+const SPLIT_SMOKE := "7"
 ## A charger about to charge (Config.ENEMY_TYPES.boar.charge): it flashes and paws (shuffles a pixel to and fro) on a
 ## red band laid from itself to where the charge ends, as wide as the charge hurts (charge_band: Enemy.lane_half()
 ## each side of its line, round at the ends): outside the band is safe. The band fills from the boar toward its end
@@ -575,22 +579,25 @@ func _sparks(c: CanvasItem, w) -> void:
 		c.draw_texture(tex, (sp.pos - tex.get_size() / 2.0).round())
 
 
-## The first boss on the field, or null.
-static func boss(w):
-	for e in w.enemies:
-		if e.T.get("boss", false) and not e.dead:
-			return e
-	return null
+## The bosses on the field (not their decoys), in the order they came.
+static func bosses(w) -> Array:
+	return w.enemies.filter(func(e): return e.T.get("boss", false) and not e.dead and not e.decoy)
+
+
+## Where the bar of the i-th boss on the field goes: stacked up from BOSS_BAR.
+static func boss_bar(i: int) -> Rect2:
+	return Rect2(BOSS_BAR.position - Vector2(0.0, BOSS_BAR_STEP * i), BOSS_BAR.size)
 
 
 func _boss_bar(c: CanvasItem, w) -> void:
-	var b = boss(w)
-	if b == null:
-		return
-	c.draw_rect(BOSS_BAR.grow(2.0), HUD_PANEL)
-	c.draw_rect(BOSS_BAR.grow(1.0), Sprites.PALETTE["k"])
-	c.draw_rect(BOSS_BAR, Sprites.PALETTE["K"])
-	c.draw_rect(Rect2(BOSS_BAR.position, Vector2(ceilf(BOSS_BAR.size.x * float(b.hp) / b.T.hp), BOSS_BAR.size.y)), Sprites.PALETTE[BOSS_BAR_COLOUR])
+	var list := bosses(w)
+	for i in list.size():
+		var b = list[i]
+		var bar := boss_bar(i)
+		c.draw_rect(bar.grow(2.0), HUD_PANEL)
+		c.draw_rect(bar.grow(1.0), Sprites.PALETTE["k"])
+		c.draw_rect(bar, Sprites.PALETTE["K"])
+		c.draw_rect(Rect2(bar.position, Vector2(ceilf(bar.size.x * float(b.hp) / b.full_hp), bar.size.y)), Sprites.PALETTE[BOSS_BAR_COLOUR])
 
 
 func _shadows(c: CanvasItem, w) -> void:
@@ -676,7 +683,7 @@ func _standing(w) -> Array:
 		var look: Dictionary = k.look
 		if look.flies:
 			continue
-		var white: bool = e.flash > 0.0 or (e.move == "warn" and (w.steps / MARK_BLINK_STEPS) % 2 == 0)
+		var white: bool = e.flash > 0.0 or (e.move in ["warn", "split"] and (w.steps / MARK_BLINK_STEPS) % 2 == 0)
 		var tex: Texture2D = k.frames[_frame[i]][_mirror[i] + (2 if white else 0)]
 		out.append([e.pos.y + 4.0, out.size(), tex, (e.pos + _lift(e) + _paw(w, e) - look.anchor).round(), _tint(e, _lit[i] == 1, warms)])
 		if e.carrying:
@@ -710,8 +717,9 @@ static func _turned(e, look: Dictionary) -> bool:
 static func _lift(e) -> Vector2:
 	if e.move != "air":
 		return Vector2.ZERO
-	var k: float = clampf(1.0 - e.move_t / e.T.leap.air, 0.0, 1.0)
-	return Vector2(0.0, -roundf(sin(k * PI) * LEAP_HEIGHT))
+	var air: float = e.hop().air
+	var k: float = clampf(1.0 - e.move_t / air, 0.0, 1.0)
+	return Vector2(0.0, -roundf(sin(k * PI) * LEAP_HEIGHT * air / e.T.leap.air)) # a hop is lower than a leap
 
 
 ## Where a boss is about to strike: the slime king's marked landing, the shade lord's line to the torch.
@@ -720,7 +728,7 @@ func _telegraphs(c: CanvasItem, w) -> void:
 	var blink: bool = (w.steps / MARK_BLINK_STEPS) % 2 == 0
 	for e in w.enemies:
 		if e.T.has("leap") and e.move in ["warn", "air"]:
-			var L: Dictionary = e.T.leap
+			var L: Dictionary = e.hop()
 			var left: float = e.move_t + (L.air if e.move == "warn" else 0.0)
 			var k: float = clampf(1.0 - left / (L.warn + L.air), 0.0, 1.0) # 0 when marked, 1 as it lands
 			var at: Vector2 = e.move_to.round()
@@ -729,6 +737,13 @@ func _telegraphs(c: CanvasItem, w) -> void:
 			c.draw_arc(at, L.shock * (1.0 - k), 0.0, TAU, 24, Color(colour, 0.8), 1.0) # closes in on the edge as it falls
 		elif e.T.has("lunge") and e.move == "warn":
 			_dashes(c, e.pos, e.move_to, Color(colour, 0.9 if blink else 0.5))
+		elif e.move == "split": # rings of smoke spread out from it toward where its decoys will stand
+			var k: float = clampf(1.0 - e.split_t / e.T.split.warn, 0.0, 1.0)
+			var smoke: Color = Sprites.PALETTE[SPLIT_SMOKE]
+			for i in e.T.split.count:
+				var at: Vector2 = Config.TORCH.pos + (e.pos - Config.TORCH.pos).rotated(TAU * (i + 1) / (e.T.split.count + 1) * k)
+				c.draw_arc(at.round(), e.T.radius * (0.6 + 0.6 * k), 0.0, TAU, 20, Color(smoke, 0.5 + 0.4 * k), 1.0)
+			c.draw_arc(e.pos.round(), e.T.radius + 4.0 + 4.0 * k, 0.0, TAU, 24, Color(colour, 0.9 if blink else 0.5), 1.0)
 		elif e.T.has("charge") and e.move in ["warn", "charge"]:
 			var band := charge_band(e)
 			var k: float = 1.0 if e.move == "charge" else clampf(1.0 - e.move_t / e.T.charge.warn, 0.0, 1.0) # 0 when lined up, 1 as it goes
@@ -814,11 +829,15 @@ func _dash_bar(c: CanvasItem, w) -> void:
 	c.draw_rect(Rect2(bar.position, Vector2(ceilf(bar.size.x * (1.0 - p.dash_wait / every)), bar.size.y)), Sprites.PALETTE[DASH_BAR_COLOUR])
 
 
-## A boss on its way: the edge it will come from glows and an arrow points at it, blinking.
+## A boss on its way: the edge it will come from glows and an arrow points at it, blinking. Each on its way has its own.
 func _coming(c: CanvasItem, w) -> void:
-	if w.boss_from == null or w.phase != "night":
+	if w.phase != "night":
 		return
-	var f: Vector2 = w.boss_from
+	for b in w.bosses_coming():
+		_coming_at(c, w, b.from)
+
+
+func _coming_at(c: CanvasItem, w, f: Vector2) -> void:
 	var out := Vector2.ZERO # which edge: the one it is past
 	if f.x < Config.FIELD.position.x: out = Vector2.LEFT
 	elif f.x > Config.FIELD.end.x: out = Vector2.RIGHT
@@ -1055,9 +1074,10 @@ func _crowd(w) -> void:
 	var light: float = w.light_radius()
 	for i in n:
 		var e = w.enemies[i]
-		var k := _kind(e.kind, e.tier)
+		var looks_as: String = Looks.DECOYS[e.kind] if e.decoy else e.kind
+		var k := _kind(looks_as, e.tier)
 		_picture[i] = k
-		_frame[i] = Looks.frame_index(e.kind, w.steps, i)
+		_frame[i] = Looks.frame_index(looks_as, w.steps, i)
 		_mirror[i] = 1 if _turned(e, k.look) else 0
 		_lit[i] = 1 if e.pos.distance_to(T.pos) <= light else 0 # w.in_light(e.pos)
 

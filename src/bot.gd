@@ -29,11 +29,12 @@ func frame(w) -> InputFrame:
 		return f
 	var p = w.player
 	var goal: Vector2 = Config.TORCH.pos
-	var foe = _nearest(p.pos, w.enemies)
-	var smotherer = _nearest(p.pos, w.enemies.filter(func(e): return e.at_torch))
+	var real: Array = w.enemies.filter(func(e): return not e.decoy) # a decoy hurts nothing: leave it be
+	var foe = _nearest(p.pos, real)
+	var smotherer = _nearest(p.pos, real.filter(func(e): return e.at_torch))
 	var landing = _landing(w, p.pos)
 	var lane = _lane(w, p.pos)
-	var rush: bool = w.enemies.any(func(e): return e.T.has("lunge") and e.move in ["warn", "lunge"])
+	var rush: bool = real.any(func(e): return e.T.has("lunge") and e.move in ["warn", "lunge"])
 	if landing != null:
 		# a leap is marked on it: step out of the shock sideways to the leap, on the torch's side (not into a fence)
 		var side: Vector2 = (landing.move_to - landing.pos).normalized().orthogonal()
@@ -44,7 +45,7 @@ func frame(w) -> InputFrame:
 		var out: Vector2 = p.pos - landing.move_to
 		if out.length() < 1.0:
 			out = side
-		goal = landing.move_to + out.normalized() * (landing.T.leap.shock + Config.PLAYER.radius + CLEAR_OF)
+		goal = landing.move_to + out.normalized() * (landing.hop().shock + Config.PLAYER.radius + CLEAR_OF)
 	elif lane != null:
 		# a charge is lined up at it: step out of the lane sideways, on the side it already leans to (the torch's
 		# side when it stands right on the line)
@@ -87,10 +88,10 @@ func frame(w) -> InputFrame:
 	return f
 
 
-## A boss's marked landing whose shock would reach the bot where it stands, or null.
+## A boss's marked landing (a leap's or a hop's) whose shock would reach the bot where it stands, or null.
 static func _landing(w, at: Vector2):
 	for e in w.enemies:
-		if e.T.has("leap") and e.move in ["warn", "air"] and at.distance_to(e.move_to) < e.T.leap.shock + Config.PLAYER.radius + CLEAR_OF:
+		if e.T.has("leap") and e.move in ["warn", "air"] and at.distance_to(e.move_to) < e.hop().shock + Config.PLAYER.radius + CLEAR_OF:
 			return e
 	return null
 

@@ -11,8 +11,9 @@
 ## away; "fed" { pos } for a log put on the torch; "healed" { pos } for a berry eaten or a blade that drank enough;
 ## "dawn" { night } for the night that just ended; "shot" { pos } for a spark the torch fired; "boss" { enemy, pos }
 ## for a boss that came out of the dark; "coming" { enemy, pos } Config.BOSS.warn seconds before it does, from
-## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), and "landed" { pos, enemy } for the slime
-## king coming down from its leap (src/sim/enemy.gd).
+## there; "warn" { pos, at, enemy } for a boss about to strike (at: where), "landed" { pos, enemy } for the slime
+## king coming down from a leap or a hop, "decoy" { pos, enemy } where the shade lord's decoy appears and "faded"
+## { pos, enemy } where one breaks or fades (src/sim/enemy.gd).
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -46,8 +47,8 @@ var next_ember := 0.0
 var next_spark := 0.0
 var next_thorn := 0.0
 var sparks: Array = [] # embers the torch fired: { pos, vel, life }
-var boss_due := false # a boss is still to come tonight
-var boss_from = null # where the boss will come from once its warning is given, until it comes; null otherwise
+var bosses_due: Array = [] # tonight's bosses still to come, first first: { kind, at (night time), from }; from is
+						 # where it comes from once its warning is given (Config.BOSS.warn before at), null until then
 var blade_kills := 0 # kills by the sword toward the next heal from the vampire upgrade
 var events: Array = [] # what happened in the last step; see the top of this file
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
@@ -85,8 +86,7 @@ func reset() -> void:
 	next_thorn = 0.0
 	sparks = []
 	blade_kills = 0
-	boss_due = _boss_night()
-	boss_from = null
+	bosses_due = _plan_bosses()
 	player = Player.new()
 	_offer()
 
@@ -102,7 +102,7 @@ func begin_at(n: int, slot: int) -> void:
 		_take(offer[mini(slot, offer.size()) - 1])
 		_offer()
 	night = n
-	boss_due = _boss_night()
+	bosses_due = _plan_bosses()
 	player.hp = max_hp()
 	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
 
@@ -336,8 +336,7 @@ func _dawn() -> void:
 	next_spark = 0.0
 	next_thorn = 0.0
 	sparks = []
-	boss_due = _boss_night()
-	boss_from = null
+	bosses_due = _plan_bosses()
 	player.hp = mini(max_hp(), player.hp + Config.DAWN.heal)
 	fuel = maxf(fuel, T.start_fuel * max_fuel() / T.max_fuel)
 	_offer()
@@ -468,6 +467,9 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 	if e.T.get("dark_proof", false) and not in_light(e.pos):
 		events.append({ "kind": "passed", "pos": e.pos, "dir": dir, "enemy": e.kind, "tier": e.tier })
 		return
+	if e.decoy: # only smoke: it breaks, and is worth nothing
+		e.fade(self)
+		return
 	e.hit(n, from)
 	events.append({ "kind": "kill" if e.dead else "hit", "pos": e.pos, "dir": dir, "enemy": e.kind, "tier": e.tier })
 	if not e.dead:
@@ -482,7 +484,7 @@ func _damage(e, n: int, from: Vector2, blade := false) -> void:
 			events.append({ "kind": "healed", "pos": player.pos })
 	if e.carrying:
 		logs.append(e.pos)
-	for i in e.T.get("split_count", 0):
+	for i in e.splits:
 		var side := -1.0 if i % 2 == 0 else 1.0
 		var half = Enemy.new(e.T.splits_into, e.pos + Vector2(side * Config.ENEMY.split_spread, 0.0), e.tier)
 		half.knock = Vector2(side * Config.ENEMY.split_knock, 0.0)
@@ -512,13 +514,13 @@ func _spawns() -> void:
 		var company: Array = row.get("with", {}).get(kind, [])
 		for i in company.size(): # beside it on the edge, one each side in turn
 			enemies.append(Enemy.new(company[i], at + along * Config.ENEMY.with_gap * (i / 2 + 1) * (1.0 if i % 2 == 0 else -1.0), tier))
-	if boss_due and time >= N.length * Config.BOSS.at - Config.BOSS.warn:
-		boss_due = false
-		boss_from = _edge_point()
-		events.append({ "kind": "coming", "enemy": boss_kind(), "pos": boss_from })
-	if boss_from != null and time >= N.length * Config.BOSS.at:
-		var boss = Enemy.new(boss_kind(), boss_from)
-		boss_from = null
+	for b in bosses_due:
+		if b.from == null and time >= b.at - Config.BOSS.warn:
+			b.from = _edge_point()
+			events.append({ "kind": "coming", "enemy": b.kind, "pos": b.from })
+	while not bosses_due.is_empty() and bosses_due[0].from != null and time >= bosses_due[0].at:
+		var b: Dictionary = bosses_due.pop_front()
+		var boss = _boss(b.kind, b.from)
 		enemies.append(boss)
 		events.append({ "kind": "boss", "enemy": boss.kind, "pos": boss.pos })
 	if time >= next_wood:
@@ -543,15 +545,60 @@ func spawn_gap() -> float:
 	return maxf(apart, Config.LATER_NIGHTS.min_gap) * (Config.BOSS.spawn_mult if _boss_night() else 1.0)
 
 
-## Whether a boss comes tonight.
+## Whether bosses come tonight.
 func _boss_night() -> bool:
 	return night % Config.BOSS.every == 0
 
 
-## Which boss comes on this boss night: they take turns.
-func boss_kind() -> String:
+## Which bosses come tonight, in the order they come ([] on a night without): Config.BOSS.counts of them, the kinds
+## taking turns from boss night to boss night and, on a night with several, from one boss to the next.
+func boss_kinds() -> Array:
+	if not _boss_night():
+		return []
+	var count := 0
+	for r in Config.BOSS.counts:
+		if night >= r.from:
+			count = r.count
 	var kinds: Array = Config.BOSS.kinds
-	return kinds[(night / Config.BOSS.every - 1) % kinds.size()]
+	var out := []
+	for i in count:
+		out.append(kinds[(night / Config.BOSS.every - 1 + i) % kinds.size()])
+	return out
+
+
+## Tonight's bosses, each with the night time it comes: BOSS.at into the night, each next one BOSS.apart later.
+func _plan_bosses() -> Array:
+	var out := []
+	var kinds := boss_kinds()
+	for i in kinds.size():
+		out.append({ "kind": kinds[i], "at": N.length * Config.BOSS.at + Config.BOSS.apart * i, "from": null })
+	return out
+
+
+## Bosses on their way that the screen has been told of: [{ kind, at, from }], from where each will come.
+func bosses_coming() -> Array:
+	return bosses_due.filter(func(b): return b.from != null)
+
+
+## What a boss's hp and summons are multiplied by tonight (Config.BOSS.strength): gentle on the first boss night,
+## stronger on each one after it, up to most.
+func boss_strength() -> float:
+	var S: Dictionary = Config.BOSS.strength
+	return minf(S.most, S.first + S.grow * (night / Config.BOSS.every - 1))
+
+
+## A boss of kind coming out of the dark at at, as strong as tonight makes it (boss_strength()): its hp rounded up,
+## the enemies it calls and those it breaks into rounded, never under one. Its row, and so its score, stays as it is.
+func _boss(kind: String, at: Vector2):
+	var boss = Enemy.new(kind, at)
+	var k := boss_strength()
+	boss.full_hp = ceili(boss.T.hp * k)
+	boss.hp = boss.full_hp
+	if boss.T.has("summon"):
+		boss.summons = maxi(1, roundi(boss.T.summon.count * k))
+	if boss.splits > 0:
+		boss.splits = maxi(1, roundi(boss.splits * k))
+	return boss
 
 
 ## This night's row of Config.NIGHTS; nights past the table use its last row.

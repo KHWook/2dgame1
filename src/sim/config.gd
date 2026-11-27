@@ -91,10 +91,18 @@ const TIER_NIGHTS := [
 ## start_fuel share of the tank, so a big torch is topped up further).
 const DAWN := { "heal": 1 }
 
-## Every few nights a boss comes, partway through the night, besides the usual enemies (which come a little less
-## often that night). kinds take turns: the first boss night brings the first, the next the second, and so on.
-## warn: seconds before it comes that the world picks the edge it comes from and says so (the screen points there).
-const BOSS := { "every": 5, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35, "warn": 2.0 }
+## Every few nights bosses come, partway through the night, besides the usual enemies (which come a little less
+## often that night). counts: how many come, from the night of a row (until the next row's). The first comes at at
+## (a share of the night), each next one apart seconds after the one before. kinds take turns: the first boss night
+## brings the first kind, the next the second, and so on; on a night with several, each next boss is the next kind.
+## warn: seconds before each comes that the world picks the edge it comes from and says so (the screen points there).
+## strength: what a boss's hp (and the numbers it summons and breaks into, never under one) is multiplied by on the boss night
+## numbered n from 1: first, plus grow for each boss night before it, at most most. The first boss is gentle.
+const BOSS := {
+	"every": 3, "at": 0.25, "kinds": ["slime_king", "shade_lord"], "spawn_mult": 1.35, "warn": 2.0, "apart": 6.0,
+	"counts": [{ "from": 3, "count": 1 }, { "from": 12, "count": 2 }, { "from": 21, "count": 3 }],
+	"strength": { "first": 0.5, "grow": 0.2, "most": 1.5 },
+}
 
 const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 
@@ -116,9 +124,15 @@ const ENEMY := {
 ## leap (the slime king): every so many seconds, when the player is within range, it marks the spot where the player
 ## stands (but never closer to the torch than torch_gap beyond where it would smother it), crouches there for warn
 ## seconds, flies for air seconds and lands on the mark; a player within shock of the
-## mark is hurt. lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
+## mark is hurt. hops: every each-th leap is count short hops in a row instead, each marked and warned the same way
+## with its own warn, air and shock, toward where the player stands but at most reach pixels from the king.
+## lunge (the shade lord): it circles ring pixels outside the torch's light, where blows pass through it;
 ## every so many seconds it stops for warn seconds, then rushes to the torch at speed, smothers it for stay seconds
-## (in the light, so it can be cut) and walks back out into the dark.
+## (in the light, so it can be cut) and walks back out into the dark. split (the shade lord): every so many seconds
+## while it circles (the first first seconds after it comes) it stops and flickers for warn seconds, then count
+## decoys of it appear round its ring. A decoy
+## has no crown and dull eyes; it hurts no one and smothers nothing, rushes the torch when its lord does and fades
+## there; a blow in the light (where blows reach it) breaks it with no score; it fades after life seconds.
 ## charge (the boar): every so many seconds, on the field with the player within range, it fixes a line at the
 ## player and paws the ground for warn seconds, then charges along it at speed for dist pixels (or to the field's
 ## edge; blows do not stop it) and stands dazed for rest seconds.
@@ -133,12 +147,14 @@ const ENEMY_TYPES := {
 	"slime_king": {
 		"hp": 16, "speed": 9.0, "radius": 13.0, "target": "torch", "smother": 1.2, "split_count": 2, "splits_into": "big_slime",
 		"boss": true, "name": "슬라임 왕", "heavy": 0.15, "summon": { "kind": "slime", "every": 8.0, "count": 2 }, "score": 150,
-		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0, "torch_gap": 24.0 },
+		"leap": { "every": 5.0, "range": 110.0, "warn": 0.6, "air": 0.45, "shock": 24.0, "torch_gap": 24.0,
+			"hops": { "each": 2, "count": 3, "warn": 0.45, "air": 0.3, "shock": 18.0, "reach": 45.0 } },
 	},
 	"shade_lord": {
 		"hp": 18, "speed": 28.0, "radius": 10.0, "target": "torch", "smother": 2.0, "dark_proof": true,
 		"boss": true, "name": "그림자 군주", "heavy": 0.2, "summon": { "kind": "shade", "every": 7.0, "count": 2 }, "score": 150,
 		"lunge": { "every": 7.0, "warn": 1.0, "speed": 110.0, "stay": 3.5, "ring": 16.0 },
+		"split": { "every": 12.0, "first": 4.0, "warn": 0.9, "count": 2, "life": 9.0 },
 	},
 }
 

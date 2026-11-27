@@ -2,9 +2,11 @@
 ## player, to hurt them; or a log, to carry it off the field. It gets knocked back when hit. In the torch's light
 ## the warm glow slows it; out of it, a kind with dark_speed_mult hunts faster.
 ## A boss also has a pattern, always warned before it strikes (move says which part it is in): the slime king leaps
-## at the player and shakes the ground where it lands; the shade lord circles in the dark and now and then rushes
-## the torch. The world tells the screen "warn" { pos, at, enemy } when one is about to strike (at: where it will) and
-## "landed" { pos, enemy } when the slime king comes down.
+## at the player and shakes the ground where it lands, and every other time hops at them three times in a row; the
+## shade lord circles in the dark, now and then rushes the torch, and now and then splits off decoys of itself. The
+## world tells the screen "warn" { pos, at, enemy } when one is about to strike (at: where it will; for a split, where
+## it stands), "landed" { pos, enemy } when the slime king comes down, "decoy" { pos, enemy } where a decoy appears and
+## "faded" { pos, enemy } where one breaks or fades.
 ## A charger (the boar) has a pattern too: it stops and paws the ground with its line drawn, charges straight along
 ## it, and stands dazed where the charge ends. It tells "warn" as well, at: the end of its line.
 extends RefCounted
@@ -19,6 +21,7 @@ var T: Dictionary
 var pos: Vector2
 var vel := Vector2.ZERO
 var hp: int
+var full_hp: int # its hp when it came: its row's, or a boss's made stronger or gentler for the night (World._boss)
 var knock := Vector2.ZERO
 var flash := 0.0
 var dead := false
@@ -26,7 +29,15 @@ var gone := false # left the field with a log: it is removed, but that is not a 
 var at_torch := false # a smotherer that has reached the torch
 var carrying := false # a thief holding a log
 var summon_t := 0.0 # time until it next calls its kind (a boss with summon in its row)
-var move := "" # a pattern: "" (walking), "warn" (about to strike), "air" (the king's leap), "lunge", "stay" (the lord's rush and its time at the torch), "charge", "rest" (a charger's run and its daze after)
+var summons := 0 # how many it calls each time: its row's count, or a boss's made stronger or gentler for the night
+var splits := 0 # how many it breaks into when it dies: its row's split_count, or a boss's made so for the night
+var hops_left := 0 # the slime king's hops still to come in a run of hops, the one under way included; 0 for a leap
+var leaps := 0 # leaps (and runs of hops) started so far
+var split_t := 0.0 # the shade lord: time until it next splits, or, while it splits, until the decoys appear
+var decoy := false # a decoy of a boss (split): it hurts nothing, smothers nothing and breaks at a blow, for no score
+var lord = null # a decoy's boss: when it is gone, so are its decoys
+var life_t := 0.0 # time a decoy has left
+var move := "" # a pattern: "" (walking), "warn" (about to strike), "air" (the king's leap), "lunge", "stay" (the lord's rush and its time at the torch), "split" (the lord flickering before its decoys appear), "charge", "rest" (a charger's run and its daze after)
 var move_t := 0.0 # time left in this part of the pattern, or, walking, until the next strike
 var move_from := Vector2.ZERO # where the leap took off
 var move_to := Vector2.ZERO # where it lands, or where the rush goes, or where a charge would end
@@ -42,8 +53,13 @@ func _init(kind_: String, pos_: Vector2, tier_: int = 1) -> void:
 	T = row(kind, tier)
 	pos = pos_
 	hp = T.hp
+	full_hp = hp
+	splits = T.get("split_count", 0)
 	if T.has("summon"):
 		summon_t = T.summon.every
+		summons = T.summon.count
+	if T.has("split"):
+		split_t = T.split.first
 	if T.has("leap"):
 		move_t = T.leap.every
 	if T.has("lunge"):
@@ -73,6 +89,11 @@ static func row(kind_: String, tier_: int) -> Dictionary:
 
 func step(world) -> void:
 	flash = maxf(0.0, flash - Config.STEP)
+	if decoy:
+		life_t -= Config.STEP
+		if life_t <= 0.0 or lord.dead or lord.gone:
+			fade(world)
+			return
 	var flying := move == "air" # through the step it lands on, too
 	if T.has("leap"):
 		_leap(world)
@@ -88,6 +109,10 @@ func step(world) -> void:
 		return
 	var stop: float = Config.TORCH.reach + T.radius if T.target == "torch" else 0.0
 	at_torch = T.target == "torch" and (Config.TORCH.pos - pos).length() <= stop
+	if decoy and at_torch: # a decoy that reaches the torch is only smoke there
+		at_torch = false
+		fade(world)
+		return
 	if move == "lunge" and at_torch:
 		move = "stay"
 		move_t = T.lunge.stay
@@ -100,7 +125,7 @@ func step(world) -> void:
 		to = aim
 		knock = Vector2.ZERO
 	# Most smotherers stop at the torch; the shade lord stops only while it warns and while it stays, so it can leave.
-	var halt: bool = move == "warn" or move == "stay" or move == "rest" or (at_torch and not T.has("lunge"))
+	var halt: bool = move in ["warn", "stay", "rest", "split"] or (at_torch and not T.has("lunge"))
 	vel = knock if knock != Vector2.ZERO else (Vector2.ZERO if halt else to * speed)
 	knock *= KNOCK_KEEP
 	if knock.length() < E.knock_stop:
@@ -121,13 +146,15 @@ func _summon(world) -> void:
 	if summon_t > 0.0:
 		return
 	summon_t += T.summon.every
-	for i in T.summon.count:
-		var around: Vector2 = Vector2.from_angle(TAU * i / T.summon.count + world.time) * (T.radius + E.summon_gap)
+	for i in summons:
+		var around: Vector2 = Vector2.from_angle(TAU * i / summons + world.time) * (T.radius + E.summon_gap)
 		world.born.append(get_script().new(T.summon.kind, pos + around))
 
 
 ## The slime king's leap. Walking, it counts down to the next one, which it starts only with the player in range: it
 ## marks where the player stands and crouches; then it flies there, and where it lands it hurts a player too close.
+## Every leap.hops.each-th time it hops instead: the same, hops.count times in a row, each a short hop (hop()) at the
+## player marked afresh as the one before lands.
 func _leap(world) -> void:
 	var L: Dictionary = T.leap
 	var p = world.player
@@ -135,27 +162,49 @@ func _leap(world) -> void:
 		"":
 			move_t = maxf(0.0, move_t - Config.STEP)
 			if move_t <= 0.0 and not p.dead and pos.distance_to(p.pos) <= L.range:
-				move = "warn"
-				move_t = L.warn
-				move_from = pos
-				move_to = _off_torch(p.pos, L.torch_gap)
-				world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
+				leaps += 1
+				hops_left = L.hops.count if L.has("hops") and leaps % L.hops.each == 0 else 0
+				_mark(world)
 		"warn":
 			move_t -= Config.STEP
 			move_from = pos
 			if move_t <= 0.0:
 				move = "air"
-				move_t = L.air
+				move_t = hop().air
 		"air":
 			move_t -= Config.STEP
-			pos = move_from.lerp(move_to, clampf(1.0 - move_t / L.air, 0.0, 1.0))
+			pos = move_from.lerp(move_to, clampf(1.0 - move_t / hop().air, 0.0, 1.0))
 			if move_t <= 0.0:
 				pos = move_to
-				move = ""
-				move_t = L.every
 				world.events.append({ "kind": "landed", "pos": pos, "enemy": kind })
-				if pos.distance_to(p.pos) < L.shock + Config.PLAYER.radius:
+				if pos.distance_to(p.pos) < hop().shock + Config.PLAYER.radius:
 					p.hurt(pos)
+				if hops_left > 1 and not p.dead:
+					hops_left -= 1
+					_mark(world)
+				else:
+					hops_left = 0
+					move = ""
+					move_t = L.every
+
+
+## The leap or hop under way, or about to be: its warn, air and shock (Config: leap, or leap.hops while it hops).
+func hop() -> Dictionary:
+	return T.leap.hops if hops_left > 0 else T.leap
+
+
+## Marks where the leap (or the next hop) lands, crouches, and says so. A hop goes at the player but no further than
+## hops.reach.
+func _mark(world) -> void:
+	var p = world.player
+	var at: Vector2 = p.pos
+	if hops_left > 0:
+		at = pos + (p.pos - pos).limit_length(T.leap.hops.reach)
+	move = "warn"
+	move_t = hop().warn
+	move_from = pos
+	move_to = _off_torch(at, T.leap.torch_gap)
+	world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
 
 
 ## Where the king may land: never on the torch. A mark closer than gap pixels beyond where it would start smothering
@@ -178,11 +227,23 @@ func _lunge(world) -> void:
 	match move:
 		"":
 			move_t -= Config.STEP
+			if T.has("split") and not decoy:
+				split_t -= Config.STEP
 			if move_t <= 0.0:
 				move = "warn"
 				move_t = L.warn
 				move_to = Config.TORCH.pos
 				world.events.append({ "kind": "warn", "pos": pos, "at": move_to, "enemy": kind })
+			elif T.has("split") and not decoy and split_t <= 0.0:
+				move = "split"
+				split_t = T.split.warn
+				world.events.append({ "kind": "warn", "pos": pos, "at": pos, "enemy": kind })
+		"split": # it stands flickering; the rush's count waits meanwhile, so its decoys rush with it
+			split_t -= Config.STEP
+			if split_t <= 0.0:
+				move = ""
+				split_t = T.split.every
+				_split(world)
 		"warn":
 			move_t -= Config.STEP
 			if move_t <= 0.0:
@@ -192,6 +253,31 @@ func _lunge(world) -> void:
 			if move_t <= 0.0:
 				move = ""
 				move_t = L.every
+
+
+## The shade lord's decoys: split.count of them round its ring (evenly spaced from it, about the torch), each counting
+## down to the same rush as it, so they rush the torch together.
+func _split(world) -> void:
+	var S: Dictionary = T.split
+	for i in S.count:
+		var at: Vector2 = Config.TORCH.pos + (pos - Config.TORCH.pos).rotated(TAU * (i + 1) / (S.count + 1))
+		var d = get_script().new(kind, at)
+		d.decoy = true
+		d.lord = self
+		d.hp = 1
+		d.full_hp = 1
+		d.life_t = S.life
+		d.move_t = move_t
+		d.summon_t = INF
+		d.split_t = INF
+		world.born.append(d)
+		world.events.append({ "kind": "decoy", "pos": at, "enemy": kind })
+
+
+## A decoy breaks or fades: it is gone (not killed: it is worth nothing), and the screen hears where.
+func fade(world) -> void:
+	gone = true
+	world.events.append({ "kind": "faded", "pos": pos, "enemy": kind })
 
 
 ## A charger's run. Walking, it counts down to the next one, which it starts only on the field with the player in
@@ -298,9 +384,9 @@ func _thieve(world) -> void:
 		carrying = true
 
 
-## Up in the air during a leap: it touches nothing until it lands.
+## Up in the air during a leap: it touches nothing until it lands. A decoy touches nothing at all.
 func touches(p) -> bool:
-	if move == "air":
+	if move == "air" or decoy:
 		return false
 	return pos.distance_to(p.pos) < T.radius + Config.PLAYER.radius
 

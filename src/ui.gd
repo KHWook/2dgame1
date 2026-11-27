@@ -47,6 +47,8 @@ const PANEL_EDGE := Color("#4a3d5c")
 const ENDINGS := { "out": "횃불이 꺼졌다", "dead": "쓰러졌다" }
 const LEVEL := " Lv.%d" # after a name from level 2: Roman numerals read as bars ("||") in the pixel font
 const DAWN_SOON_SECONDS := 10.0
+const BOSS_NAME_WIDTH := 70.0 # room for a boss's name left of its bar
+const BOSS_NAME_GAP := 4.0
 
 ## The offer cards: size, gap, icon enlargement, colours.
 const CARD := Vector2(112.0, 0.0) # as tall as the tallest card's words
@@ -184,7 +186,8 @@ var gain_label: Label
 var clock_word: Label
 var clock: Label
 var fuel_time: Label
-var boss_name: Label
+var boss_name: Label # a boss on its way, over the bars
+var boss_names: Array = [] # the name of each boss on the field, left of its bar (Painter.boss_bar)
 
 var box: PanelContainer
 var heading: Label
@@ -251,8 +254,13 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	clock = _label(self, BIG, CREAM)
 	fuel_time = _label(self, SMALL, CREAM)
 	boss_name = _label(self, SMALL, RED, HORIZONTAL_ALIGNMENT_CENTER)
-	boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.BOSS_BAR.position.y - 15.0)
 	boss_name.size = Vector2(Painter.BOSS_BAR.size.x, 12.0)
+	for i in Config.BOSS.counts.map(func(r): return r.count).max():
+		var l := _label(self, SMALL, RED, HORIZONTAL_ALIGNMENT_RIGHT)
+		var bar: Rect2 = Painter.boss_bar(i)
+		l.size = Vector2(BOSS_NAME_WIDTH, 12.0)
+		l.position = Vector2(bar.position.x - BOSS_NAME_GAP - BOSS_NAME_WIDTH, bar.get_center().y - 7.0)
+		boss_names.append(l)
 
 	box = _panel(self, PANEL, 6.0)
 	var lines := VBoxContainer.new()
@@ -464,14 +472,17 @@ func _top(w, delta: float) -> void:
 	fuel_time.add_theme_color_override("font_color", RED if Painter.fuel_low(w) or smothered else CREAM)
 	painter.fuel_text_width = _width(fuel_time) if night else 0.0
 
-	var b = Painter.boss(w)
-	var coming: bool = w.boss_from != null
-	boss_name.visible = (b != null or coming) and night
-	if b != null:
-		boss_name.text = b.T.name
-	elif coming: # the painter points at the edge it comes from
-		var who: String = Config.ENEMY_TYPES[w.boss_kind()].name
+	var here: Array = Painter.bosses(w)
+	for i in boss_names.size():
+		boss_names[i].visible = night and i < here.size()
+		if boss_names[i].visible:
+			boss_names[i].text = here[i].T.name
+	var coming: Array = w.bosses_coming()
+	boss_name.visible = night and not coming.is_empty()
+	if boss_name.visible: # the painter points at the edge it comes from
+		var who: String = Config.ENEMY_TYPES[coming[0].kind].name
 		boss_name.text = "%s%s 다가온다!" % [who, _subject(who)]
+		boss_name.position = Vector2(Painter.BOSS_BAR.position.x, Painter.boss_bar(here.size()).position.y - 5.0)
 
 
 ## The box in the middle: the offer while you pick (and the taken card playing out just after), or how it ended.
@@ -862,6 +873,8 @@ func _hint_frame(w, delta: float) -> void:
 	var bottom := Painter.VIEW.y - HINT_BOTTOM
 	if boss_name.visible:
 		bottom = boss_name.position.y - 2.0
+	elif boss_names[0].visible:
+		bottom = minf(bottom, Painter.boss_bar(Painter.bosses(w).size() - 1).position.y - 4.0)
 	var k := minf(hint_age / FADE, 1.0)
 	hint_box.position = Vector2(roundf((Painter.VIEW.x - hint_box.size.x) / 2.0), roundf(bottom - hint_box.size.y + (1.0 - k) * HINT_RISE))
 	var out := minf(1.0, hint_steps / (60.0 * FADE * 2.0))

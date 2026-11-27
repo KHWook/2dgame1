@@ -72,6 +72,9 @@ func step(w) -> void:
 			"boss":
 				_burst(BURSTS.arrive, ev.pos, Vector2.UP, Looks.bit_colours(ev.enemy, 1))
 				poofs.append({ "pos": ev.pos, "age": 0 })
+			"decoy", "faded": # a decoy of a boss appears, or breaks into smoke
+				_burst(BURSTS.kill, ev.pos, Vector2.UP, Looks.bit_colours(ev.enemy, 1))
+				poofs.append({ "pos": ev.pos, "age": 0 })
 			"landed":
 				_burst(BURSTS.landed, ev.pos, Vector2.UP, _keys(DUST) + Looks.bit_colours(ev.enemy, 1))
 				poofs.append({ "pos": ev.pos, "age": 0 })

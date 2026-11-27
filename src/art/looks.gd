@@ -31,7 +31,11 @@ const ENEMIES := {
 	"boar": { "steps": 7, "turns": true, "bits": ["b", "B", "S"], "in_dark": ["i", "i"] },
 	"slime_king": { "steps": 20, "anchor": Vector2(16.0, 17.0), "shadow": "shadow_huge", "shadow_at": Vector2(-14.0, 5.0), "bits": ["h", "g", "Y"], "in_dark": ["W", "h"] },
 	"shade_lord": { "steps": 16, "anchor": Vector2(12.0, 14.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 6.0), "bits": ["7", "8", "Y"], "glow": "shade_lord_eyes" },
+	"shade_decoy": { "steps": 16, "anchor": Vector2(12.0, 14.0), "shadow": "shadow_big", "shadow_at": Vector2(-10.0, 6.0), "bits": ["7", "8", "9"], "glow": "shade_decoy_eyes" },
 }
+## What a boss's decoys (its row's split) look like: a look above, drawn as <look>_a and <look>_b. The shade lord's
+## have its shape under a plain hood, with dull eyes where its own burn blue: the real one has the crown and the blue eyes.
+const DECOYS := { "shade_lord": "shade_decoy" }
 
 ## One line that says what a thing does, shown the first time it turns up in a game. One per enemy kind, and "berry".
 const HINTS := {
@@ -42,7 +46,7 @@ const HINTS := {
 	"big_slime": "큰 슬라임: 죽으면 둘로 갈라진다",
 	"boar": "멧돼지: 멈춰 붉은 띠가 깔리면 곧장 돌진한다, 띠 밖으로 비켜라. 돌진 뒤 어지러울 때 베라",
 	"slime_king": "슬라임 왕: 가까이 가면 뛰어올라 덮친다, 빨간 원 밖으로 피하라",
-	"shade_lord": "그림자 군주: 어둠 속을 돌다 횃불로 달려든다, 빛 안에 있을 때 베라",
+	"shade_lord": "그림자 군주: 어둠 속을 돌다 횃불로 달려든다, 빛 안에 있을 때 베라. 왕관이 없고 눈이 흐린 분신은 가짜다",
 	"berry": "열매: 다쳤을 때 밟으면 체력이 회복된다",
 }
 
@@ -132,6 +136,13 @@ static func problems() -> Array:
 		if Sprites.missing(frames).is_empty():
 			out.append_array(dark_problems(kind, look, frames.map(func(f): return Sprites.rows(f))))
 		out.append_array(tier_problems(kind, Config.ENEMY_TYPES[kind].get("boss", false), Sprites.TIERS.get(kind, []), TIER_NAMES.get(kind, []), Config.TIERS.size()))
+	for kind in Config.ENEMY_TYPES:
+		if Config.ENEMY_TYPES[kind].has("split") and not DECOYS.has(kind):
+			out.append("Boss '%s' splits off decoys but they have no look. Fix: add it to DECOYS in src/art/looks.gd (and draw that look's _a and _b in src/art/sprites.gd)." % kind)
+	for kind in DECOYS:
+		wanted.append_array([FRAMES[0] % DECOYS[kind], FRAMES[1] % DECOYS[kind]])
+		if enemy(DECOYS[kind]).glow != "":
+			wanted.append(enemy(DECOYS[kind]).glow)
 	for id in Config.UPGRADES:
 		wanted.append(ICON % id)
 	for id in TORCH_SIDE:
