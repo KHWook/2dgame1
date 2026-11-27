@@ -29,6 +29,7 @@ const BURSTS := {
 	# the keeper's own blows (STRIKES); "streak" draws a pixel as a short line along its flight, "fall" pulls it down (px/s²)
 	"clang": { "count": 4, "fan": 0.55, "speed": [90.0, 150.0], "life": [0.06, 0.12], "keep": 0.01, "streak": true },
 	"chop": { "count": 7, "fan": 1.1, "speed": [50.0, 110.0], "life": [0.25, 0.45], "keep": 0.05, "fall": 260.0 },
+	"ground": { "count": 8, "fan": PI, "speed": [30.0, 70.0], "life": [0.2, 0.35], "keep": 0.05, "fall": 200.0 }, # chips and dirt off a chop's landing
 	"pop": { "count": 8, "fan": PI, "speed": [40.0, 90.0], "life": [0.12, 0.25], "keep": 0.02 },
 	"fizzle": { "count": 3, "fan": 0.6, "speed": [8.0, 20.0], "life": [0.3, 0.5], "keep": 0.3 }, # smoke rising off a spent ember
 	"cast": { "count": 4, "fan": 0.45, "speed": [40.0, 90.0], "life": [0.08, 0.16], "keep": 0.02 }, # out of the mage's hand
@@ -69,7 +70,8 @@ const MAX_FLASHES := 24
 ## ends at (0: the event's shock)].
 ## A burst: an ember bursting on the enemy it stopped in, out to its "burst" event's radius (World.in_splash: what
 ## the ring is seen to cover, it burns).
-const RINGS := { "debris": [18, 16, 0.0], "smoke": [16, 6, 14.0], "wisp": [16, 4, 8.0], "burst": [12, 14, 0.0] }
+## Dust: a chop coming down, out to the edge of the round it strikes (world.chop_radius(), about world.chop_centre()).
+const RINGS := { "debris": [18, 16, 0.0], "smoke": [16, 6, 14.0], "wisp": [16, 4, 8.0], "burst": [12, 14, 0.0], "dust": [14, 14, 0.0] }
 const DEBRIS := ["m", "M", "t", "T", "c"]
 const DEBRIS_HOP := 3.0 # pixels a chunk rises on its way out
 
@@ -80,6 +82,7 @@ var rings: Array = [] # { pos, age in steps, kind (RINGS), radius it ends at }
 var flashes: Array = [] # a blow's mark or a fizzle: { pos, age in steps, kind ("strike"/"fizzle"), frames, steps }
 var _flying: Array = [] # the embers in flight after the last step: [bolt, enemies it had hit, where it was]
 var flare := 0.0 # 1 the moment the torch is fed, fading to 0: how much brighter it burns
+var _was_t := -1.0 # the keeper's attack_t after the last step: a chop lands on the step it passes attack_hit_at
 
 
 func _init(seed_value: int) -> void:
@@ -133,6 +136,11 @@ func step(w) -> void:
 			"burst":
 				_ring("burst", ev.pos, ev.radius)
 	_follow(w)
+	if landed(w, _was_t):
+		var at: Vector2 = w.chop_centre(w.player.pos, w.player.face)
+		_ring("dust", at, w.chop_radius())
+		_burst(BURSTS.ground, at, Vector2.UP, _keys(STRIKES.woodcutter.colours + DUST))
+	_was_t = w.player.attack_t
 	if bits.size() > MAX_BITS:
 		bits = bits.slice(bits.size() - MAX_BITS)
 	if poofs.size() > MAX_POOFS:
@@ -176,7 +184,7 @@ func step(w) -> void:
 
 
 ## Whether a hit (or kill) told this step is the keeper's own blade landing: it swings a weapon, the blow is landing
-## now (attack_hit_at to attack_hit_until) and what was struck is in the swing (world.in_swing). Thorns or the torch's
+## now (attack_hit_at to attack_hit_until) and what was struck is in the blow (world.in_blow). Thorns or the torch's
 ## sparks that happen to strike during a swing count too; it only chooses a picture.
 static func blow(w, ev) -> bool:
 	if Looks.character(w.character).weapon == "" or w.player.attack_t < 0.0:
@@ -184,7 +192,16 @@ static func blow(w, ev) -> bool:
 	var t: float = w.player.attack_t
 	if t < w.stat("attack_hit_at") - Config.STEP or t > w.stat("attack_hit_until") + Config.STEP:
 		return false
-	return w.in_swing(ev.pos, Config.ENEMY_TYPES[ev.enemy].radius + 2.0)
+	return w.in_blow(ev.pos, Config.ENEMY_TYPES[ev.enemy].radius + 2.0)
+
+
+## Whether a chop came down on the last step (it was at was before it): the keeper chops (a spin goes round
+## instead) and its attack passed attack_hit_at, whether or not anything was there to strike.
+static func landed(w, was: float) -> bool:
+	if w.stats.attack != "chop" or w.player.spin or w.player.dead:
+		return false
+	var hit_at: float = w.stat("attack_hit_at")
+	return w.player.attack_t >= hit_at and was < hit_at
 
 
 ## A hit on the step an ember was cast, close enough for that ember to have reached it already: an ember that burns
@@ -266,6 +283,11 @@ func _paint_ring(c: CanvasItem, r: Dictionary) -> void:
 			var size := 2.0 if k < 0.5 else 1.0
 			var colour: Color = Sprites.PALETTE[FIRE[mini(FIRE.size() - 1, int(k * FIRE.size() + (i % 2) * 0.5))]]
 			c.draw_rect(Rect2((at - Vector2(size, size) / 2.0).round(), Vector2(size, size)), Color(colour, 1.0 - k * k))
+		elif r.kind == "dust": # dirt thrown out along the ground to the round's edge, thinning as it settles
+			var size := 2.0 if k < 0.4 and i % 2 == 0 else 1.0
+			var colour: Color = Sprites.PALETTE[DUST[i % DUST.size()]]
+			var half := Vector2(size, size) / 2.0
+			c.draw_rect(Rect2((at - Vector2.from_angle(a) * half.x - half).round(), Vector2(size, size)), Color(colour, 1.0 - k * k))
 		elif r.kind == "debris":
 			var size := 2.0 if k < 0.5 and i % 2 == 0 else 1.0
 			var colour: Color = Sprites.PALETTE[DEBRIS[i % DEBRIS.size()]]

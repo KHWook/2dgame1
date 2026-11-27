@@ -1593,6 +1593,10 @@ const VARIANTS := {
 	"woodcutter_down_atk": ["woodcutter_down_a", { 11: "....krRrRRrRk...", 12: "....knnYnnnsk...", 13: "...kEDDkDDEk....", 14: "..kBBk..kBBk....", 15: "...kk....kk....." }],
 	"woodcutter_up_atk": ["woodcutter_up_a", { 11: "...krRrRRrRk....", 12: "...ksRrRRrRk....", 13: "...kEDDkDDEk....", 14: "...kBBk..kBBk...", 15: "....kk....kk...." }],
 	"woodcutter_side_atk": ["woodcutter_side_a", { 12: "......knnnnk....", 13: ".....kEEkEEk....", 14: "....kBk..kBk....", 15: "....kk....kk...." }],
+	# the chop's wind-up (painter.gd's _keeper): both arms up with the axe raised over the head, feet planted wide
+	"woodcutter_down_raise": ["woodcutter_down_a", { 1: ".k...kwwwwk...k.", 2: "kskkkkGGGGkkkksk", 3: "krkGGgGGgGGgGkrk", 4: "krkGgGGgGGgGGkrk", 5: "kRkjjjjjjjjjjkRk", 6: ".kk5ssssssss5kk.", 11: "....kRrRRrRk....", 12: "....knnYnnnk....", 13: "...kEDDkkDDEk...", 14: "..kBBk....kBBk..", 15: "..kk........kk.." }],
+	"woodcutter_up_raise": ["woodcutter_up_a", { 1: ".k...kwwwwk...k.", 2: "kskkkkGGGGkkkksk", 3: "krkGGgGGgGGgGkrk", 4: "krkGgGGgGGgGGkrk", 5: "kRkjjjjjjjjjjkRk", 6: ".kk5565565565kk.", 11: "....krRrRrRk....", 12: "....kRrRrRrk....", 13: "...kEDDkkDDEk...", 14: "..kBBk....kBBk..", 15: "..kk........kk.." }],
+	"woodcutter_side_raise": ["woodcutter_side_a", { 0: ".ksk..kkk.......", 1: ".krk.kwwwk......", 2: ".krkkkGGGkkk....", 3: ".kRkGgGGgGGgk...", 13: "......kEEEEk....", 14: ".....kBk.kBk....", 15: "....kk....kk...." }],
 	"mage_down_b": ["mage_down_a", { 12: "...kxVQYQQVsk...", 14: "...kVVVVVVVVk...", 15: "....kBk...kk...." }],
 	"mage_up_b": ["mage_up_a", { 12: "...ksQQQQQQxk...", 15: "....kk...kBk...." }],
 	"mage_side_b": ["mage_side_a", { 12: "....kQQQQQxk....", 13: "...kQQQQQQQQk...", 14: "...kVVVVVVVVk...", 15: "....kBk...kBk..." }],

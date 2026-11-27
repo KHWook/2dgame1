@@ -296,9 +296,41 @@ func bolt_radius() -> float:
 	return stats.bolt.radius + mod("bolt_bonus", 0.0)
 
 
-## How far an attack reaches, for aiming: the swing's reach, or how far the ember flies.
+## How far an attack reaches, for aiming: the swing's reach, the far edge of a chop's round, or how far the ember flies.
 func attack_range() -> float:
+	if stats.attack == "chop":
+		return chop_ahead() + chop_radius()
 	return bolt_range() if stats.attack == "shoot" else reach()
+
+
+## A chop (attack "chop", Config.CHARACTERS' chop): how far in front of the keeper the middle of the round it comes
+## down on is, and the round's radius, with the upgrades (chop_ahead, chop_radius).
+func chop_ahead() -> float:
+	return stats.chop.ahead + mod("chop_ahead", 0.0)
+
+
+func chop_radius() -> float:
+	return stats.chop.radius + mod("chop_radius", 0.0)
+
+
+## The middle of the round a chop from from, facing face, comes down on.
+func chop_centre(from: Vector2, face: Vector2) -> Vector2:
+	return from + face * chop_ahead()
+
+
+## Whether a chop from from facing face (the keeper's own by default) strikes a body of radius r at at: some of the
+## body is inside the round, chop_radius() about chop_centre(). Nothing else counts: what presses against the keeper's
+## back or side is not struck. The painter draws the impact inside this round (src/art/painter.gd's chop_marks).
+func in_chop(at: Vector2, r: float, from = null, face = null) -> bool:
+	var c := chop_centre(player.pos if from == null else from, player.face if face == null else face)
+	return at.distance_to(c) < chop_radius() + r
+
+
+## Whether the blow under way strikes a body of radius r at at: a chop's round (a spin still goes round), or the swing.
+func in_blow(at: Vector2, r: float) -> bool:
+	if stats.attack == "chop" and not player.spin:
+		return in_chop(at, r)
+	return in_swing(at, r)
 
 
 ## The arc of the swing under way: all the way round for a spin.
@@ -537,8 +569,15 @@ func _sparks() -> void:
 	sparks = sparks.filter(func(sp): return sp.life > 0.0)
 
 
-## Whether a living enemy's body comes within attack_range() of from: what the auto_attack upgrade attacks.
+## Whether a living enemy's body comes within attack_range() of from: what the auto_attack upgrade attacks. A chop
+## asks more: that an enemy is inside the round it would come down on, turned as a pressed attack turns (aim).
 func foe_in_reach(from: Vector2) -> bool:
+	if stats.attack == "chop":
+		var face := aim(from, player.face)
+		for e in enemies:
+			if not e.dead and in_chop(e.pos, e.T.radius, from, face):
+				return true
+		return false
 	var r: float = attack_range()
 	for e in enemies:
 		if not e.dead and from.distance_to(e.pos) - e.T.radius < r:
@@ -558,11 +597,11 @@ func aim(from: Vector2, face: Vector2) -> Vector2:
 
 
 ## The player's swing lands, on every step from PLAYER.attack_hit_at to attack_hit_until: hit everything in it
-## (in_swing) that this swing has not hit yet.
+## (in_blow: the swing, or a chop's round) that this swing has not hit yet.
 func melee(p) -> void:
 	var dmg: int = stats.damage + (mod("lit_damage", 0) if in_light(p.pos) else 0)
 	for e in enemies:
-		if not e.dead and not p.struck.has(e) and in_swing(e.pos, e.T.radius):
+		if not e.dead and not p.struck.has(e) and in_blow(e.pos, e.T.radius):
 			p.struck.append(e)
 			_damage(e, dmg, p.pos, true, stats.push)
 

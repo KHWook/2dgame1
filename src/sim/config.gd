@@ -8,8 +8,8 @@ const FIELD := Rect2(8.0, 8.0, 464.0, 254.0) # where the player can walk: the vi
 
 ## The keeper, as the knight plays it; a character (CHARACTERS) changes some of these. A swing's blow lands from
 ## attack_hit_at to attack_hit_until seconds into it (while the painter shows its trail), on every enemy that is in it
-## then (World.in_swing), each at most once per swing. attack: "swing" (a blow round the keeper) or "shoot" (an ember
-## fired at attack_hit_at, see bolt). damage: what a blow does; push: how hard it knocks back (share of ENEMY.knock).
+## then (World.in_blow), each at most once per swing. attack: "swing" (a blow round the keeper), "chop" (a blow that
+## lands in front of it, see chop) or "shoot" (an ember fired at attack_hit_at, see bolt). damage: what a blow does; push: how hard it knocks back (share of ENEMY.knock).
 ## carry: how many logs it can hold at once; carry_speed is its speed with one, carry_slow less for each more.
 ## log_bonus: fuel each log it brings adds besides TORCH.log_fuel.
 const PLAYER := {
@@ -29,6 +29,9 @@ const PLAYER := {
 ## of a fan (the spin upgrade as the mage has it). splash: where an ember burns an enemy it bursts, and splash_damage
 ## burns every other enemy whose body comes within splash pixels of that enemy's middle (World.in_splash), pushed out
 ## by splash_push of a blow's knockback, so a crowd melts and does not just queue up for the next shot.
+## chop (attack "chop"): the axe comes down on a round of radius pixels whose middle is ahead pixels in front of the
+## keeper along its facing (World.in_chop); what is behind it or at its sides is not struck, however close. A spin
+## (the spin upgrade) still goes all the way round at reach.
 ## Upgrade rows can read differently per character (UPGRADES' as).
 const CHARACTERS := {
 	"knight": {
@@ -37,11 +40,12 @@ const CHARACTERS := {
 		"stats": {},
 	},
 	"woodcutter": {
-		"name": "나무꾼", "text": "느리지만 넓고 센 도끼. 장작을 셋까지 들고, 하나에 연료 +5",
-		"trait": "약점: 느린 휘두르기",
+		"name": "나무꾼", "text": "느리지만 앞을 세게 내리찍는 도끼. 장작을 셋까지 들고, 하나에 연료 +5",
+		"trait": "약점: 느린 도끼질",
 		"bars": [["힘", 4], ["거리", 2], ["장작", 5]],
-		"stats": { "attack_time": 0.38, "attack_hit_at": 0.13, "attack_hit_until": 0.2, "reach": 21.0, "arc": 0.0,
-			"damage": 2, "push": 1.2, "carry": 3, "carry_speed": 70.0, "carry_slow": 6.0, "log_bonus": 5.0 },
+		"stats": { "attack": "chop", "attack_time": 0.38, "attack_hit_at": 0.13, "attack_hit_until": 0.2, "reach": 21.0,
+			"chop": { "ahead": 19.0, "radius": 14.0 },
+			"damage": 2, "push": 1.5, "carry": 3, "carry_speed": 70.0, "carry_slow": 6.0, "log_bonus": 5.0 },
 	},
 	"mage": {
 		"name": "불씨 술사", "text": "겨눈 쪽으로 불씨를 쏜다. 빛 안의 적에게 피해 +1, 하나를 꿰뚫는다",
@@ -209,8 +213,10 @@ const ENEMY_TYPES := {
 ## row here and handle its key there. as (optional): how the upgrade reads for a character, merged over the row (a
 ## key set to null is taken out; levels are merged one by one), for the characters whose attack is not the sword's.
 ## auto_attack (swift's last level): the keeper attacks by itself whenever its attack is ready, an enemy is within
-## World.attack_range() and it carries nothing (the attack key would put the logs down), turned to the nearest as a
-## pressed attack is (World.aim). With nothing in reach it does not swing at the air. The key still works as before.
+## World.attack_range() (for a chop: in the round it would come down on, turned to the nearest) and it carries nothing
+## (the attack key would put the logs down), turned to the nearest as a pressed attack is (World.aim). With nothing in
+## reach it does not swing at the air. The key still works as before. chop_ahead, chop_radius: pixels added to a
+## chop's (Config.CHARACTERS' chop) ahead and radius.
 ## from_night (optional): the torch offers it only from that night on (World._offer); before it, the offers are
 ## drawn as if the row were not there. A row with one goes last, so the rows before it keep their order.
 const UPGRADES := {
@@ -230,7 +236,8 @@ const UPGRADES := {
 		"as": { "woodcutter": { "text": "장작을 여럿 들어도 느려지지 않는다" } } },
 	"long_blade": { "name": "긴 칼날", "text": "베기 거리 +8", "reach_bonus": 8.0,
 		"levels": [{ "text": "베기 거리 +14", "reach_bonus": 14.0 }],
-		"as": { "woodcutter": { "name": "긴 도끼자루" },
+		"as": { "woodcutter": { "name": "긴 도끼자루", "text": "도끼가 5 더 멀리 찍는다", "chop_ahead": 5.0,
+				"levels": [{ "text": "도끼가 9 더 멀리 찍는다", "chop_ahead": 9.0 }] },
 			"mage": { "name": "먼 불씨", "text": "불씨가 날아가는 거리 +30", "reach_bonus": null, "range_bonus": 30.0,
 				"levels": [{ "text": "불씨가 날아가는 거리 +50", "reach_bonus": null, "range_bonus": 50.0 }] } } },
 	"bright": { "name": "밝은 불", "text": "빛 반경 +30%, 빛 안에서 15% 빨리 걷는다", "light_mult": 1.3, "lit_speed_mult": 1.15,
@@ -242,7 +249,8 @@ const UPGRADES := {
 		"levels": [{ "text": "나를 때린 적도 피해 2, 바짝 붙은 적은 0.7초마다 찔린다", "thorns": 2, "thorn_every": 0.7 }] },
 	"wide_swing": { "name": "넓은 베기", "text": "베기 범위가 넓어진다", "arc_bonus": -0.5,
 		"levels": [{ "text": "베기 범위가 더 넓어진다", "arc_bonus": -0.8 }],
-		"as": { "woodcutter": { "name": "넓은 휘두르기" },
+		"as": { "woodcutter": { "name": "넓게 찍기", "text": "찍는 자리가 넓어진다 (반경 +3)", "arc_bonus": null, "chop_radius": 3.0,
+				"levels": [{ "text": "찍는 자리가 더 넓어진다 (반경 +5)", "arc_bonus": null, "chop_radius": 5.0 }] },
 			"mage": { "name": "큰 불씨", "text": "불씨가 커져 맞히는 반경 +2", "arc_bonus": null, "bolt_bonus": 2.0,
 				"levels": [{ "text": "불씨가 더 커져 맞히는 반경 +3.5", "arc_bonus": null, "bolt_bonus": 3.5 }] } } },
 	"fire_blade": { "name": "불붙은 칼", "text": "빛 안에서 베면 피해 +1", "lit_damage": 1,
@@ -253,7 +261,8 @@ const UPGRADES := {
 		"levels": [{ "text": "돌진을 0.7초마다 쓸 수 있다", "dash_every": 0.7 }] },
 	"spin": { "name": "회전 베기", "text": "세 번째 베기마다 한 바퀴를 벤다", "spin_every": 3,
 		"levels": [{ "text": "두 번째 베기마다 한 바퀴를 벤다", "spin_every": 2 }],
-		"as": { "mage": { "name": "세 갈래 불씨", "text": "세 번째 쏠 때마다 불씨 셋을 부채꼴로 쏜다", "spin_every": null, "spread_every": 3,
+		"as": { "woodcutter": { "name": "회전 도끼", "text": "세 번째 도끼질마다 한 바퀴를 휘두른다", "levels": [{ "text": "두 번째 도끼질마다 한 바퀴를 휘두른다" }] },
+			"mage": { "name": "세 갈래 불씨", "text": "세 번째 쏠 때마다 불씨 셋을 부채꼴로 쏜다", "spin_every": null, "spread_every": 3,
 			"levels": [{ "text": "두 번째 쏠 때마다 불씨 셋을 쏜다", "spin_every": null, "spread_every": 2 }] } } },
 	"spark": { "name": "불씨 화살", "text": "횃불이 2.5초마다 빛 안의 적에게 불씨를 쏜다", "spark_every": 2.5,
 		"levels": [{ "text": "횃불이 1.6초마다 불씨를 쏜다", "spark_every": 1.6 },

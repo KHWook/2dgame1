@@ -1,5 +1,7 @@
 ## A simple deterministic player for the replay test, balance runs and `--bot` demo runs: fights what is close, otherwise hauls logs.
-## It plays every character (Config.CHARACTERS): a swinger stands off and swings; a shooter keeps its distance and
+## It plays every character (Config.CHARACTERS): a swinger stands off and swings; a chopper stands off as a swinger
+## does (on the same beat, so the characters are measured by one way of playing), but never so close that the foe is
+## short of its round, and chops only when the blow would strike (World.foe_in_reach); a shooter keeps its distance and
 ## shoots; one that can carry several logs picks up more on the way when the torch can wait.
 ## It reads the world and returns the InputFrame a player would produce; it never changes the world.
 extends RefCounted
@@ -11,6 +13,7 @@ const FIGHT_RANGE := 26.0
 const SWING_EVERY := 12 # steps between swing presses (shortened as the swing is: swift)
 const DEADZONE := 2.0
 const KEEP := 2.0 # how far outside a foe's touch the bot stands while it fights it
+const CHOP_INSIDE := 2.0 # a chopper stands at least this far inside the near edge of its round from the foe's body
 const DASH_FROM := 60.0 # with the dash upgrade, the bot dashes toward a goal at least this far away
 const HUNGRY := 2 # the bot goes for a berry at this hp or less; above it, hauling logs matters more
 const CLEAR_OF := 6.0 # how far past a marked landing's shock, or a charge's lane, the bot steps to be out of it
@@ -45,6 +48,7 @@ func frame(w) -> InputFrame:
 	var lane = _lane(w, p.pos)
 	var rush: bool = real.any(func(e): return e.T.has("lunge") and e.move in ["warn", "lunge"])
 	var shooter: bool = w.stats.attack == "shoot"
+	var chopper: bool = w.stats.attack == "chop"
 	if landing != null:
 		# a leap is marked on it: step out of the shock sideways to the leap, on the torch's side (not into a fence)
 		var side: Vector2 = (landing.move_to - landing.pos).normalized().orthogonal()
@@ -72,11 +76,15 @@ func frame(w) -> InputFrame:
 		pass # blows pass through it out here: walk back to the torch (the goal already) and fight it in the light
 	elif not shooter and foe != null and p.pos.distance_to(foe.pos) < FIGHT_RANGE:
 		var away: Vector2 = (p.pos - foe.pos).normalized()
-		goal = foe.pos + away * (foe.T.radius + Config.PLAYER.radius + KEEP) # stand off instead of walking into it
+		var off: float = foe.T.radius + Config.PLAYER.radius + KEEP # stand off instead of walking into it
+		if chopper: # not so close that the foe is short of the round the axe comes down on (a long haft's)
+			off = maxf(off, w.chop_ahead() - w.chop_radius() - foe.T.radius + CHOP_INSIDE)
+		goal = foe.pos + away * off
 		if p.carrying:
 			f.pressed["attack"] = true # drop the log to fight
 		elif w.steps % maxi(1, roundi(SWING_EVERY * w.mod("attack_mult", 1.0))) == 0: # a quicker swing (swift), a quicker beat
-			f.pressed["attack"] = true
+			if not chopper or w.foe_in_reach(p.pos): # a chop only where it would strike (World.foe_in_reach)
+				f.pressed["attack"] = true
 	elif smotherer != null and shooter and not p.carrying:
 		goal = _kite(w, p, smotherer, f) # shoot it off the torch from a step away
 	elif smotherer != null:

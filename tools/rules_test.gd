@@ -1530,7 +1530,7 @@ static func _characters() -> Array:
 		for key in ["name", "text", "trait", "bars", "stats"]:
 			_expect(out, "character %s has %s" % [id, key], c.has(key), true)
 		for key in c.stats:
-			_expect(out, "character %s's stat %s is one PLAYER has" % [id, key], Config.PLAYER.has(key) or key == "bolt", true)
+			_expect(out, "character %s's stat %s is one PLAYER has" % [id, key], Config.PLAYER.has(key) or key in ["bolt", "chop"], true)
 		var cw = World.new(1, id)
 		_expect(out, "%s's max hp is its hp" % id, cw.max_hp(), c.stats.get("hp", Config.PLAYER.hp))
 		_expect(out, "%s starts with full hearts" % id, cw.player.hp, cw.max_hp())
@@ -1542,38 +1542,64 @@ static func _characters() -> Array:
 	return out
 
 
-## The woodcutter's axe: slower than the sword (its blow lands later and the swing lasts longer), wider (what the
-## sword's arc misses, the axe's does not), harder (2 a blow: a slime falls at once) and it knocks back further.
+## The woodcutter's axe chops (attack "chop"): slower than the sword (its blow lands later and the swing lasts
+## longer), and it comes down on a round in front of him, Config.CHARACTERS' chop: ahead pixels along his facing,
+## radius pixels wide. A body a hair inside the round's far edge is struck, a hair outside is not; what presses
+## against his back or his side is not struck (the sword's wide arc cuts both); a spin still goes round. It strikes
+## hard (2 a blow: a slime falls at once) and knocks back further, lands at attack_hit_at and not before, strikes
+## what comes into the round while the blow lands and not after, and the long haft and the wide chop move and widen
+## the round.
 static func _woodcutter() -> Array:
 	var out := []
 	var C: Dictionary = World.character_stats("woodcutter")
+	var R: float = Config.ENEMY_TYPES.slime.radius
+	var body: float = Config.PLAYER.radius
 	_expect(out, "the axe swings slower than the sword", C.attack_time > Config.PLAYER.attack_time and C.attack_hit_at > Config.PLAYER.attack_hit_at, true)
-	_expect(out, "the axe sweeps wider than the sword", C.arc < Config.PLAYER.arc, true)
-	var body: float = asin(Config.ENEMY_TYPES.big_slime.radius / 20.0) # in_swing allows for the body's size
-	var wide := (acos(Config.PLAYER.arc) + acos(C.arc)) / 2.0 + body # between the sword's edge and the axe's
-	for who in ["knight", "woodcutter"]:
-		var w = _night(DARK, [], who)
-		var side = _add(w, "big_slime", Vector2.from_angle(wide) * 20.0)
-		side.T = side.T.duplicate()
-		side.T.speed = 0.0
-		w.player.attack_t = 0.0
-		w.player.struck = []
-		_play(w, roundi(w.stat("attack_time") / Config.STEP))
-		_expect(out, "a big slime %.0f degrees off the facing is struck by the %s" % [rad_to_deg(wide), who], side.hp < side.full_hp, who == "woodcutter")
+	_expect(out, "the woodcutter chops", [C.attack, C.chop.has("ahead"), C.chop.has("radius")], ["chop", true, true])
+	_expect(out, "the woodcutter aims as far as the round's far edge", World.new(1, "woodcutter").attack_range(), C.chop.ahead + C.chop.radius)
+	# Where each slime stands, facing right, and whether the chop strikes it; the knight's sword against the same.
+	var spots := [
+		["in the middle of the round", Vector2(C.chop.ahead, 0.0), true, true],
+		["a hair inside the far edge", Vector2(C.chop.ahead + C.chop.radius + R - 0.5, 0.0), true, false],
+		["a hair outside the far edge", Vector2(C.chop.ahead + C.chop.radius + R + 0.5, 0.0), false, false],
+		["a hair inside the edge, off to the side", Vector2(C.chop.ahead, 0.0) + Vector2.from_angle(1.2) * (C.chop.radius + R - 0.5), true, null],
+		["a hair outside the edge, off to the side", Vector2(C.chop.ahead, 0.0) + Vector2.from_angle(1.2) * (C.chop.radius + R + 0.5), false, null],
+		["pressed against his back", Vector2(-(body + R - 1.0), 0.0), false, true],
+		["pressed against his side", Vector2(0.0, body + R - 1.0), false, true],
+		["at his side, a step off", Vector2(0.0, body + R + 3.0), false, true],
+		["behind him, a step off", Vector2(-(body + R + 3.0), 0.0), false, false],
+	]
+	for spot in spots: # [where, from the woodcutter, struck by the chop, struck by the sword (null: not compared)]
+		for who in ["woodcutter", "knight"] if spot[3] != null else ["woodcutter"]:
+			var w = _night(DARK, [], who)
+			w.player.invuln = NEVER # what presses against him would hurt him and knock him about
+			var e = _planted(w, "slime", spot[1])
+			if who == "woodcutter":
+				_expect(out, "World.in_chop and the hit agree on a slime %s" % spot[0], w.in_chop(e.pos, R), spot[2])
+			w.player.attack_t = 0.0 # a swing just begun, facing right (pressing attack would turn it to the slime)
+			w.player.struck = []
+			_play(w, roundi(w.stat("attack_time") / Config.STEP))
+			_expect(out, "a slime %s is struck by the %s" % [spot[0], who], e.hp < e.full_hp, spot[2] if who == "woodcutter" else spot[3])
+	# A spin still goes round: the one against his back is cut then.
+	var sw = _night(DARK, ["spin"], "woodcutter")
+	sw.player.invuln = NEVER
+	sw.player.swings = 2 # the next is the third: a spin
+	var back = _planted(sw, "slime", Vector2(-(body + R - 1.0), 0.0))
+	_play(sw, 1, "attack")
+	_play(sw, SWING * 2)
+	_expect(out, "the woodcutter's spin goes round: the slime at his back is struck", back.dead, true)
+	# The blow: not before attack_hit_at, 2 a blow, push times the sword's knockback.
 	var w = _night(DARK, [], "woodcutter")
-	var slime = _add(w, "slime", NEAR)
-	var big = _add(w, "big_slime", Vector2(0.0, -2.0) + NEAR.rotated(-0.5))
+	var slime = _add(w, "slime", Vector2(C.chop.ahead, 0.0))
+	var big = _add(w, "big_slime", Vector2(C.chop.ahead, 0.0).rotated(-0.5))
 	w.player.attack_t = 0.0
 	w.player.struck = []
-	_play(w, roundi(C.attack_hit_at / Config.STEP) - 1)
+	var land: int = ceili(C.attack_hit_at / Config.STEP - 0.0001)
+	_play(w, land - 1)
 	_expect(out, "the axe's blow has not landed before attack_hit_at", slime.hp, Config.ENEMY_TYPES.slime.hp)
-	var axe_knock := 0.0
-	for i in 3:
-		_play(w, 1)
-		if axe_knock == 0.0 and big.hp < big.full_hp:
-			axe_knock = big.knock.length() # in the step the blow lands
-	_expect(out, "the axe does 2 a blow: a slime falls at once", slime.dead, true)
-	_expect(out, "the axe does 2 to a big slime", big.hp, Config.ENEMY_TYPES.big_slime.hp - C.damage)
+	_play(w, 1)
+	var axe_knock: float = big.knock.length() # in the step the blow lands
+	_expect(out, "the axe lands on the step attack_hit_at is reached", [slime.dead, big.hp], [true, Config.ENEMY_TYPES.big_slime.hp - C.damage])
 	var k = _night(DARK)
 	var kbig = _add(k, "big_slime", NEAR)
 	k.player.attack_t = 0.0
@@ -1587,6 +1613,57 @@ static func _woodcutter() -> Array:
 	_expect(out, "the axe knocks back push times as far as the sword", snappedf(axe_knock / maxf(sword_knock, 0.001), 0.01), C.push)
 	_play(w, roundi(C.attack_time / Config.STEP))
 	_expect(out, "the axe's swing is over after its attack_time", w.player.attack_t, -1.0)
+	# Into the round while the blow lands: struck. After attack_hit_until: not.
+	var into := land + 2
+	for at in [into, ceili(C.attack_hit_until / Config.STEP) + 1]:
+		var t = _night(DARK, [], "woodcutter")
+		t.player.attack_t = 0.0
+		t.player.struck = []
+		_play(t, at)
+		var late = _planted(t, "slime", Vector2(C.chop.ahead, 0.0))
+		_play(t, SWING)
+		_expect(out, "a slime that comes into the round %d steps in: struck" % at, late.hp < late.full_hp, at == into)
+	# The bot chops only when the blow would strike (World.foe_in_reach), stands with the foe under the round, and lands.
+	var b = _night(DARK, [], "woodcutter")
+	b.player.invuln = NEVER
+	var dummy = _planted(b, "big_slime", Vector2(-40.0, 25.0)) # knocked about by each blow, so the bot must follow it
+	dummy.hp = 1000
+	var bot = Bot.new(1)
+	var starts := 0
+	var blind := 0
+	for i in 300:
+		var f = bot.frame(b)
+		if f.is_pressed("attack") and b.player.attack_t < 0.0 and not b.foe_in_reach(b.player.pos):
+			blind += 1
+		var was: float = b.player.attack_t
+		b.step(f)
+		starts += 1 if was < 0.0 and b.player.attack_t >= 0.0 else 0
+	_expect(out, "the bot never chops where the blow would strike nothing", blind, 0)
+	_expect(out, "the bot chops a foe it fights, about as often as the axe lets it (5 seconds)", [starts > 0, starts >= 300 / ceili(C.attack_time / Config.STEP) / 2], [true, true])
+	_expect(out, "the bot's chops land", dummy.hp < 1000, true)
+	# With the long haft at its top the round starts past a bat at its feet: the bot steps back before it chops.
+	var h = _night(DARK, ["long_blade", "long_blade"], "woodcutter")
+	h.player.invuln = NEVER
+	var bat = _planted(h, "bat", Vector2(3.0, 0.0))
+	var hbot = Bot.new(1)
+	var hblind := 0
+	for i in 120:
+		var f = hbot.frame(h)
+		if f.is_pressed("attack") and h.player.attack_t < 0.0 and not h.foe_in_reach(h.player.pos):
+			hblind += 1
+		h.step(f)
+	_expect(out, "the bot does not chop at a bat under its feet, outside the round; it steps back and cuts it", [hblind, bat.dead], [0, true])
+	# The upgrades: the long haft brings the round further out, the wide chop widens it.
+	for run in [[["long_blade"], 5.0, 0.0], [["long_blade", "long_blade"], 9.0, 0.0], [["wide_swing"], 0.0, 3.0], [["wide_swing", "wide_swing"], 0.0, 5.0],
+			[["long_blade", "wide_swing"], 5.0, 3.0]]:
+		var u = _night(DARK, run[0], "woodcutter")
+		_expect(out, "the woodcutter's round with %s" % [run[0]], [u.chop_ahead(), u.chop_radius()], [C.chop.ahead + run[1], C.chop.radius + run[2]])
+		var reach_edge: float = u.chop_ahead() + u.chop_radius() + R - 0.5 # struck now, past the plain round's edge
+		var gain = _planted(u, "slime", Vector2(reach_edge, 0.0))
+		u.player.attack_t = 0.0
+		u.player.struck = []
+		_play(u, SWING)
+		_expect(out, "with %s a slime %.1f px ahead (past the plain round) is struck" % [run[0], reach_edge], [reach_edge > C.chop.ahead + C.chop.radius + R, gain.hp < gain.full_hp], [true, true])
 	return out
 
 
@@ -1788,7 +1865,12 @@ static func _character_upgrades() -> Array:
 	w = _night(DARK, ["spin"], "mage")
 	_expect(out, "the mage's spin: no swing goes round", [w.mod("spin_every", 0), w.mod("spread_every", 0)], [0, 3])
 	w = _night(DARK, ["long_blade", "vampire", "vampire"], "woodcutter")
-	_expect(out, "the woodcutter's upgrades work as the knight's", [w.reach(), w.vamp_need()], [Config.CHARACTERS.woodcutter.stats.reach + 8.0, 5])
+	_expect(out, "the woodcutter's upgrades work as the knight's (the long haft also brings the chop out)", [w.reach(), w.vamp_need(), w.chop_ahead()], [Config.CHARACTERS.woodcutter.stats.reach + 8.0, 5, Config.CHARACTERS.woodcutter.stats.chop.ahead + 5.0])
+	for id in ["long_blade", "wide_swing", "spin"]:
+		for n in range(1, World.max_level(id) + 1):
+			var u := World.upgrade(id, n, "woodcutter")
+			if "휘두르기" in u.name or "베" in u.name + u.text:
+				out.append("the woodcutter's %s at level %d still speaks of a sweep: %s / %s" % [id, n, u.name, u.text])
 	for who in Config.CHARACTERS:
 		for id in Config.UPGRADES:
 			for n in range(1, World.max_level(id) + 1):
@@ -1893,10 +1975,9 @@ static func _new_marks(fx) -> Array:
 
 
 static func _attack_fx() -> Array:
-	var out := []
+	var out := _chop_fx()
 	var painter = Painter.new(1)
-	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing"], "knight"], [[], "woodcutter"], [["long_blade", "wide_swing"], "woodcutter"],
-			[["swift", "swift", "swift"], "knight"], [["swift", "swift", "swift"], "woodcutter"]]:
+	for run in [[[], "knight"], [["long_blade", "long_blade"], "knight"], [["wide_swing"], "knight"], [["swift", "swift", "swift"], "knight"]]:
 		var w = _night(DARK, run[0], run[1])
 		var half: float = w.swing_half()
 		var far := 0.0
@@ -1974,7 +2055,7 @@ static func _attack_fx() -> Array:
 			juice.step(w)
 			shook = shook or juice.shake_left > 0
 			marks.append_array(_new_marks(fx))
-		_expect(out, "the %s's blow jolts the field (only the axe's) %s" % [who, run[0]], shook, who == "woodcutter")
+		_expect(out, "the %s's blow does not shake the field %s" % [who, run[0]], shook, false)
 		_expect(out, "the %s's blow plays its own mark once %s" % [who, run[0]], marks.map(func(f): return f.frames), [Effects.STRIKES[who].frames])
 		var many = Effects.new(1)
 		for i in Effects.MAX_FLASHES * 2:
@@ -1982,6 +2063,115 @@ static func _attack_fx() -> Array:
 		many.step(_night(DARK))
 		_expect(out, "the marks stay within MAX_FLASHES (%s)" % who, many.flashes.size() <= Effects.MAX_FLASHES, true)
 	return out
+
+
+## The woodcutter's chop is drawn where and as big as it strikes: the swing sweeps no smear (a spin still does); while
+## the blow lands, and only then, the dent's ring is world.chop_radius() about world.chop_centre() and every crack lies
+## inside the round; the dust Effects throws out on each landing (one ring, struck or not) ends at the round's edge
+## about the same centre; and the axe's head, down flat, lies on that centre. A single blow never shakes the field;
+## a chop that kills three at once jolts it a pixel, and not again until Juice.CRUSH's apart frames have gone by.
+static func _chop_fx() -> Array:
+	var out := []
+	var painter = Painter.new(1)
+	for run in [[], ["long_blade", "wide_swing"], ["long_blade", "long_blade", "wide_swing", "wide_swing"], ["swift", "swift", "swift"], ["fire_blade"]]:
+		var w = _night(LIT if run.has("fire_blade") else DARK, run, "woodcutter")
+		var fx = Effects.new(1)
+		var shown := 0
+		var heads := []
+		var rings := []
+		for turn in 2:
+			w.player.face = Vector2.from_angle(1.9 * turn + 0.3)
+			for i in roundi(w.stat("attack_time") / Config.STEP) + 2:
+				_play(w, 1, "attack" if i == 0 else "")
+				fx.step(w)
+				for r in fx.rings.filter(func(x): return x.kind == "dust" and x.age == 1):
+					rings.append(r)
+				if not (painter.smear(w).is_empty() and painter.slash_lines(w).is_empty()):
+					out.append("a chop draws a sweep's smear (%s)" % [run])
+				var m: Dictionary = painter.chop_marks(w)
+				var landing: bool = w.player.attack_t >= w.stat("attack_hit_at") and w.player.attack_t <= w.stat("attack_hit_until")
+				if m.is_empty() != not landing:
+					out.append("the chop's marks show %s the blow lands (%s at %.3f)" % ["outside the time" if landing == false else "not all the time", run, w.player.attack_t])
+				if m.is_empty():
+					continue
+				shown += 1
+				var centre: Vector2 = w.chop_centre(w.player.pos, w.player.face)
+				_expect(out, "the dent is about the chop's centre and as wide as its round (%s)" % [run], [m.centre, m.radius], [centre, w.chop_radius()])
+				for line in m.cracks:
+					for at in line:
+						if not w.in_chop(at, 0.0):
+							out.append("a crack runs outside the round the chop strikes (%s, %s)" % [run, at - centre])
+				var blade: Array = painter._blade(w)
+				var sword: Texture2D = painter._sword_texture(w)
+				var head: Vector2 = blade[0] + Vector2.from_angle(blade[1]) * (_steel_middle(sword_name(painter, w)) - Painter._grip(w).x) * blade[3]
+				heads.append(head.distance_to(centre))
+		_expect(out, "the chop's marks showed in each blow (%s)" % [run], shown > 0, true)
+		_expect(out, "the axe's head comes down on the chop's centre (%s)" % [run], heads.filter(func(d): return d > 2.0), []) # the quiver moves it a pixel (diagonally, 1.41)
+		_expect(out, "each chop throws one ring of dust (%s)" % [run], rings.size(), 2)
+		for r in rings:
+			var radii := []
+			for i in Effects.RINGS.dust[0]:
+				radii.append(Effects.ring_radius(r))
+				r.age += 1
+			_expect(out, "the dust ends at the round's edge (%s)" % [run], snappedf(radii[-1], 0.001), snappedf(w.chop_radius(), 0.001))
+			_expect(out, "the dust never goes past it (%s)" % [run], radii.all(func(x): return x <= w.chop_radius() + 0.001), true)
+	var spun = _night(DARK, ["spin"], "woodcutter")
+	spun.player.swings = 2
+	var swept := 0
+	for i in SWING:
+		_play(spun, 1, "attack" if i == 0 else "")
+		swept += painter.smear(spun).size()
+		if not painter.chop_marks(spun).is_empty():
+			out.append("a spin draws a chop's dent")
+	_expect(out, "the woodcutter's spin sweeps a smear round", swept > 0, true)
+	# Three slimes in the round, killed by one chop: a pixel's jolt, once; again at once: none; after apart frames: one.
+	var apart: int = Juice.CRUSH.woodcutter.apart
+	var juice = Juice.new(1)
+	var crushes := []
+	for wait in [0, 0, apart]:
+		var w = _night(DARK, [], "woodcutter")
+		w.player.invuln = NEVER # a hurt shakes the field too
+		for a in [-0.4, 0.0, 0.4]:
+			_planted(w, "slime", Vector2(w.chop_ahead(), 0.0) + Vector2.from_angle(a * 4.0) * 4.0)
+		for i in wait:
+			juice.frame()
+		var shook := false
+		for i in SWING:
+			_play(w, 1, "attack" if i == 0 else "")
+			juice.step(w)
+			shook = shook or juice.shake_left == Juice.SHAKE.crush[1] # a new one: the last may still be running
+			juice.frame()
+		crushes.append([w.enemies.filter(func(e): return not e.dead).size(), shook])
+	_expect(out, "three killed at once jolt the field; at once again not; after the wait again", crushes, [[0, true], [0, false], [0, true]])
+	var two = _night(DARK, [], "woodcutter")
+	two.player.invuln = NEVER
+	var j2 = Juice.new(1)
+	for a in [-0.5, 0.5]:
+		_planted(two, "slime", Vector2(two.chop_ahead(), 0.0) + Vector2(0.0, a * 6.0))
+	var two_shook := false
+	for i in SWING:
+		_play(two, 1, "attack" if i == 0 else "")
+		j2.step(two)
+		two_shook = two_shook or j2.shake_left > 0
+	_expect(out, "two killed at once do not shake the field", [two.enemies.filter(func(e): return not e.dead).size(), two_shook], [0, false])
+	return out
+
+
+## The axe sprite the painter draws now, by name (Painter.SWORD).
+static func sword_name(painter, w) -> String:
+	return Painter.SWORD % [Painter._weapon(w), "_long" if w.mod("reach_bonus", 0.0) > 0.0 else "", "_fire" if painter._burning(w) else ""]
+
+
+## Where along a weapon sprite the middle of its head (its steel or fire pixels) is, in sprite pixels from its left.
+static func _steel_middle(sprite: String) -> float:
+	var sum := 0.0
+	var n := 0
+	for row in Sprites.rows(sprite):
+		for x in row.length():
+			if row[x] in ["a", "A", "Z", "f", "F", "x"]:
+				sum += x + 0.5
+				n += 1
+	return sum / maxi(1, n)
 
 
 ## The words name the keeper being played: a line that speaks of the keeper ({who}, Looks.say) says the chosen
@@ -2192,6 +2382,19 @@ static func _auto_attack() -> Array:
 			_play(c, 1)
 			attacked = attacked or c.player.attack_t >= 0.0
 		_expect(out, "%s at swift's top carrying logs keeps them and does not attack" % who, [c.player.held, c.logs.size(), attacked], [held, 0, false])
+	# A chop asks for an enemy inside the round it would come down on, not just within its far edge: with the long
+	# haft at its top the round starts past a bat that overlaps the woodcutter's feet, and he does not chop at it.
+	var haft = _night(DARK, _times("swift", top) + ["long_blade", "long_blade"], "woodcutter")
+	haft.player.invuln = NEVER
+	var under = _planted(haft, "bat", Vector2(3.0, 0.0))
+	var chopped := false
+	for i in 30:
+		_play(haft, 1)
+		_hold_still(under, haft.player.pos + Vector2(3.0, 0.0))
+		chopped = chopped or haft.player.attack_t >= 0.0
+	_expect(out, "the woodcutter at swift's top does not chop at a bat within reach but outside the round", [haft.player.pos.distance_to(under.pos) < haft.attack_range(), haft.foe_in_reach(haft.player.pos), chopped], [true, false, false])
+	under.pos = haft.player.pos + Vector2(haft.chop_ahead(), 0.0)
+	_expect(out, "... and does at one in the round", haft.foe_in_reach(haft.player.pos), true)
 	# It turns to the nearest in reach: one in reach behind it, one nearer in reach above it.
 	for who in ["knight", "woodcutter"]:
 		var w = _night(DARK, _times("swift", top), who)

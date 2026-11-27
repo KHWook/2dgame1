@@ -17,9 +17,12 @@ const STOP := { "kill": 3, "hurt": 5, "boss": 6, "boss_kill": 10, "landed": 4 }
 ## those froze the game three frames in every eighteen, which read as stutter, not as a hit.
 const KILL_STOP_APART := 40
 ## How far the field shakes (pixels, at its start) and for how long (frames). Whole pixels only, at 480x270.
-const SHAKE := { "hurt": [2.0, 12], "boss": [3.0, 30], "boss_kill": [3.0, 24], "landed": [2.0, 16], "chop": [1.0, 6] }
-## Characters whose own blade's blow jolts the field a pixel (src/art/effects.gd's blow()): the axe bites heavily.
-const CHOP_SHAKE := ["woodcutter"]
+const SHAKE := { "hurt": [2.0, 12], "boss": [3.0, 30], "boss_kill": [3.0, 24], "landed": [2.0, 16], "crush": [1.0, 4] }
+## A keeper's own blow never shakes the field by itself: on every hit that read as the whole screen wobbling. The
+## weight is in the axe's chips, the dust of its landing and the struck enemy's flash. Only a chop that kills at
+## least CRUSH's kills enemies in one step (src/art/effects.gd's blow()) jolts the field a pixel, and not again for
+## apart frames: a crowd mown down at once, not every blow.
+const CRUSH := { "woodcutter": { "kills": 3, "apart": 90 } }
 const SHAKE_EVERY := 2 # frames between new shake offsets: every frame is a buzz, this is a jolt
 const MARGIN := 4.0 # painter.gd paints the edge this far past the view, so a shake never shows the void
 
@@ -34,6 +37,7 @@ var sounds: Array = [] # what the last step sounded like, each once
 var last_hp := 0
 var last_picks := 0
 var swinging := false
+var since_crush := 1 << 20 # frames since the last crush shake
 
 
 func _init(seed_value: int) -> void:
@@ -60,16 +64,15 @@ func step(w) -> void:
 		_shake("hurt")
 	if w.picks.size() > last_picks:
 		_sound("pick")
+	var crushed := 0
 	for ev in w.events:
 		match ev.kind:
 			"hit":
 				_sound("hit")
-				if CHOP_SHAKE.has(w.character) and Effects.blow(w, ev):
-					_shake("chop")
 			"kill":
 				_sound("kill")
-				if CHOP_SHAKE.has(w.character) and Effects.blow(w, ev):
-					_shake("chop")
+				if CRUSH.has(w.character) and Effects.blow(w, ev):
+					crushed += 1
 				if Config.ENEMY_TYPES[ev.enemy].get("boss", false):
 					stop = maxi(stop, STOP.boss_kill)
 					_shake("boss_kill")
@@ -91,6 +94,9 @@ func step(w) -> void:
 				_shake("landed")
 			"coming": # a boss is on its way
 				_sound("coming")
+	if CRUSH.has(w.character) and crushed >= CRUSH[w.character].kills and since_crush >= CRUSH[w.character].apart:
+		_shake("crush")
+		since_crush = 0
 	if stop > 0:
 		hold = maxi(hold, stop)
 		since_kill_stop = 0
@@ -101,6 +107,7 @@ func step(w) -> void:
 func frame() -> void:
 	hold = maxi(0, hold - 1)
 	since_kill_stop += 1
+	since_crush += 1
 	if shake_left <= 0:
 		offset = Vector2.ZERO
 		return
