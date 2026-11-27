@@ -498,6 +498,20 @@ func can_fill(id: String) -> bool:
 
 ## A card's chance of being drawn, against 1: Config.BUILD.combo_weight for a combined upgrade, rare_weight for a
 ## rare one.
+## Whether this keeper can still come to hold this combined upgrade (a row with needs): it is not held, it and both
+## upgrades it needs are this keeper's to have (only), and those of the two not held yet still fit their sides' free
+## slots. What an ingredient's card and its line on the pause screen ask before they name it (Ui.combo_hint).
+func can_combine(made: String) -> bool:
+	var needs: Array = Config.UPGRADES[made].needs
+	if level(made) > 0 or not (needs + [made]).all(func(id): return open_to(id, character)):
+		return false
+	for side_id in Config.BUILD.slots:
+		var wanted: int = needs.filter(func(id): return level(id) == 0 and takes_slot(id) and side(id) == side_id).size()
+		if wanted > 0 and slots_used(side_id) + wanted > slots(side_id):
+			return false
+	return true
+
+
 static func weight(id: String) -> float:
 	var row: Dictionary = Config.UPGRADES.get(id, {})
 	if row.has("needs"):

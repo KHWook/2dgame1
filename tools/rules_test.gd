@@ -3484,6 +3484,26 @@ static func _own_rows() -> Array:
 		var told := _play(w, 1)
 		_expect(out, "big_pack at level %d: every log carried goes on the fire" % n, [told.count("fed"), w.player.held, w.score], [carry + n, 0, (carry + n) * Config.SCORE.log])
 	var B: Dictionary = World.character_stats("mage").bolt
+			for i in 2:
+				var part: String = needs[i]
+				var other: String = needs[1 - i]
+				var most: int = Config.BUILD.slots[World.side(other)]
+				var rest: Array = _slotted(World.side(other), who).filter(func(id): return not needs.has(id))
+				var room: int = most - (1 if World.side(part) == World.side(other) else 0)
+				keeper.picks = [part] + rest.slice(0, room)
+				_expect(out, "%s holding %s with no slot left for %s: %s can no longer happen, and %s's line says nothing of it" % [who, part, other, made, part],
+					[keeper.slots_used(World.side(other)), keeper.can_combine(made), Ui.combo_hint(keeper, part)], [most, false, ""])
+				keeper.picks = [part] + rest.slice(0, room - 1)
+				_expect(out, "%s holding %s with a slot left for %s: %s can still happen, and %s's line says so" % [who, part, other, made, part],
+					[keeper.can_combine(made), Ui.combo_hint(keeper, part)], [true, Ui.COMBO_HINT % [World.upgrade_row(other, who).name, World.upgrade_row(made, who).name]])
+				keeper.picks = [part, other] + rest.slice(0, room - 1)
+				_expect(out, "%s holding both %s and %s on full sides: %s can still happen" % [who, part, other, made], [keeper.slots_used(World.side(other)), keeper.can_combine(made)], [most, true])
+			if World.side(needs[0]) == World.side(needs[1]):
+				var rest: Array = _slotted(side, who).filter(func(id): return not needs.has(id))
+				keeper.picks = rest.slice(0, Config.BUILD.slots[side] - 1)
+				_expect(out, "%s holding neither of %s with one %s slot left: %s cannot happen" % [who, needs, side, made], [keeper.can_combine(made), Ui.combo_hint(keeper, needs[0])], [false, ""])
+				keeper.picks = rest.slice(0, Config.BUILD.slots[side] - 2)
+				_expect(out, "%s holding neither of %s with two %s slots left: %s can happen" % [who, needs, side, made], keeper.can_combine(made), true)
 	for lit in [false, true]:
 		for n in [0, 1, 2]:
 			w = _night(Vector2(-50.0, 0.0) if lit else DARK, _times("piercing", n), "mage")

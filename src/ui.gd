@@ -835,13 +835,13 @@ func _card(i: int) -> Dictionary:
 
 
 ## What an upgrade combines with and into what, for its card and its line on the pause screen: COMBO_HINT for each
-## combined upgrade (a row of Config.UPGRADES with needs) that names it, that this keeper can come to hold and does
-## not hold yet. "" for an upgrade that is no ingredient.
+## combined upgrade (a row of Config.UPGRADES with needs) that names it and that this keeper can still come to hold
+## (World.can_combine). "" for an upgrade that is no ingredient, or whose combination can no longer happen.
 static func combo_hint(w, id: String) -> String:
 	var lines := []
 	for made in Config.UPGRADES:
 		var needs: Array = Config.UPGRADES[made].get("needs", [])
-		if needs.has(id) and w.level(made) == 0 and (needs + [made]).all(func(part): return World.open_to(part, w.character)):
+		if needs.has(id) and w.can_combine(made):
 			var other: String = needs.filter(func(part): return part != id)[0]
 			lines.append(COMBO_HINT % [World.upgrade_row(other, w.character).name, World.upgrade_row(made, w.character).name])
 	return "\n".join(lines)
