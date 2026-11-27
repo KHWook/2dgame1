@@ -30,6 +30,7 @@ static func run() -> Array:
 	out.append_array(_guide())
 	out.append_array(_chooser())
 	out.append_array(_picker())
+	out.append_array(_reroll())
 	out.append_array(_scaling())
 	return out
 
@@ -445,6 +446,42 @@ static func _chooser() -> Array:
 			out.append("cards %d and %d are too close to tell apart" % [i, i + 1])
 	if Chooser.TOP + Chooser.CARD.y + 18.0 > Touch.VIEW.y:
 		out.append("the words under the cards are off the screen")
+	return out
+
+
+## The reroll button under the offer's cards (Picker.reroll_rect, where src/ui.gd draws it): in the middle, big
+## enough for a thumb, and CLEAR pixels or more below the cards' bottom edge even counting how far past its drawn
+## edge it answers, so a thumb that lands low on a card (a card answers only inside its own edge) or just under one
+## rerolls nothing, and one that lands on the button takes no card. Like the cards' keys it is deaf for Picker.WAIT
+## after an offer opens, so the tap that drew an offer again is not also the next reroll. R is its key while the
+## offer is up, and stays the restart key in main.gd's KEYS.
+static func _reroll() -> Array:
+	var out := []
+	const CLEAR := 8.0
+	var across: float = Config.NIGHT.offer_size * Ui.CARD.x + (Config.NIGHT.offer_size - 1) * Ui.CARD_GAP
+	for tall in [80.0, 120.0, 160.0]:
+		var button := Picker.reroll_rect(across, tall)
+		var answers := button.grow(Picker.REROLL_PAD)
+		if answers.position.y - tall < CLEAR:
+			out.append("the reroll button answers %.0f pixels under cards %d tall (want %d or more)" % [answers.position.y - tall, tall, CLEAR])
+		if answers.size.x < 80.0 or answers.size.y < 20.0:
+			out.append("the reroll button answers on %s pixels: small for a thumb (want 80 by 20 or more)" % answers.size)
+		if absf(button.get_center().x - across / 2.0) > 0.5 or button.position.x < 0.0 or button.end.x > across:
+			out.append("the reroll button is not in the middle under the cards: %s of %d across" % [button, across])
+		var p = Picker.new()
+		p.show(Config.NIGHT.offer_size)
+		var early: bool = p.reroll_at(button.get_center(), across, tall)
+		p.frame(Picker.WAIT)
+		var cards := []
+		for i in Config.NIGHT.offer_size:
+			var card := Rect2(i * (Ui.CARD.x + Ui.CARD_GAP), 0.0, Ui.CARD.x, tall)
+			cards.append_array([p.reroll_at(card.get_center(), across, tall), p.reroll_at(Vector2(card.get_center().x, tall - 1.0), across, tall), p.reroll_at(Vector2(card.get_center().x, tall + CLEAR - 1.0), across, tall)])
+		var on: bool = p.reroll_at(button.get_center(), across, tall)
+		p.close()
+		if [early, cards.has(true), on, p.reroll_at(button.get_center(), across, tall)] != [false, false, true, false]:
+			out.append("the reroll button (cards %d tall) answers too early, on or just under a card, not on itself, or with no offer up: %s" % [tall, [early, cards, on]])
+	if Picker.REROLL_KEY != KEY_R or Picker.hears(KEY_R) or Main.KEYS.get(KEY_R, "") != "restart":
+		out.append("R is not the reroll key while the offer is up and the restart key otherwise")
 	return out
 
 
