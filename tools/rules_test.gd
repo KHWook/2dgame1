@@ -16,6 +16,7 @@ const Bot := preload("res://src/bot.gd")
 const Effects := preload("res://src/art/effects.gd")
 const Juice := preload("res://src/art/juice.gd")
 const SimRng := preload("res://src/sim/rng.gd")
+const Replay := preload("res://tools/replay_test.gd")
 
 const SWING := 10 # steps: long enough for a swing to land (PLAYER.attack_hit_at)
 const LIT := Vector2(30.0, 0.0) # from the torch: well inside its light
@@ -64,6 +65,7 @@ static func run() -> Array:
 	out.append_array(_keeper_words())
 	out.append_array(_swift())
 	out.append_array(_auto_attack())
+	out.append_array(_seeds())
 	return out
 
 
@@ -1515,7 +1517,8 @@ static func _tier_looks() -> Array:
 
 ## The characters (Config.CHARACTERS): the knight is the keeper as it always was (Config.PLAYER untouched, every
 ## upgrade as its row reads); each character's numbers are PLAYER with its stats over them; every one has a name, a
-## description, a weakness line and bars; a run starts again with another keeper by choose(), on the same seed.
+## description, a weakness line and bars; a run starts again with another keeper by choose(), on the seed it is
+## handed (_seeds holds what the seed does).
 static func _characters() -> Array:
 	var out := []
 	var w = World.new(1)
@@ -1535,7 +1538,7 @@ static func _characters() -> Array:
 		_expect(out, "%s's max hp is its hp" % id, cw.max_hp(), c.stats.get("hp", Config.PLAYER.hp))
 		_expect(out, "%s starts with full hearts" % id, cw.player.hp, cw.max_hp())
 	var a = World.new(5)
-	a.choose("mage")
+	a.choose("mage", 5)
 	var b = World.new(5, "mage")
 	_expect(out, "choose() starts the run again as a world made with that keeper", [a.character, a.offer, a.player.hp, a.rng.state()], [b.character, b.offer, b.player.hp, b.rng.state()])
 	_expect(out, "the knight's offer at dusk does not change when the world is made for it", World.new(5, "knight").offer, World.new(5).offer)
@@ -2420,6 +2423,47 @@ static func _auto_attack() -> Array:
 			w.step(bot.frame(w))
 		ends.append([w.night, w.time, w.score, w.player.pos, w.player.hp, w.enemies.size(), w.rng.state(), w.player.swings])
 	_expect(out, "two runs with swift's auto attack end alike", ends[0], ends[1])
+	return out
+
+
+## A run is the night its seed gives. World.choose(id, seed) starts the run that keeper and that seed give, whatever
+## the world was before: the offer a world made with them starts with and, played alike, the same world step for
+## step. Another seed gives another offer. A world that restarts by itself keeps the seed it was handed.
+static func _seeds() -> Array:
+	var out := []
+	var steps := 600 # ten seconds of the first night: enemies have come out of the dark and wood has fallen
+	var made = World.new(5, "mage")
+	var chosen = World.new(1)
+	chosen.choose("mage", 5)
+	var played = World.new(9, "woodcutter") # a run under way with another keeper, on another seed
+	var bot = Bot.new(1)
+	for i in steps:
+		played.step(bot.frame(played))
+	played.choose("mage", 5)
+	for w in [chosen, played]:
+		_expect(out, "choose(id, seed) starts the run a world made with that keeper and seed starts",
+			[w.character, w.seed_value, w.offer, w.steps, w.rng.state()], [made.character, 5, made.offer, 0, made.rng.state()])
+	var ends := []
+	for w in [made, chosen, played]:
+		for i in steps:
+			w.step(bot.frame(w))
+		ends.append(Replay.digest(w))
+	_expect(out, "the night went on while the bot played (the worlds compared are not still at dusk)", [made.phase, made.rng.state() != World.new(5, "mage").rng.state()], ["night", true])
+	_expect(out, "the same keeper and seed, played alike for %d steps, are the same world" % steps, [ends[1], ends[2]], [ends[0], ends[0]])
+	var offers := {}
+	for seed_value in range(1, 21):
+		var w = World.new(1)
+		w.choose("knight", seed_value)
+		offers[",".join(w.offer)] = true
+		_expect(out, "choose(knight, %d) deals seed %d's offer" % [seed_value, seed_value], w.offer, World.new(seed_value).offer)
+	if offers.size() < 15:
+		out.append("another seed gives another offer: 20 seeds dealt only %d different offers at dusk" % offers.size())
+	var again = World.new(1)
+	again.choose("knight", 6)
+	var dusk: Array = again.offer.duplicate()
+	again.phase = "out"
+	_play(again, 1, "restart")
+	_expect(out, "a world that restarts by itself keeps the seed it was handed", [again.seed_value, again.phase, again.offer], [6, "pick", dusk])
 	return out
 
 

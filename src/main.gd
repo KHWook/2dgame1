@@ -187,7 +187,7 @@ func _set_choosing(on: bool) -> void:
 ## The run starts (again) with this keeper: the same seed, the offers drawn for it.
 func _take_character(id: String) -> void:
 	records.remember_character(id)
-	world.choose(id)
+	world.choose(id, seed_value)
 	if start_night > 0:
 		world.begin_at(start_night, start_slot)
 	_set_choosing(false)
