@@ -1,5 +1,6 @@
 ## The words on screen and how they move: the HUD's night, score, clock and fuel time; the torch's offer as cards
-## that are dealt in, lift under the mouse (or under the slot the demo bot is about to take), and fly the taken icon
+## that are dealt in, lift the one in focus (src/picker.gd: moved by ← → or the mouse; or the slot the demo bot is
+## about to take), and fly the taken icon
 ## to its HUD tile; a line naming what was just taken; a line about each new thing the first time it turns up; the
 ## pause screen and the end screen, which list the upgrades held by name.
 ## View only (D4): it reads the world and never writes to it. main.gd owns it, calls after_step() after each world
@@ -17,6 +18,7 @@ const Sprites := preload("res://src/art/sprites.gd")
 const Guide := preload("res://src/guide.gd")
 const Coach := preload("res://src/coach.gd")
 const Chooser := preload("res://src/chooser.gd")
+const Picker := preload("res://src/picker.gd")
 
 signal chosen(slot: int) # a card was clicked: main.gd presses that slot's key for the next step
 
@@ -142,7 +144,7 @@ const CHOOSE_PIP := Vector2(9.0, 4.0)
 const CHOOSE_PIP_OFF := Color("#3a3350")
 const CHOOSE_BAR_NAME := 26.0 # the width kept for a bar's name, so the pips line up
 const CHOOSE_HP := "체력"
-const PICK_KEYS := "1 · 2 · 3 키 또는 클릭으로 고르기"
+const PICK_KEYS := CHOOSE_KEYS # the offer answers the same keys as the choosing screen (src/picker.gd)
 const PICK_TOUCH := "카드를 눌러 고르기"
 const AGAIN_KEYS := "R 다시 하기"
 const AGAIN_TOUCH := "눌러서 다시 하기"
@@ -166,6 +168,7 @@ var paused := false
 var intro := false # set by main.gd: the first screen is up
 var choosing := false # set by main.gd: the choosing screen is up
 var chooser = Chooser.new() # what the choosing screen's input does; main.gd feeds it
+var picker = Picker.new() # what the keys do to the offer's cards (focus, take); main.gd feeds it
 var choose_title: Label
 var choose_hint: Label
 var choose_cards: Array = [] # per character, in Chooser.ids() order: { card, style, key_style, focus }
@@ -421,6 +424,10 @@ func frame(w, delta: float) -> void:
 	again.text = AGAIN_TOUCH if touch else AGAIN_KEYS
 	pause_keys.text = PAUSE_TOUCH if touch else PAUSE_KEYS
 	_top(w, delta)
+	if intro or choosing or paused: # covered: the key that uncovers it must not also move or take a card
+		picker.hold()
+	else:
+		picker.frame(delta)
 	if intro or choosing: # the offer waits under the first screen and the choosing, and is dealt once they are gone
 		box.visible = false
 	else:
@@ -527,10 +534,12 @@ func _offer(w, delta: float) -> void:
 			deal = 0.0
 			taken = -1
 			_fill_cards(w)
+			picker.show(w.offer.size())
 		last_offer = w.offer.duplicate()
 		deal += delta
 	else:
 		offer_key = ""
+		picker.close()
 	if taken >= 0:
 		take_age += delta
 		if take_age >= TAKE_TIME:
@@ -580,9 +589,8 @@ func _cards(w, delta: float) -> void:
 	for i in offers.size():
 		if offers[i].card.visible:
 			shown.append(i)
-	var hover := _hovered(shown)
-	var focus := hover
-	if focus < 0 and bot_slot > 0 and bot_looked >= BOT_FOCUS_AT and taken < 0:
+	var focus: int = picker.focus if picker.open and bot_slot == 0 else -1 # the keys' card, which the mouse also moves
+	if bot_slot > 0 and bot_looked >= BOT_FOCUS_AT and taken < 0:
 		focus = mini(bot_slot, shown.size()) - 1
 	if taken >= 0:
 		focus = taken
@@ -635,12 +643,18 @@ func _hovered(shown: Array, at = null) -> int:
 
 func _input(event: InputEvent) -> void:
 	var b := event as InputEventMouseButton
-	if b == null or not b.pressed or b.button_index != MOUSE_BUTTON_LEFT or paused or intro or choosing or offer_key == "":
+	var moved := event as InputEventMouseMotion
+	if paused or intro or choosing or offer_key == "":
 		return
 	var shown := []
 	for i in offers.size():
 		if offers[i].card.visible:
 			shown.append(i)
+	if moved != null: # the mouse moving onto a card brings it into focus; one standing still leaves the keys' focus be
+		picker.hover(_hovered(shown, moved.position))
+		return
+	if b == null or not b.pressed or b.button_index != MOUSE_BUTTON_LEFT:
+		return
 	var i := _hovered(shown, b.position) # a tap moves no mouse, so where it landed is the event's own place
 	if i >= 0:
 		chosen.emit(i)

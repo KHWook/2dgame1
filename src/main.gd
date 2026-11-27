@@ -16,6 +16,7 @@ const Ui := preload("res://src/ui.gd")
 const Touch := preload("res://src/touch.gd")
 const Guide := preload("res://src/guide.gd")
 const Looks := preload("res://src/art/looks.gd")
+const Picker := preload("res://src/picker.gd")
 
 const KEYS := {
 	KEY_LEFT: "left", KEY_A: "left", KEY_RIGHT: "right", KEY_D: "right",
@@ -57,6 +58,7 @@ var chosen_by_flag := false # --char=ID picked the character: the choosing scree
 var start_night := 0 # --night=N: each run (whoever keeps the torch) starts at the dusk of night N
 var start_slot := 1
 var player_light: PointLight2D
+var ember_lights: Array = [] # Painter.MAX_LIGHTS PointLight2Ds the mage's embers and bursts light the dark with
 var touch # src/touch.gd: the stick and buttons on a phone
 ## Dev flags for looking at and measuring late nights; the replay and the balance tool never pass through here.
 ## --night=N starts at the dusk of night N (World.begin_at); --crowd=K keeps K enemies on the field and the keeper and
@@ -128,6 +130,13 @@ func _ready() -> void:
 	player_light = PointLight2D.new()
 	player_light.texture = glow
 	add_child(player_light)
+	for i in Painter.MAX_LIGHTS:
+		var light := PointLight2D.new()
+		light.texture = glow
+		light.color = TORCH_LIGHT
+		light.visible = false
+		add_child(light)
+		ember_lights.append(light)
 	overlay = Node2D.new()
 	overlay.draw.connect(func():
 		var t0 := Time.get_ticks_usec()
@@ -226,6 +235,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k != null and k.pressed and not k.echo and PAUSE_KEYS.has(k.keycode):
 		_toggle_pause()
 		return
+	# While the torch's offer is up, ← → (A D) move the focus between its cards and Enter or Space takes it
+	# (src/picker.gd), as the same pick_N action a number key or a click on the card sends; they do not walk or swing.
+	if k != null and k.pressed and not k.echo and world.phase == "pick" and bot == null and Picker.hears(k.keycode):
+		var slot: int = ui.picker.key(k.keycode)
+		if slot >= 0:
+			pending["pick_%d" % (slot + 1)] = true
+		return
 	if k == null or not KEYS.has(k.keycode):
 		return
 	var action: String = KEYS[k.keycode]
@@ -310,6 +326,14 @@ func _process(delta: float) -> void:
 	player_light.texture_scale = painter.ember_reach() * 2.0 / Painter.LIGHT_SIZE
 	player_light.color = painter.ember_colour()
 	player_light.position = world.player.pos
+	var lit: Array = painter.ember_lights(world)
+	for i in ember_lights.size():
+		var light: PointLight2D = ember_lights[i]
+		light.visible = i < lit.size() and day < 1.0
+		if light.visible:
+			light.position = lit[i][0]
+			light.texture_scale = lit[i][1] * 2.0 / Painter.LIGHT_SIZE
+			light.energy = lit[i][2] * (1.0 - day)
 
 
 ## --perf: once a second, how big the crowd is and what it costs. The draw calls are the last frame's.

@@ -14,6 +14,8 @@ const InputFrame := preload("res://src/sim/input_frame.gd")
 const Guide := preload("res://src/guide.gd")
 const Ui := preload("res://src/ui.gd")
 const Chooser := preload("res://src/chooser.gd")
+const Picker := preload("res://src/picker.gd")
+const Main := preload("res://src/main.gd")
 
 const AT := Vector2(100.0, 180.0) # where the left thumb lands
 
@@ -27,6 +29,7 @@ static func run() -> Array:
 	out.append_array(_help())
 	out.append_array(_guide())
 	out.append_array(_chooser())
+	out.append_array(_picker())
 	out.append_array(_scaling())
 	return out
 
@@ -442,6 +445,71 @@ static func _chooser() -> Array:
 			out.append("cards %d and %d are too close to tell apart" % [i, i + 1])
 	if Chooser.TOP + Chooser.CARD.y + 18.0 > Touch.VIEW.y:
 		out.append("the words under the cards are off the screen")
+	return out
+
+
+## The torch's offer by the keys (src/picker.gd), as the choosing screen does it: it opens on the middle card and is
+## deaf for Picker.WAIT seconds (a move or swing key pressed as the cards come up neither moves the focus nor takes
+## one), and again after something covered it; then ← → and A D move the focus card by card, stopping at the ends,
+## Enter or Space takes the card in focus, and the mouse onto a card focuses it. The number keys stay pick_N in
+## main.gd's KEYS (they are never play keys), and the slot taken, sent as pick_N, takes exactly that card.
+static func _picker() -> Array:
+	var out := []
+	var p = Picker.new()
+	p.show(3)
+	if p.focus != 1:
+		out.append("the offer does not open on its middle card: %d" % p.focus)
+	p.frame(Picker.WAIT * 0.9)
+	var early := [p.key(KEY_RIGHT), p.focus, p.key(KEY_SPACE), p.key(KEY_ENTER), p.open]
+	if early != [-1, 1, -1, -1, true]:
+		out.append("the offer answers a move or the attack key in its first %.1f s: %s" % [Picker.WAIT, early])
+	p.frame(Picker.WAIT * 0.2)
+	var walked := [p.key(KEY_RIGHT), p.focus, p.key(KEY_RIGHT), p.focus, p.key(KEY_LEFT), p.key(KEY_A), p.focus, p.key(KEY_LEFT), p.focus, p.key(KEY_D), p.focus]
+	if walked != [-1, 2, -1, 2, -1, -1, 0, -1, 0, -1, 1]:
+		out.append("← → and A D do not move the offer's focus card by card, stopping at the ends: %s" % [walked])
+	if p.key(KEY_X) != -1 or p.key(KEY_W) != -1 or not p.open:
+		out.append("a key other than the arrows, A D, Enter or Space moves or takes an offer card")
+	for keycode in [KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+		p.show(3)
+		p.frame(Picker.WAIT)
+		p.key(KEY_LEFT)
+		if p.key(keycode) != 0 or p.open:
+			out.append("key %d does not take the offer card in focus" % keycode)
+		if p.key(keycode) != -1:
+			out.append("a taken offer takes again on key %d" % keycode)
+	p.show(3)
+	p.frame(Picker.WAIT)
+	p.hold() # the pause screen (or the first screen) was over it
+	p.frame(Picker.WAIT * 0.5)
+	if p.key(KEY_ENTER) != -1 or not p.open:
+		out.append("the key that closes a screen over the offer also takes a card")
+	p.show(1)
+	p.frame(Picker.WAIT)
+	if [p.focus, p.key(KEY_RIGHT), p.focus] != [0, -1, 0]:
+		out.append("a one-card offer moves its focus off its card")
+	p.show(3)
+	p.hover(2)
+	p.hover(-1)
+	p.hover(5)
+	if p.focus != 2:
+		out.append("the mouse onto a card does not focus it (or off the cards moves it): %d" % p.focus)
+	for keycode in [KEY_LEFT, KEY_RIGHT, KEY_A, KEY_D, KEY_ENTER, KEY_SPACE]:
+		if not Picker.hears(keycode):
+			out.append("key %d moves the keeper or swings while the offer is up" % keycode)
+	for keycode in [KEY_1, KEY_2, KEY_3]:
+		if Picker.hears(keycode) or Main.KEYS.get(keycode, "") != "pick_%d" % ([KEY_1, KEY_2, KEY_3].find(keycode) + 1):
+			out.append("number key %d no longer takes its offer card" % keycode)
+	var w = World.new(3)
+	var offered: Array = w.offer.duplicate()
+	p.show(offered.size())
+	p.frame(Picker.WAIT)
+	p.key(KEY_RIGHT)
+	var slot: int = p.key(KEY_ENTER)
+	var f := InputFrame.new()
+	f.pressed["pick_%d" % (slot + 1)] = true
+	w.step(f)
+	if w.phase != "night" or w.picks != [offered[mini(slot, offered.size() - 1)]]:
+		out.append("the offer card taken by the keys is not the one the world takes: %s of %s" % [w.picks, offered])
 	return out
 
 
