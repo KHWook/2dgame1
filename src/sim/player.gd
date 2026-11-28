@@ -68,13 +68,13 @@ func step(world, inp) -> void:
 		# swift's last level attacks by itself: ready, holding nothing, an enemy in reach (Config auto_attack)
 		var auto: bool = attack_t < 0.0 and not carrying and world.mod("auto_attack", false) and world.foe_in_reach(pos)
 		if inp.is_pressed("attack") or auto:
-			if carrying: # every log held goes down where it stands
+			if carrying: # every log held goes down where it stands, and the same press attacks
 				for i in held:
 					world.drop_log(pos)
 				held = 0
 				carrying = false
 				dropped = pos
-			elif attack_t < 0.0:
+			if attack_t < 0.0:
 				attack_t = 0.0
 				struck = []
 				face = world.aim(pos, face)
