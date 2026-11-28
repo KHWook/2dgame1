@@ -203,6 +203,15 @@ const SURGE := {
 
 const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 
+## What a run is for: the dawn that ends this night wins it (World.won). The run then goes on for as long as the
+## keeper lasts; nothing of the nights changes with it.
+const GOAL := { "night": 10 }
+
+## What is kept from run to run beside the records (src/records.gd). opens: a character other than these opens the
+## first time anyone sees the dawn that ends that night. long: the harder way to play a first win opens, the long
+## night: the same run, won only at the dawn that ends this night (src/chooser.gd turns it on, main.gd sets World.goal).
+const UNLOCKS := { "opens": { "woodcutter": 4, "mage": 7 }, "long": { "night": 15 } }
+
 const ENEMY := {
 	"knock": 150.0, "knock_decay": 0.002, "knock_stop": 4.0, "flash": 0.12, "edge": 12.0,
 	"steal": 8.0, "split_spread": 6.0, "split_knock": 70.0, "summon_gap": 6.0,
