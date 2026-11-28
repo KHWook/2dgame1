@@ -66,7 +66,7 @@ var buttons := {} # touch index -> the action it holds down: "attack" or "dash"
 var help_touch := -1 # the touch index on the "?" button, -1 when none. It answers when lifted, so the tap that
 # opens the start screen is not also the click that closes it (Godot turns a touch into a mouse click as it lands)
 var presses := {} # actions pressed since main.gd last took them
-var ended_for := 0.0 # real seconds in "ended" or "won"
+var boxed_for := 0.0 # real seconds the box in the middle has been up: an ending's ("ended") or the win's ("won")
 var rotate_label: Label
 var guide_controls := false # set by main.gd: the start screen's guide is on its controls page
 var demo_labels: Array = []
@@ -176,7 +176,7 @@ func handle(event: InputEvent) -> bool:
 ## the action of the button there. Beside the buttons, a tap under an ending starts again (stray); under the win
 ## nothing answers, since a stray press must not close it, and nothing answers a mouse click (main.gd: not stray).
 func box_press(pos: Vector2, stray: bool) -> String:
-	if not (mode == "ended" or mode == "won") or ended_for < REST:
+	if not (mode == "ended" or mode == "won") or boxed_for < REST:
 		return ""
 	var on_button := target_at(pos)
 	return on_button if on_button != "" else "restart" if stray and mode == "ended" else ""
@@ -255,7 +255,7 @@ func upright() -> bool:
 
 ## Call every drawn frame, after main.gd has set mode.
 func frame(delta: float) -> void:
-	ended_for = ended_for + delta if mode == "ended" or mode == "won" else 0.0
+	boxed_for = boxed_for + delta if mode == "ended" or mode == "won" else 0.0
 	if mode != "play":
 		var help := help_touch if mode == "paused" else -1 # the "?" button also answers on the pause screen
 		release()

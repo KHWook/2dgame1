@@ -23,12 +23,12 @@ const NEXT_KEYS := [KEY_RIGHT, KEY_D]
 const BACK_KEYS := [KEY_LEFT, KEY_A]
 const LONG_KEY := KEY_L
 const LONG := Rect2(160.0, 244.0, 160.0, 16.0) # the long night's button, under the line of keys
-const ON_LONG := -2 # what _down holds while a press is on that button
 
 var open := false
 var focus := 0 # the card in focus, from 0
 var quiet := 0.0 # real seconds until it listens
 var _down := -1 # the card a press that began while it was listening landed on, -1 otherwise
+var _down_long := false # that press landed on the long night's button
 var locked: Array = [] # the characters that cannot be taken yet
 var long_open := false # the long night can be chosen
 var long := false # and is: the run started from here is won at Config.UNLOCKS.long.night's dawn
@@ -66,6 +66,7 @@ func show(last: String, locked_: Array = [], can_long := false) -> void:
 		focus = maxi(0, ids().find(ids().filter(func(id): return not locked.has(id)).front()))
 	quiet = WAIT
 	_down = -1
+	_down_long = false
 
 
 func frame(delta: float) -> void:
@@ -86,15 +87,16 @@ func hover(pos: Vector2) -> void:
 ## A press (a touch landing, a mouse button going down) at pos.
 func press(pos: Vector2) -> void:
 	_down = card_at(pos) if listening() else -1
-	if listening() and long_open and LONG.grow(PAD).has_point(pos):
-		_down = ON_LONG
+	_down_long = listening() and long_open and LONG.grow(PAD).has_point(pos)
 
 
 ## The press let go at pos. Returns the character taken (and closes), or "".
 func release(pos: Vector2) -> String:
 	var was := _down
+	var was_long := _down_long
 	_down = -1
-	if was == ON_LONG and listening() and LONG.grow(PAD).has_point(pos):
+	_down_long = false
+	if was_long and listening() and LONG.grow(PAD).has_point(pos):
 		long = not long
 	if was < 0 or not listening() or card_at(pos) != was:
 		return ""

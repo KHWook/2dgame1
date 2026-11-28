@@ -288,11 +288,11 @@ var held_head: Label
 var held_flow: HFlowContainer
 var board: Label
 var opened_line: Label # what this run opened (records.fresh)
-var end_buttons: HBoxContainer # the two buttons under an ending or a win: again and retry, each a label in its box
-var again: Label # "다시 하기" under an ending, "계속 지키기" under a win
-var again_box: PanelContainer
-var retry: Label # "같은 시드로 다시" under an ending, "새 판" under a win
-var retry_box: PanelContainer
+var end_buttons: HBoxContainer # the two buttons under an ending or a win, each a label in its box
+var first_words: Label # "다시 하기" under an ending, "계속 지키기" under a win
+var first_box: PanelContainer
+var second_words: Label # "같은 시드로 다시" under an ending, "새 판" under a win
+var second_box: PanelContainer
 var end_seed: Label
 
 var pause_box: PanelContainer
@@ -396,10 +396,10 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	end_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	end_buttons.add_theme_constant_override("separation", 12)
 	lines.add_child(end_buttons)
-	again_box = _end_button(true)
-	again = again_box.get_child(0)
-	retry_box = _end_button(false)
-	retry = retry_box.get_child(0)
+	first_box = _end_button(true)
+	first_words = first_box.get_child(0)
+	second_box = _end_button(false)
+	second_words = second_box.get_child(0)
 	end_seed = _seed_label(box)
 	box.visible = false
 
@@ -530,11 +530,11 @@ func frame(w, delta: float) -> void:
 	clock_time += delta
 	press.text = PICK_TOUCH if touch else PICK_KEYS
 	if winning:
-		again.text = GO_ON_TOUCH if touch else GO_ON_KEYS
-		retry.text = NEW_TOUCH if touch else NEW_KEYS
+		first_words.text = GO_ON_TOUCH if touch else GO_ON_KEYS
+		second_words.text = NEW_TOUCH if touch else NEW_KEYS
 	else:
-		again.text = AGAIN_TOUCH if touch else AGAIN_KEYS
-		retry.text = RETRY_TOUCH if touch else RETRY_KEYS
+		first_words.text = AGAIN_TOUCH if touch else AGAIN_KEYS
+		second_words.text = RETRY_TOUCH if touch else RETRY_KEYS
 	winbox.frame(delta)
 	pause_keys.text = PAUSE_TOUCH if touch else PAUSE_KEYS
 	_top(w, delta)
@@ -556,8 +556,8 @@ func frame(w, delta: float) -> void:
 	if paused:
 		pause_box.reset_size()
 		pause_box.position = ((Painter.VIEW - pause_box.size) / 2.0).round()
-	var ended: bool = ENDINGS.has(w.phase) or winning
-	var target := INTRO_SCRIM if intro or choosing else 0.55 if paused else (0.5 if ended else (0.45 if w.phase == "pick" else 0.0))
+	var end_up: bool = ENDINGS.has(w.phase) or winning
+	var target := INTRO_SCRIM if intro or choosing else 0.55 if paused else (0.5 if end_up else (0.45 if w.phase == "pick" else 0.0))
 	if taken >= 0:
 		target = 0.45 * (1.0 - take_age / TAKE_TIME)
 	painter.scrim = move_toward(painter.scrim, target, delta * 3.0)
@@ -654,7 +654,7 @@ static func coming_line(who: String, does: String) -> String:
 ## while the win box is up (winning), what the run that just won has kept.
 func _offer(w, delta: float) -> void:
 	var picking: bool = w.phase == "pick" and not winning # the offer of the night after the win waits under its box
-	var ended: bool = ENDINGS.has(w.phase) or winning
+	var end_up: bool = ENDINGS.has(w.phase) or winning
 	if picking:
 		var key := ",".join(w.offer) + "/%d/%d/%s/%d" % [w.picks.size(), w.night, w.character, w.rerolls]
 		if key != offer_key:
@@ -673,20 +673,20 @@ func _offer(w, delta: float) -> void:
 		if take_age >= TAKE_TIME:
 			taken = -1
 	var cards_on := picking or taken >= 0
-	box.visible = cards_on or ended
+	box.visible = cards_on or end_up
 	if not box.visible:
 		return
 	heading.visible = true
-	row.visible = cards_on and not ended
+	row.visible = cards_on and not end_up
 	reroll.visible = picking
 	if picking:
 		reroll_label.text = (REROLL_TOUCH if touch else REROLL_KEYS) % w.rerolls
 		reroll_label.add_theme_color_override("font_color", GOLD if w.can_reroll() else MUTED)
 		reroll.modulate.a = 1.0 if w.can_reroll() else REROLL_OFF
 	for n in [foot, held_head, held_flow, opened_line, board, end_buttons, end_seed]:
-		n.visible = ended
-	subheading.visible = not ended
-	if ended:
+		n.visible = end_up
+	subheading.visible = not end_up
+	if end_up:
 		_fill_end(w)
 	elif picking:
 		heading.add_theme_font_size_override("font_size", BIG)
@@ -698,14 +698,14 @@ func _offer(w, delta: float) -> void:
 		else:
 			heading.text = "한밤중"
 			subheading.text = "횃불이 힘을 하나 더 내어 준다"
-	omen_row.visible = cards_on and not ended and w.omen != ""
+	omen_row.visible = cards_on and not end_up and w.omen != ""
 	if omen_row.visible:
 		omen_name.text = Config.OMENS[w.omen].name
 		omen_text.text = Config.OMENS[w.omen].text
 	var fade := 1.0
 	if taken >= 0:
 		fade = 1.0 - smoothstep(0.3, 1.0, take_age / TAKE_TIME)
-	elif not ended:
+	elif not end_up:
 		fade = clampf(deal / FADE, 0.0, 1.0)
 	box.self_modulate.a = fade
 	for n in [heading, subheading, omen_row, press]:
@@ -733,9 +733,9 @@ static func dusk_words(w) -> String:
 ## win "go_on" and "restart"; under an ending "restart" and the same seed again, "retry".
 func targets(w) -> Dictionary:
 	if winning:
-		return { "go_on": again_box.get_global_rect(), "restart": retry_box.get_global_rect() }
+		return { "go_on": first_box.get_global_rect(), "restart": second_box.get_global_rect() }
 	if ENDINGS.has(w.phase):
-		return { "restart": again_box.get_global_rect(), "retry": retry_box.get_global_rect() }
+		return { "restart": first_box.get_global_rect(), "retry": second_box.get_global_rect() }
 	return {}
 
 
@@ -960,9 +960,7 @@ func _fill_end(w) -> void:
 	subheading.visible = w.won and not winning
 	subheading.text = WON_RUN % w.goal
 	subheading.add_theme_color_override("font_color", GOLD)
-	var opened: Array = records.fresh.map(func(id): return Config.CHARACTERS[id].name)
-	if winning and records.wins.values().reduce(func(a, b): return a + b, 0) == 1:
-		opened.append(LONG_NAME) # a first win opens the long night
+	var opened: Array = records.fresh.map(func(id): return LONG_NAME if id == Records.LONG else Config.CHARACTERS[id].name)
 	opened_line.visible = not opened.is_empty()
 	opened_line.text = OPENED % ", ".join(opened)
 	var ids := Painter.held(w)
@@ -1322,7 +1320,7 @@ func _choose_frame(delta: float) -> void:
 		var c: Dictionary = choose_cards[i]
 		var id: String = Chooser.ids()[i]
 		var locked: bool = chooser.locked.has(id)
-		var won: int = records.wins.get(id, 0) if records != null else 0
+		var won: int = records.wins.get(id, 0)
 		c.lock.visible = locked
 		c.lock.pivot_offset = c.lock.size / 2.0
 		c.portrait.self_modulate = LOCKED_SHADE if locked else Color.WHITE

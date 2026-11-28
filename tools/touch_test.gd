@@ -209,7 +209,7 @@ static func _end_boxes() -> Array:
 	for i in Records.KEEP:
 		records.add({ "score": 12345 + i, "night": 14, "seed": 999999, "picks": [], "date": "2026-11-%02d 10:00:00" % (i + 1), "char": Chooser.ids()[i % 3], "won": i % 2 == 0, "mode": "long" })
 	records.wins = { "knight": 12, "woodcutter": 3, "mage": 7 }
-	records.fresh = ["woodcutter", "mage"]
+	records.fresh = ["woodcutter", "mage", Records.LONG]
 	var ui = Ui.new()
 	(Engine.get_main_loop() as SceneTree).root.add_child(ui)
 	var w = World.new(999999, "mage")
@@ -237,8 +237,8 @@ static func _end_boxes() -> Array:
 				out.append("%s is so wide (%s) that it lies over the HUD's slots, top left" % [what, size])
 			if not ui.box.visible or not ui.end_buttons.visible or (not win and not ui.board.visible) or not ui.opened_line.visible or (not win and not ui.subheading.visible):
 				out.append("%s does not show its buttons, what was opened%s" % [what, "" if win else ", the records or that the run was won"])
-			var a: Rect2 = ui.again_box.get_global_rect()
-			var b: Rect2 = ui.retry_box.get_global_rect()
+			var a: Rect2 = ui.first_box.get_global_rect()
+			var b: Rect2 = ui.second_box.get_global_rect()
 			var inside: Rect2 = ui.box.get_global_rect()
 			if not inside.encloses(a) or not inside.encloses(b) or not view.encloses(a.grow(Touch.TARGET_PAD)) or not view.encloses(b.grow(Touch.TARGET_PAD)):
 				out.append("%s's buttons are not inside it and the view: %s, %s in %s" % [what, a, b, inside])
@@ -257,18 +257,20 @@ static func _end_boxes() -> Array:
 				if got != [action]:
 					out.append("a tap in the middle of %s's %s button gives %s" % [what, action, got])
 			t.free()
-			var said := [ui.again.text, ui.retry.text]
+			var said := [ui.first_words.text, ui.second_words.text]
 			var words := [Ui.GO_ON_TOUCH if touching else Ui.GO_ON_KEYS, Ui.NEW_TOUCH if touching else Ui.NEW_KEYS] if win else [Ui.AGAIN_TOUCH if touching else Ui.AGAIN_KEYS, Ui.RETRY_TOUCH if touching else Ui.RETRY_KEYS]
 			if said != words:
 				out.append("%s's buttons say %s, not %s" % [what, said, words])
 			var looks := [] # over a second of frames: how solid each button and its words are
 			for i in 10:
 				ui.frame(w, 0.1)
-				for n in [ui.again, ui.retry, ui.again_box, ui.retry_box, ui.end_buttons]:
+				for n in [ui.first_words, ui.second_words, ui.first_box, ui.second_box, ui.end_buttons]:
 					if not looks.has(n.modulate.a * n.self_modulate.a):
 						looks.append(n.modulate.a * n.self_modulate.a)
-			var edges: Array = [ui.again_box, ui.retry_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).border_color.get_luminance())
-			var fills: Array = [ui.again_box, ui.retry_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).bg_color.get_luminance())
+			var edges: Array = [ui.first_box, ui.second_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).border_color.get_luminance())
+			var fills: Array = [ui.first_box, ui.second_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).bg_color.get_luminance())
+			if ui.opened_line.text != Ui.OPENED % ", ".join([Config.CHARACTERS.woodcutter.name, Config.CHARACTERS.mage.name, Ui.LONG_NAME]):
+				out.append("%s does not name what the records say this run opened, the long night among them: %s" % [what, ui.opened_line.text])
 			if looks != [1.0]:
 				out.append("%s's buttons or their words are not steady and solid, so one reads as switched off: over a second they are %s" % [what, looks])
 			if edges[0] <= edges[1] or fills[0] <= fills[1]:
@@ -371,8 +373,8 @@ static func _box_clicks(ui, records, w, win: bool, what: String) -> Array:
 	main.touch.mode = "won" if win else "ended"
 	main.touch.targets = ui.targets(w)
 	main.winning = win
-	var first: Rect2 = ui.again_box.get_global_rect()
-	var second: Rect2 = ui.retry_box.get_global_rect()
+	var first: Rect2 = ui.first_box.get_global_rect()
+	var second: Rect2 = ui.second_box.get_global_rect()
 	var beside := [ui.box.get_global_rect().position + Vector2(3.0, 3.0), Vector2(2.0, 2.0), first.get_center() - Vector2(0.0, first.size.y / 2.0 + Touch.TARGET_PAD + 2.0)]
 	var state := func() -> Array:
 		return [main.winning, main.choosing, main.pending.keys()]

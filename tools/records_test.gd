@@ -171,7 +171,13 @@ static func _won() -> Array:
 			break
 	if not w.won or r.wins != { "knight": 1 } or not r.runs.is_empty() or Records.new(FILE).wins != { "knight": 1 } or not r.long_open():
 		out.append("the dawn that wins does not count one win for the knight, kept, with no run recorded yet and the long night open: won %s, wins %s, runs %s" % [w.won, r.wins, r.runs])
-	for s in 30: # the player keeps going
+	if r.fresh != [Records.LONG]:
+		out.append("the first win does not tell the screen that the long night opened, once: %s" % [r.fresh])
+	var later = Records.new(FILE)
+	later.step(_told(World.new(1), [{ "kind": "won", "night": 10 }]), 1, "2026-01-01")
+	if later.wins != { "knight": 2 } or not later.fresh.is_empty():
+		out.append("a win after the first is not counted, or says again that the long night opened: wins %s, fresh %s" % [later.wins, later.fresh])
+	for s in 30: # the player keeps going; its store writes over the other one's count
 		w.step(bot.frame(w))
 		r.step(w, 142, "2026-01-01")
 	w.fuel = 0.0

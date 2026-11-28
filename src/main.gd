@@ -117,6 +117,7 @@ func _ready() -> void:
 	# desktop names the folder user://records.json lives in; the web build's page title comes from config/name.web.
 	get_window().title = Ui.INTRO_TITLE
 	records = Records.new()
+	ui = Ui.new() # its screens' states are there from here (the chooser's long night); its nodes are built by setup, below
 	records.saves = keeps(bot != null, DisplayServer.get_name() == "headless", staged(Array(OS.get_cmdline_user_args())))
 	records.settle()
 	if character != "" and not Config.CHARACTERS.has(character):
@@ -179,7 +180,6 @@ func _ready() -> void:
 		var t0 := Time.get_ticks_usec()
 		painter.paint_overlay(overlay, world)
 		perf_paint_us += Time.get_ticks_usec() - t0)
-	ui = Ui.new()
 	add_child(ui)
 	ui.setup(painter, records, overlay, bot.pick if bot != null else 0, world)
 	ui.coach.on = bot == null and not records.guide_read() # the first night is coached until the guide has been read once
@@ -271,7 +271,7 @@ func _again(same: bool) -> void:
 ## screen has it on, moves the dawn that wins.
 func _take_character(id: String, same := false) -> void:
 	seed_value = _next_seed(same)
-	var long: bool = ui != null and ui.chooser.long
+	var long: bool = ui.chooser.long
 	records.mode = "long" if long else ""
 	if goal_flag <= 0:
 		world.goal = Config.UNLOCKS.long.night if long else Config.GOAL.night
@@ -510,11 +510,10 @@ func _physics_process(_delta: float) -> void:
 	painter.step(world)
 	juice.step(world)
 	for name in juice.sounds:
-		if sfx.has(name):
-			sfx[name].play()
-		# a sting of the music's: only with the music on, once its sample is made, and the dawn's not under the win's
-		var sting: AudioStreamPlayer = music_players.get(name) if Music.STINGS.has(name) else null
-		if sting != null and sting.stream != null and records.music and music.may_play(OS.has_feature("web")) and not (name == "dawn" and juice.sounds.has("win")):
+		sfx[name].play()
+	for name in juice.stings if records.music and music.may_play(OS.has_feature("web")) else []:
+		var sting: AudioStreamPlayer = music_players.get(name)
+		if sting != null and sting.stream != null: # none in a run without a screen, or its sample is not made yet
 			sting.play()
 	music.sounded(juice.sounds)
 	if won_in(world.events):

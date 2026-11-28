@@ -35,6 +35,7 @@ const CHARACTER_FILE := "user://character.json"
 const ASIDE := "%s.unread%s.%s" # where a file that could not be read goes: its name, a number from the second on, its extension
 const ASIDE_MOST := 99
 const PART := "%s.part" # a save's own name until it is whole: the file's, with this after it
+const LONG := "long" # in fresh: the long night (Config.UNLOCKS.long), which a first win opens
 const AS_READ := "char as read" # in a run in memory only: its "char" in the file, when that is no character here
 
 var path: String
@@ -45,7 +46,7 @@ var opened: Array = [] # the characters that can be chosen
 var wins := {} # character id -> runs won with it
 var music := true
 var mode := "" # set by main.gd when a run starts: "" as usual or "long", kept in its record
-var fresh: Array = [] # the characters this run opened, for the screen to say so; emptied when the next run starts
+var fresh: Array = [] # what this run opened, for the screen to say so: character ids, and LONG; emptied when the next run starts
 var place := 0 # where the run that just ended landed, from 1; 0 if it missed the list or none has ended
 var latest = null # that run, so the list can mark it
 var saves := true # false when Main.keeps says this run may not write: nothing is written
@@ -132,6 +133,8 @@ func step(w, seed_value: int, date: String) -> void:
 					fresh.append(id)
 					changed = true
 		elif ev.kind == "won":
+			if not long_open():
+				fresh.append(LONG)
 			wins[w.character] = wins.get(w.character, 0) + 1
 			changed = true
 	if over and not _over:

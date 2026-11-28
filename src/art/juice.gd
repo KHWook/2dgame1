@@ -33,7 +33,8 @@ var shake_size := 0.0
 var shake_left := 0
 var shake_frames := 1
 var offset := Vector2.ZERO # where the field is drawn, against the HUD which stays put
-var sounds: Array = [] # what the last step sounded like, each once
+var sounds: Array = [] # what the last step sounded like, each once: names of src/audio/sfx.gd's SOUNDS
+var stings: Array = [] # the music's sting for the last step, if any (src/audio/music.gd's STINGS): a dawn's, or the win's in its place
 var last_hp := 0
 var last_picks := 0
 var swinging := false
@@ -54,6 +55,7 @@ func seen(w) -> void:
 ## Call once after each world.step().
 func step(w) -> void:
 	sounds = []
+	stings = []
 	var p = w.player
 	var stop := 0
 	if p.attack_t >= 0.0 and not swinging:
@@ -86,8 +88,9 @@ func step(w) -> void:
 				_shake("boss")
 			"dawn":
 				_sound("dawn")
-			"won": # not an effect: the music's sting (src/audio/music.gd's STINGS), which main.gd plays
-				_sound("win")
+				stings = ["dawn"]
+			"won": # told right after its dawn
+				stings = ["win"]
 			"warn": # a boss is about to strike
 				_sound("warn")
 			"landed":

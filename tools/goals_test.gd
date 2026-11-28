@@ -304,8 +304,24 @@ static func _music_state() -> Array:
 	juice.seen(won)
 	won.step(InputFrame.new())
 	juice.step(won)
-	_expect(out, "the step that wins sounds the dawn and the win's sting", [juice.sounds.has("dawn"), juice.sounds.has("win"), Music.STINGS.has("win"), Music.STINGS.has("dawn")], [true, true, true, true])
-	_expect(out, "the win's sting is the music's, not an effect", Sfx.SOUNDS.has("win"), false)
+	_expect(out, "the step that wins sounds the dawn's effect and, of the stings, the win's in the dawn's place", [juice.sounds.has("dawn"), juice.stings], [true, ["win"]])
+	won.phase = "night"
+	won.offer = []
+	won.time = Config.NIGHT.length
+	won.step(InputFrame.new())
+	juice.step(won)
+	_expect(out, "the dawn after sounds its effect and its own sting", [juice.sounds.has("dawn"), juice.stings], [true, ["dawn"]])
+	won.step(InputFrame.new())
+	juice.step(won)
+	_expect(out, "and the step after that no sting", juice.stings, [])
+	for kind in ["hit", "kill", "fed", "boss", "dawn", "won", "warn", "landed", "boss_coming", "pack_coming", "burned", "spat", "splat", "beat"]:
+		var told = World.new(1)
+		var hears = Juice.new(1)
+		hears.seen(told)
+		told.events = [{ "kind": kind, "enemy": "slime", "pos": Vector2.ZERO, "night": 1, "tier": 1, "hurt": false }]
+		hears.step(told)
+		_expect(out, "what Juice names for the event %s is all there to play: effects in Sfx.SOUNDS, stings in Music.STINGS" % kind,
+			[hears.sounds.filter(func(n): return not Sfx.SOUNDS.has(n)), hears.stings.filter(func(n): return not Music.STINGS.has(n))], [[], []])
 	return out
 
 
