@@ -1,7 +1,8 @@
 ## What a run is for, and what plays under it, held to what they claim: the dawn that wins is told once and changes
 ## no step after it (a run that wins and one that never can are hashed step by step against each other); the same
 ## seed again is the same run from its first offer; the choosing screen's locks are not asked for the demo bot or
-## --char=ID, and only a person's own run on a screen writes the player's files; the HUD shows the goal; the music
+## --char=ID, and only a person's own run on a screen writes the player's files; what main.gd decides between the
+## engine and all that is asked of its own functions, never read from its text; the HUD shows the goal; the music
 ## follows the world (dusk, night, a boss on the field, the torch running low), cross-fades, steps back for a warning,
 ## waits for the first press in a browser, and its samples are whole, unclipped, seamless and under the warnings.
 extends RefCounted
@@ -18,8 +19,11 @@ const Sfx := preload("res://src/audio/sfx.gd")
 const Juice := preload("res://src/art/juice.gd")
 const Painter := preload("res://src/art/painter.gd")
 const Ui := preload("res://src/ui.gd")
+const Records := preload("res://src/records.gd")
+const ReplayScript := preload("res://tests/replay_script.gd")
 
-const SEED := 142 # the replay's seed: the bot (slot 1, the knight) is still standing after eight nights
+const SEED := ReplayScript.SEED # the replay's: the bot (slot 1, the knight) is still standing after eight nights
+const NO_FILE := "user://goals_test_%s.json" # the files of records that write nothing (_main): never there
 const MOST := 60 * 200 # steps: past the third dusk
 const SEAM := 0.02 # the most a loop's last sample may differ from its first, of full scale
 const DUCKED_UNDER := 10.0 # dB a warning stays over the loudest music while the music steps back for it
@@ -29,6 +33,7 @@ const DUCKED_UNDER := 10.0 # dB a warning stays over the loudest music while the
 static func run() -> Array:
 	var out := []
 	out.append_array(_win())
+	out.append_array(_win_box())
 	out.append_array(_win_ignored())
 	out.append_array(_retry())
 	out.append_array(_locks())
@@ -55,10 +60,12 @@ static func _win() -> Array:
 	var bot = Bot.new(1)
 	var told := [] # [the night it named, the night the world was on before the step, what came just before it]
 	var won_before := false
+	var boxes := 0 # the steps after which main.gd puts the win box up
 	for s in MOST:
 		var night: int = w.night
 		var was: bool = w.won
 		w.step(bot.frame(w))
+		boxes += 1 if Main.won_in(w.events) else 0
 		for i in w.events.size():
 			if w.events[i].kind == "won":
 				told.append([w.events[i].night, night, w.events[i - 1].kind if i > 0 else ""])
@@ -68,18 +75,57 @@ static func _win() -> Array:
 	_expect(out, "the bot saw three dawns (or the scene shows nothing)", w.night, 4)
 	_expect(out, "with the goal at 2, the win is told once, on the dawn that ends night 2, right after that dawn", told, [[2, 2, "dawn"]])
 	_expect(out, "the world had not won before that step and has ever since", [won_before, w.won], [false, true])
+	_expect(out, "main.gd puts the win box up after one step of those three nights, the one that told the win", boxes, told.size())
 	w.phase = "out"
 	var f := InputFrame.new()
 	f.pressed["restart"] = true
 	w.step(f)
 	_expect(out, "a run started again has not won", [w.won, w.night], [false, 1])
-	# main.gd is the bridge and is not run here: that it shows the box on the step the win is told, does not step the
-	# world under it, and records the run when the player leaves it for a new one, is read from its source.
-	var source := FileAccess.get_file_as_string("res://src/main.gd")
-	for line in ["if world.won and world.events.any(func(ev): return ev.kind == \"won\"):\n\t\t_set_winning(true)",
-			"if winning: # the world waits under the win box", "records.close(world, seed_value, Time.get_datetime_string_from_system(false, true))\n\t\t_again(false)"]:
-		if not source.contains(line):
-			out.append("main.gd no longer has the line the win box hangs on: %s" % line.replace("\n", " / ").replace("\t", ""))
+	return out
+
+
+## main.gd as far as it goes without a window: its own functions on a real Ui, the world given and records that
+## write nothing. _drop frees it.
+static func _main(w):
+	var main = Main.new()
+	main.world = w
+	main.records = Records.new(NO_FILE % "records", NO_FILE % "guide", NO_FILE % "character")
+	main.records.saves = false
+	main.overlay = Node2D.new()
+	main.ui = Ui.new()
+	(Engine.get_main_loop() as SceneTree).root.add_child(main.ui)
+	main.ui.setup(Painter.new(1), main.records, main.overlay, 0, w)
+	return main
+
+
+static func _drop(main) -> void:
+	main.ui.free() # and the overlay, which is its child
+	main.free()
+
+
+## While the win box is up the world is held, as under the pause, the guide, the choosing screen and a phone held
+## upright; under those the box does not answer. Its answers, given to main.gd: "go_on" takes the box away and
+## records nothing; "restart" records the run as it stands, as won, and opens the choosing screen.
+static func _win_box() -> Array:
+	var out := []
+	_expect(out, "nothing up: the world steps; the win box up: it holds the world and answers", [Main.held_by(false, false, false, false, false), Main.held_by(false, false, false, false, true)], ["", "win"])
+	for i in 4:
+		var on := [i == 0, i == 1, i == 2, i == 3]
+		_expect(out, "the pause, the guide, the choosing screen and a phone upright each hold the world (%s), over the win box too" % [on],
+			[Main.held_by(on[0], on[1], on[2], on[3], false), Main.held_by(on[0], on[1], on[2], on[3], true)], ["screen", "screen"])
+	for did in ["go_on", "restart"]:
+		var w = World.new(SEED)
+		w.won = true
+		w.night = 11
+		w.score = 500
+		var main = _main(w)
+		main._set_winning(true)
+		_expect(out, "the win box goes up in main.gd, the Ui and the box itself", [main.winning, main.ui.winning, main.ui.winbox.open], [true, true, true])
+		main._win_answer(did)
+		_expect(out, "after %s: the box is gone; the choosing screen is up and the run recorded as won only for a new run" % did,
+			[main.winning, main.ui.winning, main.ui.winbox.open, main.choosing, main.records.runs.map(func(r): return [r.score, r.night, r.won])],
+			[false, false, false, did == "restart", [[500, 11, true]] if did == "restart" else []])
+		_drop(main)
 	return out
 
 
@@ -141,9 +187,10 @@ static func _retry() -> Array:
 		first.step(bot.frame(first))
 	_expect(out, "and, played alike for 900 steps, is the same world", Replay.digest(first), mark)
 	_expect(out, "T asks for it, and is no other key", [Main.KEYS.get(KEY_T, ""), Main.KEYS.values().count("retry")], ["retry", 1])
-	var source := FileAccess.get_file_as_string("res://src/main.gd")
-	if not source.contains("_again(f.pressed.has(\"retry\"))") or not source.contains("_take_character(world.character, same)"):
-		out.append("main.gd does not start the same seed and keeper again when \"retry\" is pressed at an ending")
+	_expect(out, "at an ending a step's presses ask for the same run again (T, over R), a new one (R), or nothing",
+		[Main.asks_again({ "retry": true }, true, false), Main.asks_again({ "retry": true, "restart": true }, true, false), Main.asks_again({ "restart": true }, true, false), Main.asks_again({ "attack": true }, true, false)],
+		["retry", "retry", "restart", ""])
+	_expect(out, "they ask nothing while the run goes on, or of the demo bot", [Main.asks_again({ "retry": true, "restart": true }, false, false), Main.asks_again({ "retry": true, "restart": true }, true, true)], ["", ""])
 	return out
 
 
@@ -155,11 +202,8 @@ static func _locks() -> Array:
 	_expect(out, "with only the knight open, the other two are locked", Main.locks(["knight"], false), ["woodcutter", "mage"])
 	_expect(out, "with everyone open, nobody is", Main.locks(all, false), [])
 	_expect(out, "for the demo bot and --char=ID nobody is locked, whatever is open", [Main.locks(["knight"], true), Main.locks([], true)], [[], []])
-	var source := FileAccess.get_file_as_string("res://src/main.gd")
-	if not source.contains("locks(records.opened, bot != null or chosen_by_flag)"):
-		out.append("main.gd does not free the choosing screen's locks for the demo bot and --char=ID")
-	if not source.contains("if bot != null or chosen_by_flag:\n\t\t_take_character(world.character)"):
-		out.append("main.gd does not start the bot's or --char=ID's run without the choosing screen")
+	_expect(out, "the demo bot's runs and --char=ID's start without the choosing screen and its locks; a person's do not",
+		[Main.unasked(true, false), Main.unasked(false, true), Main.unasked(true, true), Main.unasked(false, false)], [true, true, true, false])
 	var kept := []
 	for is_bot in [false, true]:
 		for headless in [false, true]:
@@ -167,8 +211,9 @@ static func _locks() -> Array:
 				if Main.keeps(is_bot, headless, moved):
 					kept.append([is_bot, headless, moved])
 	_expect(out, "only a person's run on a screen, not staged by a flag, writes the player's files", kept, [[false, false, false]])
-	if not source.contains("records.saves = keeps(bot != null, DisplayServer.get_name() == \"headless\", staged)") or not source.contains("a.begins_with(\"--goal=\") or a.begins_with(\"--night=\") or a.begins_with(\"--crowd=\"))"):
-		out.append("main.gd does not tell the records whether this run may write (Main.keeps)")
+	_expect(out, "a run is staged by --goal=N, --night=N or --crowd=K, each alone or among others",
+		[Main.staged(["--goal=3"]), Main.staged(["--night=4"]), Main.staged(["--crowd=50"]), Main.staged(["--seed=9", "--flat", "--night=2"])], [true, true, true, true])
+	_expect(out, "and by no other flag, or none", [Main.staged(["--seed=9", "--bot", "--char=mage", "--slot=2", "--skip=600", "--perf", "--flat"]), Main.staged([])], [false, false])
 	return out
 
 
@@ -305,11 +350,22 @@ static func _music_fade() -> Array:
 	_expect(out, "in a browser nothing may play before the first press; elsewhere it may", [page.may_play(true), page.may_play(false)], [false, true])
 	page.heard = true
 	_expect(out, "after it, it may", page.may_play(true), true)
-	var source := FileAccess.get_file_as_string("res://src/main.gd")
-	if not source.contains("if not music.may_play(OS.has_feature(\"web\")):\n\t\treturn") or not source.contains("music.heard = true"):
-		out.append("main.gd does not hold the music until the first press in a browser")
-	if not source.contains("if DisplayServer.get_name() != \"headless\": # a run without a screen makes no music"):
-		out.append("main.gd makes the music in a run without a screen")
+	var key := InputEventKey.new()
+	key.keycode = KEY_W
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	var tap := InputEventScreenTouch.new()
+	var heard := []
+	for event in [InputEventMouseMotion.new(), key, click, tap]: # each not pressed, then pressed, given to main.gd
+		for down in [false, true]:
+			if not event is InputEventMouseMotion:
+				event.pressed = down
+			var main = Main.new()
+			main._input(event)
+			heard.append(main.music.heard)
+			main.free()
+	_expect(out, "main.gd counts a key, a mouse button or a touch going down as the first press, and nothing else", heard, [false, false, false, true, false, true, false, true])
+	_expect(out, "the music is made in a run on a screen, not in one without", [Main.makes_music(false), Main.makes_music(true)], [true, false])
 	return out
 
 

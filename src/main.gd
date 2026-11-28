@@ -117,10 +117,7 @@ func _ready() -> void:
 	# desktop names the folder user://records.json lives in; the web build's page title comes from config/name.web.
 	get_window().title = Ui.INTRO_TITLE
 	records = Records.new()
-	# Only a person's own run on a screen is kept: the demo bot, a run without a screen and one started with a flag
-	# that moves the goal or the night (--goal, --night, --crowd) write nothing (records, what is open, the music setting).
-	var staged: bool = Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--goal=") or a.begins_with("--night=") or a.begins_with("--crowd="))
-	records.saves = keeps(bot != null, DisplayServer.get_name() == "headless", staged)
+	records.saves = keeps(bot != null, DisplayServer.get_name() == "headless", staged(Array(OS.get_cmdline_user_args())))
 	records.settle()
 	if character != "" and not Config.CHARACTERS.has(character):
 		push_warning("--char=%s is not a character (%s): the knight keeps the torch" % [character, ", ".join(Config.CHARACTERS.keys())])
@@ -136,7 +133,7 @@ func _ready() -> void:
 			start_night = int(a.substr(8))
 			start_slot = slot
 			world.begin_at(start_night, slot)
-	if bot != null or chosen_by_flag:
+	if unasked(bot != null, chosen_by_flag):
 		_take_character(world.character)
 	for i in skip if bot != null else 0: # --bot --skip=N: the bot plays N steps before the first frame, to look at a late night
 		world.step(bot.frame(world))
@@ -148,7 +145,7 @@ func _ready() -> void:
 		player.volume_db = SFX_DB
 		add_child(player)
 		sfx[name] = player
-	if DisplayServer.get_name() != "headless": # a run without a screen makes no music and needs no audio device for it
+	if makes_music(DisplayServer.get_name() == "headless"):
 		for name in Music.LOOPS.keys() + Music.STINGS.keys():
 			var player := AudioStreamPlayer.new()
 			player.volume_db = STING_DB if Music.STINGS.has(name) else -80.0
@@ -238,7 +235,7 @@ func _set_choosing(on: bool) -> void:
 	choosing = on
 	ui.choosing = on
 	if on:
-		ui.chooser.show(world.character, locks(records.opened, bot != null or chosen_by_flag), records.long_open())
+		ui.chooser.show(world.character, locks(records.opened, unasked(bot != null, chosen_by_flag)), records.long_open())
 
 
 ## The win box goes up or away (src/winbox.gd). While it is up the world is not stepped.
@@ -263,7 +260,7 @@ func _win_answer(did: String) -> void:
 ## A new run from an ending or the win box: the same seed and keeper at once (same), or the choosing screen (the
 ## keeper --char=ID named, without it).
 func _again(same: bool) -> void:
-	if same or chosen_by_flag:
+	if same or unasked(bot != null, chosen_by_flag):
 		_take_character(world.character, same)
 	else:
 		_set_choosing(true)
@@ -302,10 +299,46 @@ static func locks(opened: Array, free: bool) -> Array:
 	return [] if free else Config.CHARACTERS.keys().filter(func(id): return not opened.has(id))
 
 
-## Whether this run may write the player's files: not the demo bot's, not one without a screen, not one staged by a
-## flag that moves the goal or the night (a dawn seen that way would open a character, or win).
-static func keeps(is_bot: bool, headless: bool, staged: bool) -> bool:
-	return not (is_bot or headless or staged)
+## Whether this run may write the player's files (records, what is open, the music setting): not the demo bot's, not
+## one without a screen, not a staged one.
+static func keeps(is_bot: bool, headless: bool, staged_: bool) -> bool:
+	return not (is_bot or headless or staged_)
+
+
+## Whether a run is staged: started with a flag (args: the user's) that moves the goal or the night, --goal=N,
+## --night=N or --crowd=K. A dawn seen that way would open a character, or win.
+static func staged(args: Array) -> bool:
+	return args.any(func(a): return a.begins_with("--goal=") or a.begins_with("--night=") or a.begins_with("--crowd="))
+
+
+## Whether runs start without the choosing screen and its locks: the demo bot's, and those whose keeper --char=ID named.
+static func unasked(is_bot: bool, by_flag: bool) -> bool:
+	return is_bot or by_flag
+
+
+## Whether the music's players and samples are made: not in a run without a screen, which then needs no audio device.
+static func makes_music(headless: bool) -> bool:
+	return not headless
+
+
+## What holds the world this tick, so that it is not stepped: "screen" under the pause, the guide, the choosing
+## screen or a phone held upright (the presses made there are dropped), "win" under the win box alone (which those
+## presses may answer), "" when nothing does.
+static func held_by(paused_: bool, intro_: bool, choosing_: bool, upright: bool, winning_: bool) -> String:
+	return "screen" if paused_ or intro_ or choosing_ or upright else "win" if winning_ else ""
+
+
+## Whether the step that made these events won the run: the world tells it once ("won").
+static func won_in(events: Array) -> bool:
+	return events.any(func(ev): return ev.kind == "won")
+
+
+## What the presses of a step ask of an ending: "retry" (the same seed and keeper again), "restart" (a new run), or
+## "" for neither, while the run has not ended, and for the demo bot.
+static func asks_again(pressed: Dictionary, ended: bool, is_bot: bool) -> String:
+	if not ended or is_bot:
+		return ""
+	return "retry" if pressed.has("retry") else "restart" if pressed.has("restart") else ""
 
 
 ## A run's seed, 1 to SEED_MOST, from two clocks in microseconds: the system's, which tells one launch from another,
@@ -363,7 +396,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			records.read_guide()
 			var returning: bool = ui.guide.returning
 			_set_intro(false)
-			if not returning and bot == null and not chosen_by_flag:
+			if not returning and not unasked(bot != null, chosen_by_flag):
 				_set_choosing(true)
 			if touch.on and OS.has_feature("web"): # a tap on the start button asks for the whole screen
 				JavaScriptBridge.eval(FULL_SCREEN_JS, true)
@@ -425,17 +458,19 @@ func _physics_process(_delta: float) -> void:
 	pending.merge(touch.take())
 	f.pressed = pending
 	pending = {}
-	if paused or intro or choosing or touch.upright(): # presses made while paused are dropped; keys still held count again once it goes on
+	var holder := held_by(paused, intro, choosing, touch.upright(), winning)
+	if holder == "screen": # keys still held count again once it goes on
 		return
-	if winning: # the world waits under the win box; the demo bot reads it for a while and keeps going
+	if holder == "win": # the demo bot reads the box for a while and keeps going
 		bot_looked += 1
 		if bot != null and bot_looked >= BOT_LOOKS * 2:
 			_win_answer("go_on")
 		elif bot == null and (f.pressed.has("go_on") or f.pressed.has("restart")):
 			_win_answer("go_on" if f.pressed.has("go_on") else "restart")
 		return
-	if (f.pressed.has("restart") or f.pressed.has("retry")) and Ui.ENDINGS.has(world.phase) and bot == null:
-		_again(f.pressed.has("retry"))
+	var again := asks_again(f.pressed, Ui.ENDINGS.has(world.phase), bot != null)
+	if again != "":
+		_again(again == "retry")
 		return
 	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
 	juice.frame()
@@ -467,7 +502,7 @@ func _physics_process(_delta: float) -> void:
 		if sting != null and sting.stream != null and records.music and music.may_play(OS.has_feature("web")) and not (name == "dawn" and juice.sounds.has("win")):
 			sting.play()
 	music.sounded(juice.sounds)
-	if world.won and world.events.any(func(ev): return ev.kind == "won"):
+	if won_in(world.events):
 		_set_winning(true)
 	ui.after_step(world)
 	queue_redraw()
