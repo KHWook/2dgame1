@@ -16,6 +16,9 @@ const Ui := preload("res://src/ui.gd")
 const Chooser := preload("res://src/chooser.gd")
 const Picker := preload("res://src/picker.gd")
 const Main := preload("res://src/main.gd")
+const Winbox := preload("res://src/winbox.gd")
+const Records := preload("res://src/records.gd")
+const Painter := preload("res://src/art/painter.gd")
 
 const AT := Vector2(100.0, 180.0) # where the left thumb lands
 
@@ -32,6 +35,385 @@ static func run() -> Array:
 	out.append_array(_picker())
 	out.append_array(_reroll())
 	out.append_array(_scaling())
+	out.append_array(_locked_cards())
+	out.append_array(_winbox())
+	out.append_array(_let_go())
+	out.append_array(_end_boxes())
+	out.append_array(_music_button())
+	return out
+
+
+## A locked character's card cannot be taken by a tap, its number or Enter, and the screen opens on an open card
+## instead; the others are taken as ever. The long night's button answers only once it is open: a tap let go on it,
+## or L, turns it on and off; it is thumb-sized, on the screen, clear of the cards and the line of keys.
+static func _locked_cards() -> Array:
+	var out := []
+	var ids: Array = Chooser.ids()
+	var c = Chooser.new()
+	c.show("mage", ["woodcutter", "mage"])
+	c.frame(Chooser.WAIT)
+	if c.focus != ids.find("knight"):
+		out.append("the choosing screen opens on a locked card (focus %d)" % c.focus)
+	for i in [ids.find("woodcutter"), ids.find("mage")]:
+		var mid: Vector2 = Chooser.rect(i).get_center()
+		c.press(mid)
+		var tapped: String = c.release(mid)
+		c.focus = i
+		if tapped != "" or c.key(Chooser.PICK_KEYS[i]) != "" or c.key(KEY_ENTER) != "" or not c.open:
+			out.append("a locked card (%s) is taken by a tap, its number or Enter" % ids[i])
+	var open_mid: Vector2 = Chooser.rect(ids.find("knight")).get_center()
+	c.press(open_mid)
+	if c.release(open_mid) != "knight":
+		out.append("beside locked cards, a tap on the open one does not take it")
+	c.show("knight", ["mage"])
+	c.frame(Chooser.WAIT)
+	if c.key(KEY_2) != "woodcutter":
+		out.append("a card opened since is not taken by its number")
+	var button: Vector2 = Chooser.LONG.get_center()
+	c.show("knight")
+	c.frame(Chooser.WAIT)
+	c.press(button)
+	c.release(button)
+	c.key(Chooser.LONG_KEY)
+	if c.long or not c.open:
+		out.append("the long night is turned on before a win has opened it")
+	c.show("knight", [], true)
+	c.press(button) # pressed while deaf
+	c.frame(Chooser.WAIT)
+	c.release(button)
+	if c.long:
+		out.append("a press begun before the choosing screen listens turns the long night on")
+	var states := []
+	for i in 2:
+		c.press(button)
+		c.release(button)
+		states.append(c.long)
+	c.key(Chooser.LONG_KEY)
+	states.append(c.long)
+	c.press(button)
+	c.release(open_mid) # slid off the button onto a card: neither
+	states.append([c.long, c.open])
+	if states != [true, false, true, [true, true]]:
+		out.append("a tap on the long night's button, or L, does not turn it on and off (and nothing else): %s" % [states])
+	if c.key(KEY_1) != "knight" or not c.long:
+		out.append("the long night turned on does not stay on when a card is taken")
+	c.show("knight", [], false)
+	if c.long:
+		out.append("the long night stays on when it is no longer open")
+	var r: Rect2 = Chooser.LONG
+	if not Rect2(Vector2.ZERO, Touch.VIEW).encloses(r.grow(Chooser.PAD)) or r.size.x < 40.0 or r.size.y < 16.0:
+		out.append("the long night's button is off the screen or smaller than a thumb: %s" % r)
+	if r.position.y < Chooser.TOP + Chooser.CARD.y + 18.0 or range(ids.size()).any(func(i): return Chooser.rect(i).grow(Chooser.PAD).intersects(r.grow(Chooser.PAD))):
+		out.append("the long night's button lies over the cards or the line of keys under them: %s" % r)
+	if Chooser.PICK_KEYS.has(Chooser.LONG_KEY) or Chooser.START_KEYS.has(Chooser.LONG_KEY) or Chooser.NEXT_KEYS.has(Chooser.LONG_KEY) or Chooser.BACK_KEYS.has(Chooser.LONG_KEY):
+		out.append("the long night's key is also one of the choosing screen's other keys")
+	return out
+
+
+## The win box hears nothing for Winbox.WAIT seconds (the keeper was swinging a moment ago), then Enter or Space keeps
+## the run going and R starts a new one; no other key answers. On a phone only its two buttons answer, after
+## Touch.REST: a tap anywhere else does nothing. Under an ending the same-seed button asks for the same seed, and a
+## tap anywhere else starts again.
+static func _winbox() -> Array:
+	var out := []
+	var b = Winbox.new()
+	b.show()
+	b.frame(Winbox.WAIT * 0.9)
+	if b.key(KEY_SPACE) != "" or b.key(KEY_ENTER) != "" or b.key(KEY_R) != "":
+		out.append("the win box answers a key in its first %.1f s" % Winbox.WAIT)
+	b.frame(Winbox.WAIT * 0.2)
+	var keys := [b.key(KEY_ENTER), b.key(KEY_SPACE), b.key(KEY_KP_ENTER), b.key(KEY_R), b.key(KEY_X), b.key(KEY_T), b.key(KEY_ESCAPE)]
+	if keys != ["go_on", "go_on", "go_on", "restart", "", "", ""]:
+		out.append("the win box's keys are not Enter and Space to go on and R for a new run, and nothing else: %s" % [keys])
+	b.close()
+	if b.key(KEY_ENTER) != "":
+		out.append("the win box answers a key once it is closed")
+	var go := Rect2(150.0, 180.0, 80.0, 18.0)
+	var anew := Rect2(250.0, 180.0, 64.0, 18.0)
+	var t = _fresh()
+	t.mode = "won"
+	t.targets = { "go_on": go, "restart": anew }
+	t.frame(Touch.REST / 2.0)
+	_touch(t, 0, go.get_center())
+	_touch(t, 0, go.get_center(), false)
+	if not t.take().is_empty():
+		out.append("a tap answers the win box before it has shown for %.1f s" % Touch.REST)
+	t.frame(Touch.REST)
+	for at in [AT, Touch.ATTACK, Vector2(240.0, 60.0), go.get_center() + Vector2(0.0, go.size.y / 2.0 + Touch.TARGET_PAD + 2.0)]:
+		_touch(t, 0, at)
+		_touch(t, 0, at, false)
+	if not t.take().is_empty() or not _held(t).is_empty():
+		out.append("a tap beside the win box's buttons answers it")
+	_touch(t, 0, go.get_center())
+	_touch(t, 0, go.get_center(), false)
+	var went: Array = t.take().keys()
+	_touch(t, 0, anew.get_center() + Vector2(anew.size.x / 2.0 + Touch.TARGET_PAD - 1.0, 0.0))
+	var started: Array = t.take().keys()
+	if went != ["go_on"] or started != ["restart"]:
+		out.append("the win box's buttons do not give go_on and restart: %s, %s" % [went, started])
+	t.mode = "off" # the choosing screen, then a run that ends
+	t.frame(0.0)
+	t.mode = "ended"
+	t.targets = { "retry": anew }
+	t.frame(Touch.REST / 2.0)
+	_touch(t, 1, anew.get_center())
+	if not t.take().is_empty():
+		out.append("the same-seed button answers before the end has shown for %.1f s" % Touch.REST)
+	t.frame(Touch.REST)
+	_touch(t, 1, anew.get_center())
+	var again: Array = t.take().keys()
+	_touch(t, 1, AT)
+	var fresh: Array = t.take().keys()
+	if again != ["retry"] or fresh != ["restart"]:
+		out.append("under an ending, the same-seed button does not give retry and a tap elsewhere restart: %s, %s" % [again, fresh])
+	t.free()
+	return out
+
+
+## A key let go is let go whatever is on screen. The win box, the guide (H in the middle of a run) and the choosing
+## screen take every press, but a key that was down when one of them came up and is released under it is no longer
+## held when it closes: the keeper does not walk on by itself. main.gd's own input function is given the release.
+static func _let_go() -> Array:
+	var out := []
+	for screen in ["winning", "intro", "choosing"]:
+		var main = Main.new()
+		main.held = { "up": true, "attack": true }
+		main.set(screen, true)
+		var e := InputEventKey.new()
+		e.keycode = KEY_W
+		e.pressed = false
+		main._unhandled_input(e)
+		if main.held.keys() != ["attack"]:
+			out.append("W let go while main.gd's %s is on is still held when it goes off: %s" % [screen, main.held.keys()])
+		main.free()
+	return out
+
+
+## Sorts a box's containers now, top down, so that its buttons are where a frame would draw them.
+static func _settle(node: Node) -> void:
+	if node is Container:
+		node.notification(Container.NOTIFICATION_SORT_CHILDREN)
+	for c in node.get_children():
+		_settle(c)
+
+
+## The boxes the real Ui lays out, with the list of records full, wins to list, two characters just opened and a big
+## build held: the ending's (of a run that won and went on) and the win's both fit the view; each has its two
+## buttons side by side, thumb-sized, apart, inside the box; Ui.targets gives src/touch.gd both buttons of either
+## box, and a tap at each one's middle gives its action, as a mouse click there does (_box_clicks).
+static func _end_boxes() -> Array:
+	var out := []
+	var file := "user://records_touch_test.json"
+	DirAccess.remove_absolute(file)
+	var records = Records.new(file)
+	for i in Records.KEEP:
+		records.add({ "score": 12345 + i, "night": 14, "seed": 999999, "picks": [], "date": "2026-11-%02d 10:00:00" % (i + 1), "char": Chooser.ids()[i % 3], "won": i % 2 == 0, "mode": "long" })
+	records.wins = { "knight": 12, "woodcutter": 3, "mage": 7 }
+	records.fresh = ["woodcutter", "mage", Records.LONG]
+	var ui = Ui.new()
+	(Engine.get_main_loop() as SceneTree).root.add_child(ui)
+	var w = World.new(999999, "mage")
+	ui.setup(Painter.new(1), records, Node2D.new(), 0, w)
+	var slotted := func(side: String) -> Array:
+		return Config.UPGRADES.keys().filter(func(id): return World.side(id) == side and World.takes_slot(id) and World.open_to(id, "mage") and not Config.UPGRADES[id].has("needs")).slice(0, Config.BUILD.slots[side])
+	w.picks = slotted.call("torch") + slotted.call("keeper") + Config.UPGRADES.keys().filter(func(id): return not World.takes_slot(id) and World.open_to(id, "mage"))
+	w.night = 14
+	w.score = 123456
+	w.won = true
+	var view := Rect2(Vector2.ZERO, Touch.VIEW)
+	for touching in [false, true]:
+		for win in [false, true]:
+			var what := "%s box%s" % ["the win" if win else "the ending's", " on a phone" if touching else ""]
+			w.phase = "pick" if win else "dead"
+			ui.winning = win
+			ui.touch = touching
+			ui.frame(w, 0.1)
+			ui.frame(w, 0.1)
+			_settle(ui.box)
+			var size: Vector2 = ui.box.get_combined_minimum_size()
+			if size.x > view.size.x or size.y > view.size.y:
+				out.append("%s does not fit the view: %s" % [what, size])
+			if (view.size.x - size.x) / 2.0 < Painter.HUD_PICKS.x + Config.BUILD.slots.torch * Painter.TILE_STEP.x:
+				out.append("%s is so wide (%s) that it lies over the HUD's slots, top left" % [what, size])
+			if not ui.box.visible or not ui.end_buttons.visible or (not win and not ui.board.visible) or not ui.opened_line.visible or (not win and not ui.subheading.visible):
+				out.append("%s does not show its buttons, what was opened%s" % [what, "" if win else ", the records or that the run was won"])
+			var a: Rect2 = ui.first_box.get_global_rect()
+			var b: Rect2 = ui.second_box.get_global_rect()
+			var inside: Rect2 = ui.box.get_global_rect()
+			if not inside.encloses(a) or not inside.encloses(b) or not view.encloses(a.grow(Touch.TARGET_PAD)) or not view.encloses(b.grow(Touch.TARGET_PAD)):
+				out.append("%s's buttons are not inside it and the view: %s, %s in %s" % [what, a, b, inside])
+			if a.grow(Touch.TARGET_PAD).intersects(b.grow(Touch.TARGET_PAD)) or a.size.x < Ui.BUTTON.x or b.size.x < Ui.BUTTON.x or a.size.y < Ui.BUTTON.y or b.size.y < Ui.BUTTON.y:
+				out.append("%s's buttons touch or are smaller than a thumb: %s, %s" % [what, a, b])
+			var want := { "go_on": a, "restart": b } if win else { "restart": a, "retry": b }
+			if ui.targets(w) != want:
+				out.append("%s hands the touch controls %s, not %s" % [what, ui.targets(w), want])
+			var t = _fresh()
+			t.mode = "won" if win else "ended"
+			t.targets = ui.targets(w)
+			t.frame(Touch.REST)
+			for action in want:
+				_touch(t, 0, want[action].get_center())
+				var got: Array = t.take().keys()
+				if got != [action]:
+					out.append("a tap in the middle of %s's %s button gives %s" % [what, action, got])
+			t.free()
+			var said := [ui.first_words.text, ui.second_words.text]
+			var words := [Ui.GO_ON_TOUCH if touching else Ui.GO_ON_KEYS, Ui.NEW_TOUCH if touching else Ui.NEW_KEYS] if win else [Ui.AGAIN_TOUCH if touching else Ui.AGAIN_KEYS, Ui.RETRY_TOUCH if touching else Ui.RETRY_KEYS]
+			if said != words:
+				out.append("%s's buttons say %s, not %s" % [what, said, words])
+			var looks := [] # over a second of frames: how solid each button and its words are
+			for i in 10:
+				ui.frame(w, 0.1)
+				for n in [ui.first_words, ui.second_words, ui.first_box, ui.second_box, ui.end_buttons]:
+					if not looks.has(n.modulate.a * n.self_modulate.a):
+						looks.append(n.modulate.a * n.self_modulate.a)
+			var edges: Array = [ui.first_box, ui.second_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).border_color.get_luminance())
+			var fills: Array = [ui.first_box, ui.second_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).bg_color.get_luminance())
+			if ui.opened_line.text != Ui.OPENED % ", ".join([Config.CHARACTERS.woodcutter.name, Config.CHARACTERS.mage.name, Ui.LONG_NAME]):
+				out.append("%s does not name what the records say this run opened, the long night among them: %s" % [what, ui.opened_line.text])
+			if looks != [1.0]:
+				out.append("%s's buttons or their words are not steady and solid, so one reads as switched off: over a second they are %s" % [what, looks])
+			if edges[0] <= edges[1] or fills[0] <= fills[1]:
+				out.append("%s's first button is not told apart by a brighter edge and fill: edges %s, fills %s" % [what, edges, fills])
+			out.append_array(_box_clicks(ui, records, w, win, what))
+			if not win and (not ui.board.text.contains(Ui.BOARD_WON) or not ui.board.text.contains(Ui.BOARD_LONG) or not ui.board.text.contains(Ui.BOARD_WINS % "") or ui.board.text.count("\n") != Records.SHOWN + 1):
+				out.append("the records under an ending do not mark the won runs, the long nights and each character's wins on %d lines: %s" % [Records.SHOWN + 2, ui.board.text])
+	w.phase = "night"
+	ui.winning = false
+	ui.frame(w, 0.1)
+	if not ui.targets(w).is_empty():
+		out.append("the touch controls are handed buttons while no box is up: %s" % [ui.targets(w)])
+	# The choosing screen: a locked card says what opens it, an open one what the character does; a crown and a count
+	# on the cards that have won; the long night's button where it answers.
+	ui.choosing = true
+	ui.chooser.show("knight", ["mage"], true)
+	records.wins = { "woodcutter": 3 }
+	ui.frame(w, 0.1)
+	var cards: Array = ui.choose_cards
+	var mage: int = Chooser.ids().find("mage")
+	var woodcutter: int = Chooser.ids().find("woodcutter")
+	if not cards[mage].lock.visible or cards[mage].text.text.replace("\n", " ") != Ui.LOCKED % Config.UNLOCKS.opens.mage or cards[woodcutter].lock.visible or cards[woodcutter].text.text.replace("\n", " ") != Config.CHARACTERS.woodcutter.text:
+		out.append("a locked card does not show its lock and what opens it, or an open one does: %s / %s" % [cards[mage].text.text, cards[woodcutter].text.text])
+	if not cards[woodcutter].crown.visible or cards[woodcutter].wins.text != Ui.WINS % 3 or cards[mage].crown.visible or cards[0].wins.visible:
+		out.append("the cards do not mark who has won, and how often")
+	if not ui.choose_long.visible or ui.choose_long.position != Chooser.LONG.position or ui.choose_long.get_combined_minimum_size().x > Chooser.LONG.size.x or ui.choose_long.get_combined_minimum_size().y > Chooser.LONG.size.y:
+		out.append("the long night's button is not drawn where it answers: %s, %s" % [ui.choose_long.position, ui.choose_long.get_combined_minimum_size()])
+	for locks in [["mage"], []]: # every card holds its words, locked or open, with its crown
+		ui.chooser.show("knight", locks, true)
+		ui.frame(w, 0.1)
+		for i in cards.size():
+			var need: Vector2 = cards[i].card.get_combined_minimum_size()
+			if need.y > Chooser.CARD.y or need.x > Chooser.CARD.x:
+				out.append("card %d's words do not fit it (%s locked): it needs %s of %s" % [i + 1, locks, need, Chooser.CARD])
+	ui.free()
+	DirAccess.remove_absolute(file)
+	return out
+
+
+## The note button turns the music on and off (as M does) while playing or paused, and is nothing else: it holds no
+## action, does not swing, pause or bring the start screen back, and does not answer while the cards are up. It is
+## on the screen, apart from the "?" and pause buttons.
+static func _music_button() -> Array:
+	var out := []
+	var t = _fresh()
+	var count := { "music": 0, "pause": 0, "help": 0 }
+	t.music_pressed.connect(func(): count.music += 1)
+	t.pause_pressed.connect(func(): count.pause += 1)
+	t.help_pressed.connect(func(): count.help += 1)
+	_touch(t, 0, Touch.MUSIC)
+	_touch(t, 0, Touch.MUSIC, false)
+	if count != { "music": 1, "pause": 0, "help": 0 } or not t.take().is_empty() or not _held(t).is_empty():
+		out.append("a tap on the note button while playing is not the music's toggle alone: %s" % [count])
+	t.mode = "paused"
+	_touch(t, 0, Touch.MUSIC + Vector2(Touch.MUSIC_REACH - 1.0, 0.0))
+	_touch(t, 0, Touch.MUSIC, false)
+	if count != { "music": 2, "pause": 0, "help": 0 }:
+		out.append("a tap on the note button while paused does not toggle the music, or also goes on: %s" % [count])
+	for mode in ["pick", "ended", "won", "off"]:
+		t.mode = mode
+		t.frame(Touch.REST)
+		_touch(t, 0, Touch.MUSIC)
+		_touch(t, 0, Touch.MUSIC, false)
+	if count.music != 2:
+		out.append("the note button answers where it is not drawn (the cards, an ending, the win, the start screen)")
+	if Touch.MUSIC.distance_to(Touch.HELP) < Touch.MUSIC_REACH + Touch.HELP_REACH or Touch.MUSIC.distance_to(Touch.PAUSE) < Touch.MUSIC_REACH + Touch.PAUSE_REACH:
+		out.append("the note button and the buttons beside it both answer one tap")
+	if not Rect2(Vector2.ZERO, Touch.VIEW).grow(-Touch.EDGE + 5.0).has_point(Touch.MUSIC) or Touch.MUSIC.y > Touch.STICK_TOP:
+		out.append("the note button is off the screen or where the thumbs play: %s" % Touch.MUSIC)
+	if Main.MUSIC_KEY != KEY_M or Main.KEYS.has(KEY_M) or Chooser.LONG_KEY == KEY_M or Winbox.GO_KEYS.has(KEY_M) or Winbox.NEW_KEYS.has(KEY_M):
+		out.append("M is not the music's key alone")
+	t.free()
+	return out
+
+
+## A mouse button going down at a point, given to main.gd's own input function. from_touch: the click Godot makes of
+## a touch, which is not the mouse's.
+static func _click(main, at: Vector2, button := MOUSE_BUTTON_LEFT, from_touch := false) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = button
+	e.position = at
+	e.pressed = true
+	if from_touch:
+		e.device = InputEvent.DEVICE_ID_EMULATION
+	main._unhandled_input(e)
+
+
+## A left click of the mouse on a button of the box the Ui has laid out (the win's, or an ending's) does what a tap
+## there does, through main.gd's own input function: on the win box "go_on" takes it away, and not in its first
+## Winbox.WAIT seconds; on an ending the two buttons press "restart" and "retry" for the next step, and not in its
+## first Touch.REST seconds. A click beside the buttons, another mouse button, and the click Godot makes of a touch
+## (the touch has answered already) do nothing.
+static func _box_clicks(ui, records, w, win: bool, what: String) -> Array:
+	var out := []
+	var main = Main.new()
+	main.ui = ui
+	main.records = records
+	main.world = w
+	main.touch = Touch.new()
+	main.touch.mode = "won" if win else "ended"
+	main.touch.targets = ui.targets(w)
+	main.winning = win
+	var first: Rect2 = ui.first_box.get_global_rect()
+	var second: Rect2 = ui.second_box.get_global_rect()
+	var beside := [ui.box.get_global_rect().position + Vector2(3.0, 3.0), Vector2(2.0, 2.0), first.get_center() - Vector2(0.0, first.size.y / 2.0 + Touch.TARGET_PAD + 2.0)]
+	var state := func() -> Array:
+		return [main.winning, main.choosing, main.pending.keys()]
+	var idle := [win, false, []]
+	ui.winbox.show()
+	main.touch.frame(Touch.REST * 0.9)
+	ui.winbox.frame(Touch.REST * 0.9)
+	_click(main, first.get_center())
+	_click(main, second.get_center())
+	if state.call() != idle:
+		out.append("a click on %s's buttons answers before it has shown for %.1f s: %s" % [what, Touch.REST, state.call()])
+	main.touch.frame(Touch.REST * 0.2)
+	ui.winbox.frame(Touch.REST * 0.2)
+	if win:
+		_click(main, first.get_center())
+		if state.call() != idle or main.touch.box_press(first.get_center(), false) != "go_on":
+			out.append("a click on %s's first button answers %.1f s after it opened, before its %.1f s are over: %s" % [what, Touch.REST * 1.1, Winbox.WAIT, state.call()])
+		ui.winbox.frame(Winbox.WAIT)
+	for at in beside:
+		_click(main, at)
+	_click(main, first.get_center(), MOUSE_BUTTON_RIGHT)
+	_click(main, second.get_center(), MOUSE_BUTTON_LEFT, true)
+	if state.call() != idle:
+		out.append("a click beside %s's buttons, a right click on one, or the click made of a touch answers it: %s" % [what, state.call()])
+	if win:
+		if main.touch.box_press(second.get_center(), false) != "restart":
+			out.append("a click on %s's second button does not ask for a new run: %s" % [what, main.touch.box_press(second.get_center(), false)])
+		_click(main, first.get_center())
+		if state.call() != [false, false, []] or ui.winning or ui.winbox.open:
+			out.append("a click on %s's first button does not take the box away and keep the run going: %s" % [what, state.call()])
+	else:
+		_click(main, first.get_center())
+		var again: Array = main.pending.keys()
+		main.pending = {}
+		_click(main, second.get_center())
+		if again != ["restart"] or main.pending.keys() != ["retry"]:
+			out.append("a click on %s's buttons does not press restart and retry for the next step: %s, %s" % [what, again, main.pending.keys()])
+	main.touch.free()
+	main.free()
 	return out
 
 

@@ -1,7 +1,9 @@
 ## Touch controls for playing on a phone: a stick that appears where the left thumb lands and steers in any of
 ## Config.STICK_DIRECTIONS directions, a sword button on the right (a tap anywhere on the right half swings too) and
 ## (once the dash upgrade is held) a dash button beside it, a pause button, a "?" button beside it that brings the start
-## screen back (the H key), and a tap that restarts after the end. Part of
+## screen back (the H key), a note button beside that for the music (the M key), a tap that restarts after the end
+## (or, on its same-seed button, plays that run again), and the win box's two buttons (targets; main.gd asks
+## box_press what a mouse click on those buttons does). Part of
 ## the bridge with src/main.gd: it turns screen touches into the same action names the keys give ("attack", "dash")
 ## and the stick into a direction number (InputFrame.stick), so the simulation reads no screen (S1), and each tap
 ## counts for exactly one step (D6: take()).
@@ -17,6 +19,7 @@ const Ui := preload("res://src/ui.gd")
 
 signal pause_pressed # the pause button, or a tap anywhere while paused
 signal help_pressed # the "?" button, while playing or paused: the start screen again
+signal music_pressed # the note button, while playing or paused: the music on or off (the M key)
 
 const VIEW: Vector2 = Config.VIEW
 const DEAD := 4.0 # pixels the thumb moves from where it landed before the keeper walks
@@ -33,6 +36,9 @@ const ATTACK_REACH := 34.0 # touch radius: well past the drawn button (and any t
 const DASH_REACH := 24.0 # past its drawn 16, short of the sword's: the two never both answer one tap
 const PAUSE_REACH := 13.0
 const HELP_REACH := 12.0 # a little smaller than the pause button's, so the two never both answer one tap
+const MUSIC := HELP - Vector2(26.0, 0.0) # left of the "?" button
+const MUSIC_REACH := 12.0
+const TARGET_PAD := 4.0 # a button of a box in the middle (targets) answers this far past its drawn edge
 const ICON_SCALE := 2 # the sword and dash pictures on their buttons are drawn twice their size
 const LOOK := 0.45 # how solid the controls are while untouched
 const LOOK_DOWN := 0.85 # and while pressed
@@ -47,7 +53,9 @@ const DEMO_PUSH := Vector2(9.0, -5.0) # its knob, pushed a little
 const DEMO_WORDS := [["끌어서 이동", Vector2(74.0, 224.0)], ["누르면 베기", Vector2(412.0, 194.0)], ["돌진", Vector2(369.0, 213.0)]]
 
 var on := false # the controls are shown and listen
-var mode := "off" # set by main.gd every frame: "play", "pick", "ended", "paused", or "off" (the start screen)
+var mode := "off" # set by main.gd every frame: "play", "pick", "ended", "won" (the win box), "paused", or "off" (the start screen)
+var targets := {} # set by main.gd every frame: the buttons of the box in the middle, action -> where it is drawn (Ui.targets)
+var music_on := true # set by main.gd: how the note button is drawn
 var dash_shown := false # set by main.gd: the dash upgrade is held
 var attack_icon := "sword" # set by main.gd: the picture on the attack button, the keeper's own (Looks.CHARACTERS button)
 var stick := -1 # the touch index steering, -1 when none
@@ -58,7 +66,7 @@ var buttons := {} # touch index -> the action it holds down: "attack" or "dash"
 var help_touch := -1 # the touch index on the "?" button, -1 when none. It answers when lifted, so the tap that
 # opens the start screen is not also the click that closes it (Godot turns a touch into a mouse click as it lands)
 var presses := {} # actions pressed since main.gd last took them
-var ended_for := 0.0 # real seconds in "ended"
+var boxed_for := 0.0 # real seconds the box in the middle has been up: an ending's ("ended") or the win's ("won")
 var rotate_label: Label
 var guide_controls := false # set by main.gd: the start screen's guide is on its controls page
 var demo_labels: Array = []
@@ -137,12 +145,16 @@ func handle(event: InputEvent) -> bool:
 	if (mode == "play" or mode == "paused") and t.position.distance_to(HELP) <= HELP_REACH:
 		help_touch = t.index
 		return true
+	if (mode == "play" or mode == "paused") and t.position.distance_to(MUSIC) <= MUSIC_REACH:
+		music_pressed.emit()
+		return true
 	match mode:
 		"paused":
 			pause_pressed.emit()
-		"ended":
-			if ended_for >= REST:
-				presses["restart"] = true
+		"ended", "won":
+			var asked := box_press(t.position, true)
+			if asked != "":
+				presses[asked] = true
 		"play":
 			if t.position.distance_to(PAUSE) <= PAUSE_REACH:
 				pause_pressed.emit()
@@ -158,6 +170,24 @@ func handle(event: InputEvent) -> bool:
 		_:
 			return false # the start screen and the cards are tapped as mouse clicks
 	return true
+
+
+## What a press at pos asks of the box in the middle (an ending's or the win's) once it has shown for REST seconds:
+## the action of the button there. Beside the buttons, a tap under an ending starts again (stray); under the win
+## nothing answers, since a stray press must not close it, and nothing answers a mouse click (main.gd: not stray).
+func box_press(pos: Vector2, stray: bool) -> String:
+	if not (mode == "ended" or mode == "won") or boxed_for < REST:
+		return ""
+	var on_button := target_at(pos)
+	return on_button if on_button != "" else "restart" if stray and mode == "ended" else ""
+
+
+## The action of the button (targets) at pos, a little past its edges counting, or "".
+func target_at(pos: Vector2) -> String:
+	for action in targets:
+		if targets[action].grow(TARGET_PAD).has_point(pos):
+			return action
+	return ""
 
 
 func _press(index: int, action: String) -> void:
@@ -225,7 +255,7 @@ func upright() -> bool:
 
 ## Call every drawn frame, after main.gd has set mode.
 func frame(delta: float) -> void:
-	ended_for = ended_for + delta if mode == "ended" else 0.0
+	boxed_for = boxed_for + delta if mode == "ended" or mode == "won" else 0.0
 	if mode != "play":
 		var help := help_touch if mode == "paused" else -1 # the "?" button also answers on the pause screen
 		release()
@@ -255,6 +285,10 @@ func _draw() -> void:
 	_sprite("pause_bars", PAUSE, mode == "paused")
 	_sprite("button_small", HELP, help_touch >= 0)
 	_sprite("help_mark", HELP, help_touch >= 0)
+	_sprite("button_small", MUSIC, false)
+	_sprite("note_mark", MUSIC, false)
+	if not music_on:
+		_sprite("note_off", MUSIC, false)
 	if mode != "play":
 		return
 	var attacking := buttons.values().has("attack")

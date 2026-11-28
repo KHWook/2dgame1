@@ -157,7 +157,13 @@ const BERRY_BOB_STEPS := 20 # steps per half bob
 const SCRIM := Color(0.03, 0.02, 0.07)
 ## The night's progress towards dawn, under the clock that main.gd writes at the top in the middle.
 const NIGHT_BAR := Rect2(195.0, 18.0, 90.0, 3.0)
-const CLOCK_PANEL := Rect2(185.0, 1.0, 110.0, 23.0)
+const CLOCK_PANEL := Rect2(185.0, 1.0, 110.0, 28.0)
+## The run's goal under the night's bar: a pip per dawn up to the one that wins (World.goal), the dawns seen in
+## gold, tonight's in orange, the last one taller.
+const GOAL_PIP := Vector2(4.0, 3.0)
+const GOAL_GAP := 2.0
+const GOAL_TOP := 24.0
+const GOAL_MOST := int(CLOCK_PANEL.size.x / (GOAL_PIP.x + GOAL_GAP)) # as many as lie side by side inside the clock's panel; a goal past it shows none
 const BOSS_BAR := Rect2(140.0, 254.0, 200.0, 5.0) # the first boss's health, along the bottom; the ui writes its name left of it
 const BOSS_BAR_STEP := 10.0 # each next boss's bar is this much higher: they stack up from the bottom
 const BOSS_BAR_COLOUR := "i"
@@ -718,6 +724,24 @@ func _night_bar(c: CanvasItem, w) -> void:
 	c.draw_rect(NIGHT_BAR.grow(1.0), Sprites.PALETTE["k"])
 	c.draw_rect(NIGHT_BAR, Sprites.PALETTE["K"])
 	c.draw_rect(Rect2(NIGHT_BAR.position, Vector2(ceilf(NIGHT_BAR.size.x * share), NIGHT_BAR.size.y)), Sprites.PALETTE["Y"])
+	var pips := goal_pips(w)
+	for i in pips.size():
+		var pip: Rect2 = pips[i]
+		c.draw_rect(pip.grow(1.0), Sprites.PALETTE["k"])
+		c.draw_rect(pip, Sprites.PALETTE["Y" if i < w.night - 1 else "x" if i == w.night - 1 else "K"])
+
+
+## Where the goal's pips are, the first dawn's first: none when the row would not fit (GOAL_MOST).
+static func goal_pips(w) -> Array:
+	var out := []
+	var n: int = w.goal
+	if n > GOAL_MOST:
+		return out
+	var left := roundf(NIGHT_BAR.get_center().x - (n * GOAL_PIP.x + (n - 1) * GOAL_GAP) / 2.0)
+	for i in n:
+		var last := i == n - 1
+		out.append(Rect2(left + i * (GOAL_PIP.x + GOAL_GAP), GOAL_TOP - (1.0 if last else 0.0), GOAL_PIP.x, GOAL_PIP.y + (1.0 if last else 0.0)))
+	return out
 
 
 ## The embers the spark upgrade fires: they glow, so they are painted where the night does not dim them.
