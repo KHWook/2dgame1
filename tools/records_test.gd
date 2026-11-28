@@ -1,5 +1,6 @@
 ## The score records (src/records.gd) hold to what they claim: best first, only the top ten, one entry per run
-## however long its ending lasts, the same list after a save and a load, and a broken file is an empty list.
+## however long its ending lasts, the same list after a save and a load, and a broken file is an empty list; a save
+## never leaves half a file, and says so when it cannot be made.
 ## Works on a file of its own under user://, never the player's.
 extends RefCounted
 
@@ -12,6 +13,7 @@ const InputFrame := preload("res://src/sim/input_frame.gd")
 const FILE := "user://records_test.json"
 const GUIDE_FILE := "user://guide_test.json"
 const CHARACTER_FILE := "user://character_test.json"
+const PART := "user://records_test.json.part" # Records.PART of FILE: where a save is written before it is whole
 
 
 ## Every failure as a message; empty when all hold.
@@ -26,6 +28,8 @@ static func run() -> Array:
 	out.append_array(_grandfather())
 	out.append_array(_won())
 	out.append_array(_never_lost())
+	out.append_array(_unknown_kept())
+	out.append_array(_whole_saves())
 	out.append_array(_settings())
 	out.append_array(_no_writes())
 	_wipe()
@@ -42,6 +46,7 @@ static func _aside(n := 1) -> String:
 ## Removes the test's records file and everything set aside from it.
 static func _wipe() -> void:
 	DirAccess.remove_absolute(FILE)
+	DirAccess.remove_absolute(PART)
 	for n in range(1, 6):
 		DirAccess.remove_absolute(_aside(n))
 
@@ -247,6 +252,93 @@ static func _never_lost() -> Array:
 	return out
 
 
+## What a file names that this version does not have stays in it through a save: an entry of "open" or of "wins"
+## that is no character here (or no count), and the keeper of a run, which is shown as the knight's and written back
+## as it was read. What this version does know is read and counted as ever beside them.
+static func _unknown_kept() -> Array:
+	var out := []
+	_put('{"version": 3, "runs": [{"score": 50, "night": 2, "char": "archer", "note": "hi", "won": true}, {"score": 40, "night": 1, "char": "mage"}], "open": ["knight", "archer", 7, "mage"], "wins": {"archer": 2, "mage": 1, "knight": "x"}}')
+	var r = Records.new(FILE)
+	if r.opened != ["knight", "mage"] or r.wins != { "mage": 1 } or r.runs.map(func(run): return run.char) != ["knight", "mage"]:
+		out.append("a file naming a character this version does not have is not read as what it does have: open %s, wins %s, runs %s" % [r.opened, r.wins, r.runs])
+	r.step(_told(World.new(1, "mage"), [{ "kind": "won", "night": 10 }]), 1, "2026-01-01")
+	r.add(_run(60, 3, "2026-01-02"))
+	for pass_ in 2: # after a save, and after a load and another save
+		var disk := _on_disk()
+		var runs: Array = disk.get("runs", [])
+		if disk.get("open") != ["knight", "mage", "archer", 7.0]:
+			out.append("an entry of open that is no character here is lost on save %d: %s" % [pass_ + 1, disk.get("open")])
+		if disk.get("wins") != { "archer": 2.0, "mage": 2.0, "knight": "x" }:
+			out.append("an entry of wins that is no character here, or no count, is lost on save %d (the mage's two are counted): %s" % [pass_ + 1, disk.get("wins")])
+		if runs.map(func(run): return run.get("char")) != ["knight", "archer", "mage"] or runs[1].get("note") != "hi" or runs.any(func(run): return run.has(Records.AS_READ)):
+			out.append("the run of a keeper this version does not have is not written back as it was read on save %d: %s" % [pass_ + 1, runs])
+		r = Records.new(FILE)
+		r.set_music(not r.music)
+	return out
+
+
+## A save never leaves half a file: it is written under another name beside the file and renamed over it, also where
+## the file is already there. A part cut short beside a whole file is passed over and written over by the next save;
+## with no file (the game stopped inside the rename) a whole part is read, and a half one is a first play. Where the
+## part cannot be written, or a file that cannot be read cannot be set aside (every name taken), write says so and
+## the file is byte for byte as it was.
+static func _whole_saves() -> Array:
+	var out := []
+	var good := '{"version": 3, "runs": [], "open": ["knight", "mage"], "wins": {"mage": 2}, "music": true}'
+	var put_part := func(text: String) -> void:
+		var f := FileAccess.open(PART, FileAccess.WRITE)
+		f.store_string(text)
+		f.close()
+	for part in ["", good.substr(0, 40)]:
+		_put(good)
+		if part != "":
+			put_part.call(part)
+		var r = Records.new(FILE)
+		if r.opened != ["knight", "mage"] or r.wins != { "mage": 2 }:
+			out.append("a whole file beside %s is not what is read: open %s, wins %s" % ["half a part" if part != "" else "no part", r.opened, r.wins])
+		r.set_music(false)
+		if _on_disk().get("music") != false or _on_disk().get("wins") != { "mage": 2.0 } or FileAccess.file_exists(PART) or FileAccess.file_exists(_aside()):
+			out.append("a save over a file that is there (beside %s) does not put the new one whole in its place and leave nothing else: %s" % ["half a part" if part != "" else "no part", _on_disk()])
+	_wipe()
+	put_part.call(good)
+	var stopped = Records.new(FILE)
+	if stopped.opened != ["knight", "mage"] or stopped.wins != { "mage": 2 }:
+		out.append("with no file and a whole part beside it (a save stopped inside its rename), the part is not read: open %s, wins %s" % [stopped.opened, stopped.wins])
+	stopped.set_music(false)
+	if _on_disk().get("wins") != { "mage": 2.0 } or _on_disk().get("music") != false or FileAccess.file_exists(PART):
+		out.append("the save after a part was read does not put the file in its place: %s" % [_on_disk()])
+	_wipe()
+	put_part.call(good.substr(0, 40))
+	var first = Records.new(FILE)
+	first.set_music(false)
+	if first.opened != ["knight"] or not first.wins.is_empty() or _on_disk().get("music") != false or FileAccess.file_exists(PART) or FileAccess.file_exists(_aside()):
+		out.append("with no file and half a part, the game does not start as a first play and save over the part: open %s, on disk %s" % [first.opened, _on_disk()])
+	_put(good)
+	DirAccess.make_dir_absolute(PART) # a folder of the part's name: the part cannot be written
+	var blocked = Records.new(FILE)
+	blocked.music = false
+	var said: String = blocked.write()
+	if said == "" or FileAccess.get_file_as_string(FILE) != good:
+		out.append("a save whose part cannot be written does not say so (%s) and leave the file as it was: %s" % [said, FileAccess.get_file_as_string(FILE)])
+	DirAccess.remove_absolute(PART)
+	if blocked.write() != "" or _on_disk().get("music") != false:
+		out.append("the save after one that could not be made is not made")
+	_put("broken {")
+	for n in range(1, Records.ASIDE_MOST + 1):
+		FileAccess.open(_aside(n), FileAccess.WRITE).store_string("taken")
+	var stuck = Records.new(FILE)
+	stuck.music = false
+	said = stuck.write()
+	if said == "" or FileAccess.get_file_as_string(FILE) != "broken {" or FileAccess.file_exists(PART):
+		out.append("a file that cannot be read or set aside is written over, or the save does not say that it was not made (%s)" % said)
+	DirAccess.remove_absolute(_aside(40))
+	if stuck.write() != "" or FileAccess.get_file_as_string(_aside(40)) != "broken {" or _on_disk().get("music") != false:
+		out.append("once a name is free, the file that cannot be read is not set aside under it and the save made")
+	for n in range(1, Records.ASIDE_MOST + 1):
+		DirAccess.remove_absolute(_aside(n))
+	return out
+
+
 ## The music setting is kept: on at first, off once turned off, on again once turned on; anything but false is on.
 static func _settings() -> Array:
 	var out := []
@@ -270,7 +362,7 @@ static func _settings() -> Array:
 	return out
 
 
-## A store told not to save (the demo bot's, a run without a screen: Main.keeps) writes nothing: no file where there
+## A store told not to save (Main.keeps) writes nothing: no file where there
 ## was none, and a file there byte for byte as it was, whatever is recorded, opened, won, set or settled.
 static func _no_writes() -> Array:
 	var out := []
