@@ -207,9 +207,10 @@ const SCORE := { "kill": 10, "log": 5, "dawn": 100 }
 ## keeper lasts; nothing of the nights changes with it.
 const GOAL := { "night": 10 }
 
-## What is kept from run to run beside the records (src/records.gd). opens: a character other than these opens the
-## first time anyone sees the dawn that ends that night. long: the harder way to play a first win opens, the long
-## night: the same run, won only at the dawn that ends this night (src/chooser.gd turns it on, main.gd sets World.goal).
+## What is kept from run to run beside the records (src/records.gd). opens: character -> the night whose dawn, seen
+## by anyone for the first time, opens it; a character not named is open from the start. long: the harder way to
+## play a first win opens, the long night: the same run, won only at the dawn that ends this night (src/chooser.gd
+## turns it on, main.gd sets World.goal).
 const UNLOCKS := { "opens": { "woodcutter": 4, "mage": 7 }, "long": { "night": 15 } }
 
 const ENEMY := {

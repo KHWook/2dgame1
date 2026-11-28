@@ -113,7 +113,7 @@ static func _locked_cards() -> Array:
 ## The win box hears nothing for Winbox.WAIT seconds (the keeper was swinging a moment ago), then Enter or Space keeps
 ## the run going and R starts a new one; no other key answers. On a phone only its two buttons answer, after
 ## Touch.REST: a tap anywhere else does nothing. Under an ending the same-seed button asks for the same seed, and a
-## tap anywhere else starts again as it always has.
+## tap anywhere else starts again.
 static func _winbox() -> Array:
 	var out := []
 	var b = Winbox.new()

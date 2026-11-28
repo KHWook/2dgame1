@@ -159,11 +159,11 @@ const SCRIM := Color(0.03, 0.02, 0.07)
 const NIGHT_BAR := Rect2(195.0, 18.0, 90.0, 3.0)
 const CLOCK_PANEL := Rect2(185.0, 1.0, 110.0, 28.0)
 ## The run's goal under the night's bar: a pip per dawn up to the one that wins (World.goal), the dawns seen in
-## gold, tonight's in orange, the last one taller. Left out when the goal is too far for the row to fit the panel.
+## gold, tonight's in orange, the last one taller.
 const GOAL_PIP := Vector2(4.0, 3.0)
 const GOAL_GAP := 2.0
 const GOAL_TOP := 24.0
-const GOAL_MOST := 15
+const GOAL_MOST := int(CLOCK_PANEL.size.x / (GOAL_PIP.x + GOAL_GAP)) # as many as lie side by side inside the clock's panel; a goal past it shows none
 const BOSS_BAR := Rect2(140.0, 254.0, 200.0, 5.0) # the first boss's health, along the bottom; the ui writes its name left of it
 const BOSS_BAR_STEP := 10.0 # each next boss's bar is this much higher: they stack up from the bottom
 const BOSS_BAR_COLOUR := "i"
@@ -724,8 +724,9 @@ func _night_bar(c: CanvasItem, w) -> void:
 	c.draw_rect(NIGHT_BAR.grow(1.0), Sprites.PALETTE["k"])
 	c.draw_rect(NIGHT_BAR, Sprites.PALETTE["K"])
 	c.draw_rect(Rect2(NIGHT_BAR.position, Vector2(ceilf(NIGHT_BAR.size.x * share), NIGHT_BAR.size.y)), Sprites.PALETTE["Y"])
-	for i in goal_pips(w).size():
-		var pip: Rect2 = goal_pips(w)[i]
+	var pips := goal_pips(w)
+	for i in pips.size():
+		var pip: Rect2 = pips[i]
 		c.draw_rect(pip.grow(1.0), Sprites.PALETTE["k"])
 		c.draw_rect(pip, Sprites.PALETTE["Y" if i < w.night - 1 else "x" if i == w.night - 1 else "K"])
 

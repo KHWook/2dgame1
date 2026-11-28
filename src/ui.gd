@@ -943,8 +943,8 @@ static func combo_hint(w, id: String) -> String:
 	return "\n".join(lines)
 
 
-## The end: how it ended, the night and score and where it landed, the upgrades held by name, the best runs, and in
-## the corner the run's seed.
+## The box under an ending or a win: the title, the keeper and score (and place, under an ending), what this run
+## opened, the upgrades held by name, the best runs (not under a win), and in the corner the run's seed.
 func _fill_end(w) -> void:
 	heading.add_theme_font_size_override("font_size", HUGE)
 	if winning: # the win box: what the run has kept so far, and the two ways on
@@ -957,7 +957,7 @@ func _fill_end(w) -> void:
 		heading.add_theme_color_override("font_color", RED if w.phase == "dead" else Color("#ff9a3c"))
 		foot.text = "%s · %d번째 밤 · 점수 %d" % [Config.CHARACTERS[w.character].name, w.night, w.score] + (" · 새 기록!" if records.place == 1 else (" · %d위" % records.place if records.place > 1 else ""))
 		foot.add_theme_color_override("font_color", GOLD if records.place == 1 else CREAM)
-	subheading.visible = w.won and not winning # an ending of a run that was won and went on says so
+	subheading.visible = w.won and not winning
 	subheading.text = WON_RUN % w.goal
 	subheading.add_theme_color_override("font_color", GOLD)
 	var opened: Array = records.fresh.map(func(id): return Config.CHARACTERS[id].name)
@@ -1213,7 +1213,7 @@ func _board() -> String:
 		var how: String = BOARD_WON if r.get("won", false) else BOARD_LONG if r.get("mode", "") == "long" else ""
 		lines.append("%d위   %d점 · %s · %d번째 밤 · %s%s%s" % [i + 1, r.score, Config.CHARACTERS[r.char].name, r.night, _day(r.date), how, mark])
 	var won: Array = Config.CHARACTERS.keys().filter(func(id): return records.wins.get(id, 0) > 0)
-	if not won.is_empty(): # under the list: how often each character has won
+	if not won.is_empty():
 		lines.append(BOARD_WINS % " · ".join(won.map(func(id): return "%s %d" % [Config.CHARACTERS[id].name, records.wins[id]])))
 	return ("최고 기록\n" + "\n".join(lines)) if not lines.is_empty() else ""
 
@@ -1318,7 +1318,7 @@ func _choose_frame(delta: float) -> void:
 	choose_long_label.add_theme_color_override("font_color", GOLD if chooser.long else MUTED)
 	(choose_long.get_theme_stylebox("panel") as StyleBoxFlat).border_color = GOLD if chooser.long else CARD_EDGE
 	choose_long.size = Chooser.LONG.size
-	for i in choose_cards.size(): # a locked card: its picture dark under a padlock, and what opens it for its words
+	for i in choose_cards.size():
 		var c: Dictionary = choose_cards[i]
 		var id: String = Chooser.ids()[i]
 		var locked: bool = chooser.locked.has(id)

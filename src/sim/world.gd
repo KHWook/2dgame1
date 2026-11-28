@@ -21,7 +21,6 @@
 ## burning up in the flame, "spat" { pos, enemy } for a spitter letting its blob go and "beat" { pos, enemy } for a
 ## drummer's beat (src/sim/enemy.gd); "splat" { pos, hurt } where a blob bursts on the keeper (hurt) or under a blow or an ember;
 ## "won" { night } on the step of the dawn that ends night goal (Config.GOAL), once a run, right after its "dawn".
-## That dawn wins the run (won): the world says so once and plays on exactly as it would have.
 extends RefCounted
 
 const Config := preload("res://src/sim/config.gd")
@@ -72,7 +71,7 @@ var blade_kills := 0 # kills by the sword toward the next heal from the vampire 
 var haste_until := 0.0 # the night time until which the keeper walks and attacks faster for a kill (haste, haste_attack)
 var next_beacon := 0.0 # the night time from which a blow in the light makes the torch fire again (beacon_every)
 var events: Array = [] # what happened in the last step; see the top of this file
-var goal: int = Config.GOAL.night # the dawn that ends this night wins the run (main.gd's --goal=N moves it, to look at the win)
+var goal: int = Config.GOAL.night # the dawn that ends this night wins the run (main.gd moves it for the long night and --goal=N)
 var won := false # the run has seen that dawn. Told once (the "won" event); no rule reads it, so the nights after are the same
 var _mods := {} # what mod() looks up: key -> the values the picks set it to (see _remod)
 var _mods_for = null # the picks array _mods was worked out for (picks only ever grows, or is replaced)

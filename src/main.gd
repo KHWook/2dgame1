@@ -31,8 +31,8 @@ const KEYS := {
 }
 const PAUSE_KEYS := [KEY_P, KEY_ESCAPE]
 const HELP_KEY := KEY_H # brings the first screen back
-const MUSIC_KEY := KEY_M # the music on or off, on any screen; the effects stay
-const SFX_DB := -12.0 # how loud the sound effects play: under the player's own music, if any
+const MUSIC_KEY := KEY_M # the music on or off; the effects stay
+const SFX_DB := -12.0 # how loud the sound effects play: over the music (MUSIC_DB)
 const MUSIC_DB := -19.0 # the loops, under the effects: a warning is never the quieter of the two (tools/goals_test.gd)
 const STING_DB := -14.0 # the dawn's and the win's stings
 const MUSIC_WORK_USEC := 3000 # the most of a frame spent making the music's samples, until they are all made
@@ -57,7 +57,7 @@ var sky: CanvasModulate
 var ground: ShaderMaterial = null
 var overlay: Node2D # above the night and the lights: what glows by itself, and the HUD pictures
 var ui # src/ui.gd: every word on screen, and the offer cards
-var records # src/records.gd: the best runs on disk
+var records # src/records.gd: everything kept between plays
 var seed_value := 1
 var seed_fixed := false
 var torch_lights: Array = [] # one PointLight2D per ring of tongues (Painter.LIGHT_RINGS), turning against each other
@@ -193,7 +193,7 @@ func _ready() -> void:
 	touch_layer.add_child(touch)
 	touch.pause_pressed.connect(_toggle_pause)
 	touch.help_pressed.connect(func(): _set_intro(true)) # the H key's touch: over the pause screen too, as H is
-	touch.music_pressed.connect(func(): records.set_music(not records.music)) # the M key's touch
+	touch.music_pressed.connect(func(): records.set_music(not records.music))
 	get_tree().root.size_changed.connect(_fit)
 	_fit()
 

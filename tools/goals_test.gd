@@ -221,7 +221,7 @@ static func _locks() -> Array:
 ## last one taller, none overlapping; and the dusk's offer says it in words until the run is won.
 static func _hud() -> Array:
 	var out := []
-	for goal in [8, 10, 12, 15]:
+	for goal in [8, 10, 12, 15, Painter.GOAL_MOST]:
 		var w = World.new(1)
 		w.goal = goal
 		var pips: Array = Painter.goal_pips(w)
@@ -234,6 +234,7 @@ static func _hud() -> Array:
 		_expect(out, "the last of the %d pips, the dawn that wins, is the tall one" % goal, pips.filter(func(p): return p.size.y > Painter.GOAL_PIP.y), [pips[-1]])
 	var far = World.new(1)
 	far.goal = Painter.GOAL_MOST + 1
+	_expect(out, "the row holds as many pips as lie inside the clock's panel, each with its edge, and not one more", [Painter.GOAL_MOST, Painter.GOAL_MOST * (Painter.GOAL_PIP.x + Painter.GOAL_GAP) <= Painter.CLOCK_PANEL.size.x, (Painter.GOAL_MOST + 1) * (Painter.GOAL_PIP.x + Painter.GOAL_GAP) > Painter.CLOCK_PANEL.size.x], [18, true, true])
 	_expect(out, "a goal too far for the row shows no pips", Painter.goal_pips(far), [])
 	var w = World.new(1)
 	_expect(out, "the first dusk says the goal", Ui.dusk_words(w), Ui.GOAL_FIRST % 10)
@@ -378,15 +379,18 @@ static func _floats(stream: AudioStreamWAV) -> PackedFloat32Array:
 	return out
 
 
-## How loud a sample is: its root mean square in dB under full scale, and its peak.
+## How loud a sample is: its root mean square in dB under full scale, and its peak; its first and last samples, and
+## the biggest step between two samples next to each other inside it.
 static func level(stream: AudioStreamWAV) -> Dictionary:
 	var s := _floats(stream)
 	var sum := 0.0
 	var peak := 0.0
-	for v in s:
-		sum += v * v
-		peak = maxf(peak, absf(v))
-	return { "rms_db": linear_to_db(sqrt(sum / maxi(1, s.size()))), "peak": peak, "first": s[0], "last": s[-1], "samples": s.size() }
+	var biggest_step := 0.0
+	for i in s.size():
+		sum += s[i] * s[i]
+		peak = maxf(peak, absf(s[i]))
+		biggest_step = maxf(biggest_step, absf(s[i] - s[i - 1]) if i > 0 else 0.0)
+	return { "rms_db": linear_to_db(sqrt(sum / maxi(1, s.size()))), "peak": peak, "first": s[0], "last": s[-1], "samples": s.size(), "biggest_step": biggest_step }
 
 
 ## Every loop is as long as its row says, loops forward over all of it, never clips, is not silent, and its last
@@ -415,10 +419,9 @@ static func _music_samples() -> Array:
 	var s := _floats(wrap.stream)
 	var beat := s.size() / 4
 	var heard := [0.0, 0.0, 0.0, 0.0] # the loudest sample in each beat
-	var step := 0.0 # the biggest step between two samples next to each other, inside the loop
+	var step: float = level(wrap.stream).biggest_step
 	for i in s.size():
 		heard[mini(i / beat, 3)] = maxf(heard[mini(i / beat, 3)], absf(s[i]))
-		step = maxf(step, absf(s[i] - s[i - 1]) if i > 0 else 0.0)
 	_expect(out, "a note over a loop's end sounds on its last beat, goes on in its first, and nowhere else",
 		[heard[3] > 0.2, heard[0] > 0.2, heard[1] < 0.001, heard[2] < 0.001], [true, true, true, true])
 	_expect(out, "and it runs through the seam with no bigger a step than inside it (%.4f then %.4f; inside at most %.4f)" % [s[-1], s[0], step], absf(s[0] - s[-1]) <= step, true)

@@ -14,7 +14,7 @@ const RATE := 11025 # half the effects' rate: the loops are low and soft, and ta
 const ATTACK := 0.008 # seconds a note takes to swell in, so it starts without a click
 const CHUNK := 512 # samples made between two looks at the clock
 const FADE := 1.2 # seconds a cross-fade takes
-const DUCKS := ["warn", "coming", "boss"] # the sounds that warn (src/art/juice.gd): the music steps back for them
+const DUCKS := ["warn", "coming", "boss"] # the sounds the music steps back for: a boss or pack coming, a boss arriving, a boss about to strike
 const DUCK := 0.3 # how much of the music is left while it steps back
 const DUCK_TIME := 0.9 # for how long, in seconds; it comes back over the last third
 const TIGHT_FROM := 20.0 # the tight loop starts to come in when the torch would go out within this many seconds
@@ -128,8 +128,7 @@ static func row(name: String) -> Dictionary:
 
 ## How many samples a loop or a sting is.
 static func length(name: String) -> int:
-	var r := row(name)
-	return int(round(r.beats * 60.0 / r.bpm * RATE))
+	return Maker.samples(row(name))
 
 
 ## The whole sample, made in one go (the tools and the tests; the game uses a Maker over many frames).
@@ -157,13 +156,17 @@ class Maker:
 	var data := PackedByteArray()
 	var stream: AudioStreamWAV = null
 
+	## How many samples a row's beats take at its bpm.
+	static func samples(r: Dictionary) -> int:
+		return int(round(r.beats * 60.0 / r.bpm * RATE))
+
 	## row_: a row to make instead of the one name has in LOOPS or STINGS (as a loop; the tests' own).
 	func _init(name_: String, row_: Dictionary = {}) -> void:
 		name = name_
 		loops = LOOPS.has(name) or not row_.is_empty()
 		var r: Dictionary = row_ if not row_.is_empty() else LOOPS[name] if loops else STINGS[name]
 		var beat: float = 60.0 / r.bpm * RATE
-		count = int(round(r.beats * beat))
+		count = samples(r)
 		mix.resize(count)
 		mix.fill(0.0)
 		data.resize(count * 2)

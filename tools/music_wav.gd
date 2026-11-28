@@ -26,12 +26,8 @@ func _initialize() -> void:
 		bytes += stream.data.size()
 		stream.save_to_wav(dir.path_join(name + ".wav"))
 		var l: Dictionary = GoalsTest.level(stream)
-		var s: PackedFloat32Array = GoalsTest._floats(stream)
-		var steps := 0.0 # the biggest step between two samples next to each other, inside the sample
-		for i in range(1, s.size()):
-			steps = maxf(steps, absf(s[i] - s[i - 1]))
 		print("music_wav: %s (%s): %.3f s, %d samples at %d Hz, peak %.3f (%.1f dB), RMS %.1f dB, last %.4f -> first %.4f (step %.4f; the biggest inside is %.4f), made in %.1f ms, %d bytes" % [
 			name, "loop" if Music.LOOPS.has(name) else "sting", float(l.samples) / Music.RATE, l.samples, Music.RATE, l.peak, linear_to_db(l.peak), l.rms_db,
-			l.last, l.first, absf(l.first - l.last), steps, took / 1000.0, stream.data.size()])
+			l.last, l.first, absf(l.first - l.last), l.biggest_step, took / 1000.0, stream.data.size()])
 	print("music_wav: all %d made in %.1f ms, %d bytes of samples, written to %s" % [Music.LOOPS.size() + Music.STINGS.size(), total_usec / 1000.0, bytes, dir])
 	quit(0)
