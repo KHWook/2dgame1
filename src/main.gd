@@ -338,10 +338,13 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	var click := event as InputEventMouseButton
-	if k != null and k.pressed and not k.echo and k.keycode == MUSIC_KEY: # on any screen
+	if k != null and not k.pressed: # a key let go is let go under every screen, or it would still be held when the screen closes
+		held.erase(KEYS.get(k.keycode, ""))
+		return
+	if k != null and k.pressed and not k.echo and k.keycode == MUSIC_KEY:
 		records.set_music(not records.music)
 		return
-	if winning and not intro: # the win box takes every key; its two buttons are tapped through src/touch.gd
+	if winning and not intro: # the win box takes every key but M; its two buttons are tapped through src/touch.gd
 		if k != null and k.pressed and not k.echo and bot == null:
 			var did: String = ui.winbox.key(k.keycode)
 			if did != "":
@@ -399,15 +402,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not k.echo and bot == null and ui.picker.reroll_key(k.keycode):
 			pending["reroll"] = true
 		return
-	if k == null or not KEYS.has(k.keycode):
+	if k == null or k.echo or not KEYS.has(k.keycode):
 		return
 	var action: String = KEYS[k.keycode]
-	if k.pressed and not k.echo:
-		if not held.has(action):
-			pending[action] = true
-		held[action] = true
-	elif not k.pressed:
-		held.erase(action)
+	if not held.has(action):
+		pending[action] = true
+	held[action] = true
 
 
 func _notification(what: int) -> void:

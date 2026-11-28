@@ -37,6 +37,7 @@ static func run() -> Array:
 	out.append_array(_scaling())
 	out.append_array(_locked_cards())
 	out.append_array(_winbox())
+	out.append_array(_let_go())
 	out.append_array(_end_boxes())
 	out.append_array(_music_button())
 	return out
@@ -166,6 +167,25 @@ static func _winbox() -> Array:
 	if again != ["retry"] or fresh != ["restart"]:
 		out.append("under an ending, the same-seed button does not give retry and a tap elsewhere restart: %s, %s" % [again, fresh])
 	t.free()
+	return out
+
+
+## A key let go is let go whatever is on screen. The win box, the guide (H in the middle of a run) and the choosing
+## screen take every press, but a key that was down when one of them came up and is released under it is no longer
+## held when it closes: the keeper does not walk on by itself. main.gd's own input function is given the release.
+static func _let_go() -> Array:
+	var out := []
+	for screen in ["winning", "intro", "choosing"]:
+		var main = Main.new()
+		main.held = { "up": true, "attack": true }
+		main.set(screen, true)
+		var e := InputEventKey.new()
+		e.keycode = KEY_W
+		e.pressed = false
+		main._unhandled_input(e)
+		if main.held.keys() != ["attack"]:
+			out.append("W let go while main.gd's %s is on is still held when it goes off: %s" % [screen, main.held.keys()])
+		main.free()
 	return out
 
 
