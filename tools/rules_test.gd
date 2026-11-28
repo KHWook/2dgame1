@@ -1159,11 +1159,20 @@ static func _logs() -> Array:
 	var w = _night(DARK)
 	w.player.take_log(w.carry())
 	_play(w, 1, "attack")
-	_expect(out, "the attack key puts a carried log down", [w.player.carrying, w.logs.size()], [false, 1])
-	_play(w, SWING)
+	_expect(out, "the attack key puts a carried log down and swings in the same press", [w.player.carrying, w.logs.size(), w.player.attack_t >= 0.0], [false, 1, true])
+	_play(w, SWING * 3)
 	_expect(out, "a log just put down stays down while you stand on it", w.player.carrying, false)
 	_play(w, 1, "attack")
 	_expect(out, "with the log down, the attack key swings", w.player.attack_t >= 0.0, true)
+	# Carrying, with an enemy in reach: one press puts the log down and the blow lands.
+	var h = _night(DARK)
+	h.player.take_log(h.carry())
+	var slime = _add(h, "slime", NEAR)
+	h.player.invuln = NEVER
+	var hp: int = slime.hp
+	_play(h, 1, "attack")
+	_play(h, SWING)
+	_expect(out, "carrying a log, one press of the attack key hits the enemy in front", [h.player.carrying, slime.hp < hp or slime.dead], [false, true])
 	_play(w, 30, "", "right")
 	_play(w, 30, "", "left")
 	_expect(out, "walking off the log and back onto it picks it up", [w.player.carrying, w.logs.size()], [true, 0])
@@ -2082,9 +2091,19 @@ static func _stack() -> Array:
 	var thief = _add(w, "thief", Vector2(3.0, 0.0))
 	_play(w, 1)
 	_expect(out, "a thief takes one log of the woodcutter's stack", [w.player.held, thief.carrying], [2, true])
-	# The attack key puts them all down.
+	# The attack key puts them all down, and the axe comes down in the same press.
 	_play(w, 1, "attack")
-	_expect(out, "the attack key puts every log down, and swings no axe", [w.player.held, w.player.carrying, w.logs.size(), w.player.attack_t], [0, false, 2, -1.0])
+	_expect(out, "the attack key puts every log down and swings the axe", [w.player.held, w.player.carrying, w.logs.size(), w.player.attack_t >= 0.0], [0, false, 2, true])
+	# Carrying a full stack, with an enemy where the axe comes down: one press hurts it.
+	var c = _night(DARK, [], "woodcutter")
+	for i in 3:
+		c.player.take_log(c.carry())
+	var foe = _add(c, "slime", c.player.face * c.chop_ahead())
+	c.player.invuln = NEVER
+	var foe_hp: int = foe.hp
+	_play(c, 1, "attack")
+	_play(c, SWING)
+	_expect(out, "carrying three logs, one press of the attack key chops the enemy in front", [c.player.held, foe.hp < foe_hp or foe.dead], [0, true])
 	return out
 
 

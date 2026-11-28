@@ -81,7 +81,7 @@ func frame(w) -> InputFrame:
 			off = maxf(off, w.chop_ahead() - w.chop_radius() - foe.T.radius + CHOP_INSIDE)
 		goal = foe.pos + away * off
 		if p.carrying:
-			f.pressed["attack"] = true # drop the log to fight
+			f.pressed["attack"] = true # put the log down: the same press swings
 		elif w.steps % maxi(1, roundi(SWING_EVERY * w.mod("attack_mult", 1.0))) == 0: # a quicker swing (swift), a quicker beat
 			if not chopper or w.foe_in_reach(p.pos): # a chop only where it would strike (World.foe_in_reach)
 				f.pressed["attack"] = true

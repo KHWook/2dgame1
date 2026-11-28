@@ -128,7 +128,7 @@ const GUIDE_PAGES := [
 ]
 const GUIDE_KEYS := [
 	[["pad_knob"], "이동", "WASD · 방향키"],
-	[["sword"], "베기", "Space · J · X (장작을 들었으면 내려놓기)"],
+	[["sword"], "베기", "Space · J · X (장작을 들었으면 내려놓고 베기)"],
 	[["icon_dash"], "돌진", "Shift · K (돌진 힘을 얻은 뒤)"],
 	[["pause_bars"], "멈춤", "P · Esc     이 설명 다시 보기 H"],
 ]
