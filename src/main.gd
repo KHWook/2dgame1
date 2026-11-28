@@ -362,6 +362,13 @@ static func _stir(h: int) -> int:
 	return h ^ (h >> 16)
 
 
+## Whether an event is a mouse's own left button going down. The click Godot makes of every touch is not: the
+## touch itself has been heard by then (src/touch.gd), and would be answered twice.
+static func own_click(event: InputEvent) -> bool:
+	var b := event as InputEventMouseButton
+	return b != null and b.pressed and b.button_index == MOUSE_BUTTON_LEFT and b.device != InputEvent.DEVICE_ID_EMULATION
+
+
 ## Any press is the first input a browser waits for before a page may sound (Music.may_play).
 func _input(event: InputEvent) -> void:
 	if (event is InputEventKey or event is InputEventMouseButton or event is InputEventScreenTouch) and event.is_pressed():
@@ -377,11 +384,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if k != null and k.pressed and not k.echo and k.keycode == MUSIC_KEY:
 		records.set_music(not records.music)
 		return
-	if winning and not intro: # the win box takes every key but M; its two buttons are tapped through src/touch.gd
-		if k != null and k.pressed and not k.echo and bot == null:
-			var did: String = ui.winbox.key(k.keycode)
-			if did != "":
-				_win_answer(did)
+	if winning and not intro: # the win box takes every key but M, and every click; a tap comes through src/touch.gd
+		var did := ""
+		if k != null and not k.echo and bot == null:
+			did = ui.winbox.key(k.keycode)
+		elif own_click(event) and bot == null and ui.winbox.listening():
+			did = touch.box_press(click.position, false)
+		if did != "":
+			_win_answer(did)
 		return
 	if intro: # the guide takes every key and click; only its start button (or Enter, Space) closes it
 		var did := ""
@@ -417,6 +427,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			records.remember_character(took)
 			_set_choosing(false)
 			_take_character(took)
+		return
+	if own_click(event): # on an ending's two buttons it asks what a tap there does; anywhere else, nothing
+		var asked: String = touch.box_press(click.position, false) if bot == null else ""
+		if asked != "":
+			pending[asked] = true
 		return
 	if k != null and k.pressed and not k.echo and k.keycode == HELP_KEY:
 		_set_intro(true)

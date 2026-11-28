@@ -199,8 +199,8 @@ static func _settle(node: Node) -> void:
 
 ## The boxes the real Ui lays out, with the list of records full, wins to list, two characters just opened and a big
 ## build held: the ending's (of a run that won and went on) and the win's both fit the view; each has its two
-## buttons side by side, thumb-sized, apart, inside the box; Ui.targets gives src/touch.gd the same-seed button under
-## an ending and both buttons under a win, and a tap at each one's middle gives its action.
+## buttons side by side, thumb-sized, apart, inside the box; Ui.targets gives src/touch.gd both buttons of either
+## box, and a tap at each one's middle gives its action, as a mouse click there does (_box_clicks).
 static func _end_boxes() -> Array:
 	var out := []
 	var file := "user://records_touch_test.json"
@@ -244,7 +244,7 @@ static func _end_boxes() -> Array:
 				out.append("%s's buttons are not inside it and the view: %s, %s in %s" % [what, a, b, inside])
 			if a.grow(Touch.TARGET_PAD).intersects(b.grow(Touch.TARGET_PAD)) or a.size.x < Ui.BUTTON.x or b.size.x < Ui.BUTTON.x or a.size.y < Ui.BUTTON.y or b.size.y < Ui.BUTTON.y:
 				out.append("%s's buttons touch or are smaller than a thumb: %s, %s" % [what, a, b])
-			var want := { "go_on": a, "restart": b } if win else { "retry": b }
+			var want := { "go_on": a, "restart": b } if win else { "restart": a, "retry": b }
 			if ui.targets(w) != want:
 				out.append("%s hands the touch controls %s, not %s" % [what, ui.targets(w), want])
 			var t = _fresh()
@@ -261,6 +261,7 @@ static func _end_boxes() -> Array:
 			var words := [Ui.GO_ON_TOUCH if touching else Ui.GO_ON_KEYS, Ui.NEW_TOUCH if touching else Ui.NEW_KEYS] if win else [Ui.AGAIN_TOUCH if touching else Ui.AGAIN_KEYS, Ui.RETRY_TOUCH if touching else Ui.RETRY_KEYS]
 			if said != words:
 				out.append("%s's buttons say %s, not %s" % [what, said, words])
+			out.append_array(_box_clicks(ui, records, w, win, what))
 			if not win and (not ui.board.text.contains(Ui.BOARD_WON) or not ui.board.text.contains(Ui.BOARD_LONG) or not ui.board.text.contains(Ui.BOARD_WINS % "") or ui.board.text.count("\n") != Records.SHOWN + 1):
 				out.append("the records under an ending do not mark the won runs, the long nights and each character's wins on %d lines: %s" % [Records.SHOWN + 2, ui.board.text])
 	w.phase = "night"
@@ -328,6 +329,77 @@ static func _music_button() -> Array:
 	if Main.MUSIC_KEY != KEY_M or Main.KEYS.has(KEY_M) or Chooser.LONG_KEY == KEY_M or Winbox.GO_KEYS.has(KEY_M) or Winbox.NEW_KEYS.has(KEY_M):
 		out.append("M is not the music's key alone")
 	t.free()
+	return out
+
+
+## A mouse button going down at a point, given to main.gd's own input function. from_touch: the click Godot makes of
+## a touch, which is not the mouse's.
+static func _click(main, at: Vector2, button := MOUSE_BUTTON_LEFT, from_touch := false) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = button
+	e.position = at
+	e.pressed = true
+	if from_touch:
+		e.device = InputEvent.DEVICE_ID_EMULATION
+	main._unhandled_input(e)
+
+
+## A left click of the mouse on a button of the box the Ui has laid out (the win's, or an ending's) does what a tap
+## there does, through main.gd's own input function: on the win box "go_on" takes it away, and not in its first
+## Winbox.WAIT seconds; on an ending the two buttons press "restart" and "retry" for the next step, and not in its
+## first Touch.REST seconds. A click beside the buttons, another mouse button, and the click Godot makes of a touch
+## (the touch has answered already) do nothing.
+static func _box_clicks(ui, records, w, win: bool, what: String) -> Array:
+	var out := []
+	var main = Main.new()
+	main.ui = ui
+	main.records = records
+	main.world = w
+	main.touch = Touch.new()
+	main.touch.mode = "won" if win else "ended"
+	main.touch.targets = ui.targets(w)
+	main.winning = win
+	var first: Rect2 = ui.again_box.get_global_rect()
+	var second: Rect2 = ui.retry_box.get_global_rect()
+	var beside := [ui.box.get_global_rect().position + Vector2(3.0, 3.0), Vector2(2.0, 2.0), first.get_center() - Vector2(0.0, first.size.y / 2.0 + Touch.TARGET_PAD + 2.0)]
+	var state := func() -> Array:
+		return [main.winning, main.choosing, main.pending.keys()]
+	var idle := [win, false, []]
+	ui.winbox.show()
+	main.touch.frame(Touch.REST * 0.9)
+	ui.winbox.frame(Touch.REST * 0.9)
+	_click(main, first.get_center())
+	_click(main, second.get_center())
+	if state.call() != idle:
+		out.append("a click on %s's buttons answers before it has shown for %.1f s: %s" % [what, Touch.REST, state.call()])
+	main.touch.frame(Touch.REST * 0.2)
+	ui.winbox.frame(Touch.REST * 0.2)
+	if win:
+		_click(main, first.get_center())
+		if state.call() != idle or main.touch.box_press(first.get_center(), false) != "go_on":
+			out.append("a click on %s's first button answers %.1f s after it opened, before its %.1f s are over: %s" % [what, Touch.REST * 1.1, Winbox.WAIT, state.call()])
+		ui.winbox.frame(Winbox.WAIT)
+	for at in beside:
+		_click(main, at)
+	_click(main, first.get_center(), MOUSE_BUTTON_RIGHT)
+	_click(main, second.get_center(), MOUSE_BUTTON_LEFT, true)
+	if state.call() != idle:
+		out.append("a click beside %s's buttons, a right click on one, or the click made of a touch answers it: %s" % [what, state.call()])
+	if win:
+		if main.touch.box_press(second.get_center(), false) != "restart":
+			out.append("a click on %s's second button does not ask for a new run: %s" % [what, main.touch.box_press(second.get_center(), false)])
+		_click(main, first.get_center())
+		if state.call() != [false, false, []] or ui.winning or ui.winbox.open:
+			out.append("a click on %s's first button does not take the box away and keep the run going: %s" % [what, state.call()])
+	else:
+		_click(main, first.get_center())
+		var again: Array = main.pending.keys()
+		main.pending = {}
+		_click(main, second.get_center())
+		if again != ["restart"] or main.pending.keys() != ["retry"]:
+			out.append("a click on %s's buttons does not press restart and retry for the next step: %s, %s" % [what, again, main.pending.keys()])
+	main.touch.free()
+	main.free()
 	return out
 
 

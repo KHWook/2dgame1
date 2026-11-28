@@ -2,7 +2,8 @@
 ## Config.STICK_DIRECTIONS directions, a sword button on the right (a tap anywhere on the right half swings too) and
 ## (once the dash upgrade is held) a dash button beside it, a pause button, a "?" button beside it that brings the start
 ## screen back (the H key), a note button beside that for the music (the M key), a tap that restarts after the end
-## (or, on its same-seed button, plays that run again), and the win box's two buttons (targets). Part of
+## (or, on its same-seed button, plays that run again), and the win box's two buttons (targets; main.gd asks
+## box_press what a mouse click on those buttons does). Part of
 ## the bridge with src/main.gd: it turns screen touches into the same action names the keys give ("attack", "dash")
 ## and the stick into a direction number (InputFrame.stick), so the simulation reads no screen (S1), and each tap
 ## counts for exactly one step (D6: take()).
@@ -150,13 +151,10 @@ func handle(event: InputEvent) -> bool:
 	match mode:
 		"paused":
 			pause_pressed.emit()
-		"ended": # a tap on a button does what it says; one anywhere else starts again, as it always has
-			if ended_for >= REST:
-				var on_button := target_at(t.position)
-				presses[on_button if on_button != "" else "restart"] = true
-		"won": # only its two buttons answer: a stray tap must not close the win
-			if ended_for >= REST and target_at(t.position) != "":
-				presses[target_at(t.position)] = true
+		"ended", "won":
+			var asked := box_press(t.position, true)
+			if asked != "":
+				presses[asked] = true
 		"play":
 			if t.position.distance_to(PAUSE) <= PAUSE_REACH:
 				pause_pressed.emit()
@@ -172,6 +170,16 @@ func handle(event: InputEvent) -> bool:
 		_:
 			return false # the start screen and the cards are tapped as mouse clicks
 	return true
+
+
+## What a press at pos asks of the box in the middle (an ending's or the win's) once it has shown for REST seconds:
+## the action of the button there. Beside the buttons, a tap under an ending starts again (stray); under the win
+## nothing answers, since a stray press must not close it, and nothing answers a mouse click (main.gd: not stray).
+func box_press(pos: Vector2, stray: bool) -> String:
+	if not (mode == "ended" or mode == "won") or ended_for < REST:
+		return ""
+	var on_button := target_at(pos)
+	return on_button if on_button != "" else "restart" if stray and mode == "ended" else ""
 
 
 ## The action of the button (targets) at pos, a little past its edges counting, or "".

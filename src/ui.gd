@@ -728,13 +728,13 @@ static func dusk_words(w) -> String:
 	return GOAL_FIRST % w.goal if w.night == 1 else GOAL_LEFT % (w.goal - w.night + 1)
 
 
-## The buttons of the box in the middle, for src/touch.gd: action -> where it is drawn. Under a win, both ("go_on",
-## "restart"); under an ending, the same-seed one ("retry": a tap anywhere else starts again).
+## The buttons of the box in the middle, for a tap or a click (src/touch.gd): action -> where it is drawn. Under a
+## win "go_on" and "restart"; under an ending "restart" and the same seed again, "retry".
 func targets(w) -> Dictionary:
 	if winning:
 		return { "go_on": again_box.get_global_rect(), "restart": retry_box.get_global_rect() }
 	if ENDINGS.has(w.phase):
-		return { "retry": retry_box.get_global_rect() }
+		return { "restart": again_box.get_global_rect(), "retry": retry_box.get_global_rect() }
 	return {}
 
 
