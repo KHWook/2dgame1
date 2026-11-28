@@ -200,6 +200,7 @@ const BOARD_WON := " · 승리" # after a record that reached its goal
 const BOARD_LONG := " · 긴 밤" # after one played as the long night that did not (its goal was further)
 const BOARD_WINS := "승리   %s"
 const BUTTON := Vector2(64.0, 18.0) # the least an end box's button measures: a thumb finds it
+const BUTTON_FIRST := Color(0.3, 0.22, 0.2, 0.97) # the fill of the first of the two, the one Enter or R takes: lighter than CARD_BACK
 const END_WIDTH := 280.0 # the width an end box's upgrades wrap at: with its edges the box stays right of the HUD's left panel
 const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
 const PAUSE_TOUCH := "눌러서 계속하기 · ? 설명 보기"
@@ -395,9 +396,9 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	end_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	end_buttons.add_theme_constant_override("separation", 12)
 	lines.add_child(end_buttons)
-	again_box = _end_button()
+	again_box = _end_button(true)
 	again = again_box.get_child(0)
-	retry_box = _end_button()
+	retry_box = _end_button(false)
 	retry = retry_box.get_child(0)
 	end_seed = _seed_label(box)
 	box.visible = false
@@ -738,10 +739,11 @@ func targets(w) -> Dictionary:
 	return {}
 
 
-## One of the two buttons under an ending or a win: a small edged box with its words, in end_buttons.
-func _end_button() -> PanelContainer:
-	var b := _panel(end_buttons, CARD_BACK, 3.0)
-	(b.get_theme_stylebox("panel") as StyleBoxFlat).border_color = CARD_EDGE
+## One of the two buttons under an ending or a win: a small edged box with its words, in end_buttons. Both are
+## steady, so that neither reads as switched off; the first is told apart by a gold edge and a lighter fill.
+func _end_button(first: bool) -> PanelContainer:
+	var b := _panel(end_buttons, BUTTON_FIRST if first else CARD_BACK, 3.0)
+	(b.get_theme_stylebox("panel") as StyleBoxFlat).border_color = GOLD if first else CARD_EDGE
 	b.custom_minimum_size = BUTTON
 	var l := _label(b, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -977,7 +979,6 @@ func _fill_end(w) -> void:
 					held_flow.add_child(_held_item(w, id))
 	board.text = _board() if not winning else ""
 	board.visible = board.text != ""
-	again.modulate.a = 0.65 + 0.35 * cos(clock_time * 4.0)
 	_write_seed(end_seed, heading, w)
 
 

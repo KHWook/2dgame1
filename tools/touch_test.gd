@@ -261,6 +261,18 @@ static func _end_boxes() -> Array:
 			var words := [Ui.GO_ON_TOUCH if touching else Ui.GO_ON_KEYS, Ui.NEW_TOUCH if touching else Ui.NEW_KEYS] if win else [Ui.AGAIN_TOUCH if touching else Ui.AGAIN_KEYS, Ui.RETRY_TOUCH if touching else Ui.RETRY_KEYS]
 			if said != words:
 				out.append("%s's buttons say %s, not %s" % [what, said, words])
+			var looks := [] # over a second of frames: how solid each button and its words are
+			for i in 10:
+				ui.frame(w, 0.1)
+				for n in [ui.again, ui.retry, ui.again_box, ui.retry_box, ui.end_buttons]:
+					if not looks.has(n.modulate.a * n.self_modulate.a):
+						looks.append(n.modulate.a * n.self_modulate.a)
+			var edges: Array = [ui.again_box, ui.retry_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).border_color.get_luminance())
+			var fills: Array = [ui.again_box, ui.retry_box].map(func(n): return (n.get_theme_stylebox("panel") as StyleBoxFlat).bg_color.get_luminance())
+			if looks != [1.0]:
+				out.append("%s's buttons or their words are not steady and solid, so one reads as switched off: over a second they are %s" % [what, looks])
+			if edges[0] <= edges[1] or fills[0] <= fills[1]:
+				out.append("%s's first button is not told apart by a brighter edge and fill: edges %s, fills %s" % [what, edges, fills])
 			out.append_array(_box_clicks(ui, records, w, win, what))
 			if not win and (not ui.board.text.contains(Ui.BOARD_WON) or not ui.board.text.contains(Ui.BOARD_LONG) or not ui.board.text.contains(Ui.BOARD_WINS % "") or ui.board.text.count("\n") != Records.SHOWN + 1):
 				out.append("the records under an ending do not mark the won runs, the long nights and each character's wins on %d lines: %s" % [Records.SHOWN + 2, ui.board.text])
