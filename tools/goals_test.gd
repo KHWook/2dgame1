@@ -73,6 +73,13 @@ static func _win() -> Array:
 	f.pressed["restart"] = true
 	w.step(f)
 	_expect(out, "a run started again has not won", [w.won, w.night], [false, 1])
+	# main.gd is the bridge and is not run here: that it shows the box on the step the win is told, does not step the
+	# world under it, and records the run when the player leaves it for a new one, is read from its source.
+	var source := FileAccess.get_file_as_string("res://src/main.gd")
+	for line in ["if world.won and world.events.any(func(ev): return ev.kind == \"won\"):\n\t\t_set_winning(true)",
+			"if winning: # the world waits under the win box", "records.close(world, seed_value, Time.get_datetime_string_from_system(false, true))\n\t\t_again(false)"]:
+		if not source.contains(line):
+			out.append("main.gd no longer has the line the win box hangs on: %s" % line.replace("\n", " / ").replace("\t", ""))
 	return out
 
 
@@ -345,6 +352,20 @@ static func _music_samples() -> Array:
 			_expect(out, "%s's last sample runs into its first (%.4f then %.4f)" % [name, l.last, l.first], absf(l.first - l.last) <= SEAM, true)
 		else:
 			_expect(out, "the sting %s plays once and ends in silence (its last sample is %.4f)" % [name, l.last], [stream.loop_mode, absf(l.last) <= SEAM], [AudioStreamWAV.LOOP_DISABLED, true])
+	# A note still sounding at a loop's end goes on from its start: here the only note begins on the last beat of four
+	# and lasts two, so the loop's first beat holds its second half, and the seam is as smooth as the note's inside.
+	var wrap = Music.Maker.new("wrap", { "bpm": 120.0, "beats": 4, "voices": [{ "wave": "tri", "vol": 0.5, "step": 3.0, "hold": 2.0, "env": "pad", "seq": [0, 57] }] })
+	wrap.work(-1)
+	var s := _floats(wrap.stream)
+	var beat := s.size() / 4
+	var heard := [0.0, 0.0, 0.0, 0.0] # the loudest sample in each beat
+	var step := 0.0 # the biggest step between two samples next to each other, inside the loop
+	for i in s.size():
+		heard[mini(i / beat, 3)] = maxf(heard[mini(i / beat, 3)], absf(s[i]))
+		step = maxf(step, absf(s[i] - s[i - 1]) if i > 0 else 0.0)
+	_expect(out, "a note over a loop's end sounds on its last beat, goes on in its first, and nowhere else",
+		[heard[3] > 0.2, heard[0] > 0.2, heard[1] < 0.001, heard[2] < 0.001], [true, true, true, true])
+	_expect(out, "and it runs through the seam with no bigger a step than inside it (%.4f then %.4f; inside at most %.4f)" % [s[-1], s[0], step], absf(s[0] - s[-1]) <= step, true)
 	_expect(out, "the loops that play together are one length", Music.LAYERED.map(func(n): return Music.length(n)).max(), Music.LAYERED.map(func(n): return Music.length(n)).min())
 	var slow = Music.Maker.new("tight")
 	var calls := 0

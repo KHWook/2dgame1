@@ -157,13 +157,15 @@ class Maker:
 	var data := PackedByteArray()
 	var stream: AudioStreamWAV = null
 
-	func _init(name_: String) -> void:
+	## row_: a row to make instead of the one name has in LOOPS or STINGS (as a loop; the tests' own).
+	func _init(name_: String, row_: Dictionary = {}) -> void:
 		name = name_
-		loops = LOOPS.has(name)
-		var r: Dictionary = LOOPS[name] if loops else STINGS[name]
+		loops = LOOPS.has(name) or not row_.is_empty()
+		var r: Dictionary = row_ if not row_.is_empty() else LOOPS[name] if loops else STINGS[name]
 		var beat: float = 60.0 / r.bpm * RATE
 		count = int(round(r.beats * beat))
 		mix.resize(count)
+		mix.fill(0.0)
 		data.resize(count * 2)
 		rng = SimRng.new(name.hash()) # the same hiss every time
 		for v in r.voices:
