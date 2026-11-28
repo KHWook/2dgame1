@@ -1816,6 +1816,56 @@ const SPRITES := {
 		"..kwk..",
 		"..kkk..",
 	],
+	# The music button (src/touch.gd): a note, and the stroke drawn across it while the music is off.
+	"note_mark": [
+		"...kkkkk.",
+		"...kwwwk.",
+		"...kwkwk.",
+		"...kwkwk.",
+		"...kwkwk.",
+		".kkkwkwk.",
+		"kwwwwkwk.",
+		"kwwwwkkk.",
+		".kkkk....",
+	],
+	"note_off": [
+		".......kk",
+		"......krk",
+		".....krk.",
+		"....krk..",
+		"...krk...",
+		"..krk....",
+		".krk.....",
+		"krk......",
+		"kk.......",
+	],
+	# A locked character's card (src/ui.gd): a padlock over its picture.
+	"lock": [
+		"...kkkkk...",
+		"..kkAAAkk..",
+		".kkAkkkAkk.",
+		".kAkk.kkAk.",
+		".kAk...kAk.",
+		"kkkkkkkkkkk",
+		"kFFFFFFFFFk",
+		"kFFFkkkFFFk",
+		"kFxFkkkFxFk",
+		"kFxFFkFFxFk",
+		"kFxxFFFxxFk",
+		"kkxxxxxxxkk",
+		".kkkkkkkkk.",
+	],
+	# A win with this character (src/ui.gd, on its card and in the records): a small crown.
+	"crown": [
+		".k...k...k.",
+		"kYk.kYk.kYk",
+		"kYk.kYk.kYk",
+		"kYYkYYYkYYk",
+		"kYYYYYYYYYk",
+		"kFiFFiFFiFk",
+		"kFFFFFFFFFk",
+		"kkkkkkkkkkk",
+	],
 }
 
 ## A second frame that is another sprite with a few rows redrawn: name -> [base sprite, { row index: new row }].

@@ -86,6 +86,8 @@ func step(w) -> void:
 				_shake("boss")
 			"dawn":
 				_sound("dawn")
+			"won": # not an effect: the music's sting (src/audio/music.gd's STINGS), which main.gd plays
+				_sound("win")
 			"warn": # a boss is about to strike
 				_sound("warn")
 			"landed":

@@ -13,6 +13,7 @@ const Painter := preload("res://src/art/painter.gd")
 const Records := preload("res://src/records.gd")
 const Juice := preload("res://src/art/juice.gd")
 const Sfx := preload("res://src/audio/sfx.gd")
+const Music := preload("res://src/audio/music.gd")
 const Ui := preload("res://src/ui.gd")
 const Touch := preload("res://src/touch.gd")
 const Guide := preload("res://src/guide.gd")
@@ -26,10 +27,15 @@ const KEYS := {
 	KEY_X: "attack", KEY_J: "attack", KEY_SPACE: "attack",
 	KEY_SHIFT: "dash", KEY_K: "dash",
 	KEY_1: "pick_1", KEY_2: "pick_2", KEY_3: "pick_3", KEY_R: "restart",
+	KEY_T: "retry", # from an ending: the same seed and keeper again
 }
 const PAUSE_KEYS := [KEY_P, KEY_ESCAPE]
 const HELP_KEY := KEY_H # brings the first screen back
+const MUSIC_KEY := KEY_M # the music on or off, on any screen; the effects stay
 const SFX_DB := -12.0 # how loud the sound effects play: under the player's own music, if any
+const MUSIC_DB := -19.0 # the loops, under the effects: a warning is never the quieter of the two (tools/goals_test.gd)
+const STING_DB := -14.0 # the dawn's and the win's stings
+const MUSIC_WORK_USEC := 3000 # the most of a frame spent making the music's samples, until they are all made
 const TORCH_LIGHT := Color("#ffcf8a")
 const TORCH_ENERGY := 1.25 # the night is nearly black, so what you see by is all the torch's
 const DAY_ENERGY := 0.3 # the torch still glows a little once the sun is up
@@ -57,6 +63,11 @@ var seed_fixed := false
 var torch_lights: Array = [] # one PointLight2D per ring of tongues (Painter.LIGHT_RINGS), turning against each other
 var juice # src/art/juice.gd: hit-stop, shake, and which sounds the last step made
 var sfx := {} # sound name -> its AudioStreamPlayer
+var music = Music.new() # src/audio/music.gd: how much of each loop sounds now
+var music_players := {} # loop or sting name -> its AudioStreamPlayer; none in a run without a screen
+var music_makers: Array = [] # the samples still to make, the next one first (Music.Maker)
+var winning := false # the win box is up (src/winbox.gd): the world waits until it is answered
+var goal_flag := 0 # --goal=N: the dawn that wins, to look at the win box
 var paused := false
 var intro := false # the first screen is up (src/ui.gd, src/guide.gd): the world waits until its start button
 var choosing := false # the choosing screen is up (src/chooser.gd): the world waits until a character is taken
@@ -96,6 +107,8 @@ func _ready() -> void:
 			crowd = int(a.substr(8))
 		if a.begins_with("--char="): # who keeps the torch, without the choosing screen (for the bot and dev runs)
 			character = a.substr(7)
+		if a.begins_with("--goal="):
+			goal_flag = int(a.substr(7))
 	perf = OS.get_cmdline_user_args().has("--perf")
 	if OS.get_cmdline_user_args().has("--bot"):
 		bot = Bot.new(slot)
@@ -104,12 +117,19 @@ func _ready() -> void:
 	# desktop names the folder user://records.json lives in; the web build's page title comes from config/name.web.
 	get_window().title = Ui.INTRO_TITLE
 	records = Records.new()
+	# Only a person's own run on a screen is kept: the demo bot, a run without a screen and one started with a flag
+	# that moves the goal or the night (--goal, --night, --crowd) write nothing (records, what is open, the music setting).
+	var staged: bool = Array(OS.get_cmdline_user_args()).any(func(a): return a.begins_with("--goal=") or a.begins_with("--night=") or a.begins_with("--crowd="))
+	records.saves = keeps(bot != null, DisplayServer.get_name() == "headless", staged)
+	records.settle()
 	if character != "" and not Config.CHARACTERS.has(character):
 		push_warning("--char=%s is not a character (%s): the knight keeps the torch" % [character, ", ".join(Config.CHARACTERS.keys())])
 		character = "knight"
 	chosen_by_flag = character != ""
 	seed_value = _next_seed()
 	world = World.new(seed_value, character if chosen_by_flag else records.last_character())
+	if goal_flag > 0:
+		world.goal = goal_flag
 	painter = Painter.new(seed_value)
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--night="):
@@ -128,6 +148,13 @@ func _ready() -> void:
 		player.volume_db = SFX_DB
 		add_child(player)
 		sfx[name] = player
+	if DisplayServer.get_name() != "headless": # a run without a screen makes no music and needs no audio device for it
+		for name in Music.LOOPS.keys() + Music.STINGS.keys():
+			var player := AudioStreamPlayer.new()
+			player.volume_db = STING_DB if Music.STINGS.has(name) else -80.0
+			add_child(player)
+			music_players[name] = player
+			music_makers.append(Music.Maker.new(name))
 	sky = CanvasModulate.new()
 	add_child(sky)
 	if not OS.get_cmdline_user_args().has("--flat"):
@@ -169,6 +196,7 @@ func _ready() -> void:
 	touch_layer.add_child(touch)
 	touch.pause_pressed.connect(_toggle_pause)
 	touch.help_pressed.connect(func(): _set_intro(true)) # the H key's touch: over the pause screen too, as H is
+	touch.music_pressed.connect(func(): records.set_music(not records.music)) # the M key's touch
 	get_tree().root.size_changed.connect(_fit)
 	_fit()
 
@@ -210,13 +238,46 @@ func _set_choosing(on: bool) -> void:
 	choosing = on
 	ui.choosing = on
 	if on:
-		ui.chooser.show(world.character)
+		ui.chooser.show(world.character, locks(records.opened, bot != null or chosen_by_flag), records.long_open())
 
 
-## A run starts with this keeper, on a new seed unless the seed is fixed: the offers are drawn for the keeper and the
-## ground is laid out from the seed.
-func _take_character(id: String) -> void:
-	seed_value = _next_seed()
+## The win box goes up or away (src/winbox.gd). While it is up the world is not stepped.
+func _set_winning(on: bool) -> void:
+	winning = on
+	ui.winning = on
+	bot_looked = 0
+	if on:
+		ui.winbox.show()
+	else:
+		ui.winbox.close()
+
+
+## The win box's answer: "go_on" plays on from the same step; "restart" records the run as it stands and starts anew.
+func _win_answer(did: String) -> void:
+	_set_winning(false)
+	if did == "restart":
+		records.close(world, seed_value, Time.get_datetime_string_from_system(false, true))
+		_again(false)
+
+
+## A new run from an ending or the win box: the same seed and keeper at once (same), or the choosing screen (the
+## keeper --char=ID named, without it).
+func _again(same: bool) -> void:
+	if same or chosen_by_flag:
+		_take_character(world.character, same)
+	else:
+		_set_choosing(true)
+
+
+## A run starts with this keeper, on a new seed unless the seed is fixed or the run before is played again (same):
+## the offers are drawn for the keeper and the ground is laid out from the seed. The long night, when the choosing
+## screen has it on, moves the dawn that wins.
+func _take_character(id: String, same := false) -> void:
+	seed_value = _next_seed(same)
+	var long: bool = ui != null and ui.chooser.long
+	records.mode = "long" if long else ""
+	if goal_flag <= 0:
+		world.goal = Config.UNLOCKS.long.night if long else Config.GOAL.night
 	world.choose(id, seed_value)
 	if start_night > 0:
 		world.begin_at(start_night, start_slot)
@@ -224,12 +285,27 @@ func _take_character(id: String) -> void:
 	print("run: seed %d, %s" % [seed_value, id])
 
 
-## The seed the next world is made from: the fixed one, or a new one from the system's clock and the time since the
-## game began.
-func _next_seed() -> int:
-	if seed_fixed:
-		return seed_value
-	return fresh_seed(int(Time.get_unix_time_from_system() * 1000000.0), Time.get_ticks_usec())
+## The seed the next world is made from: the fixed one, the one just played (same), or a new one from the system's
+## clock and the time since the game began.
+func _next_seed(same := false) -> int:
+	return seed_after(same, seed_fixed, seed_value, int(Time.get_unix_time_from_system() * 1000000.0), Time.get_ticks_usec())
+
+
+## Pure: the seed of the next run. The one in hand when the seed is fixed or the run is played again, else fresh_seed.
+static func seed_after(same: bool, fixed: bool, now: int, clock_usec: int, ticks_usec: int) -> int:
+	return now if same or fixed else fresh_seed(clock_usec, ticks_usec)
+
+
+## The characters the choosing screen keeps locked: those not opened yet. None when free: the demo bot and --char=ID
+## never ask what is open, so tools keep working on a new machine.
+static func locks(opened: Array, free: bool) -> Array:
+	return [] if free else Config.CHARACTERS.keys().filter(func(id): return not opened.has(id))
+
+
+## Whether this run may write the player's files: not the demo bot's, not one without a screen, not one staged by a
+## flag that moves the goal or the night (a dawn seen that way would open a character, or win).
+static func keeps(is_bot: bool, headless: bool, staged: bool) -> bool:
+	return not (is_bot or headless or staged)
 
 
 ## A run's seed, 1 to SEED_MOST, from two clocks in microseconds: the system's, which tells one launch from another,
@@ -253,9 +329,24 @@ static func _stir(h: int) -> int:
 	return h ^ (h >> 16)
 
 
+## Any press is the first input a browser waits for before a page may sound (Music.may_play).
+func _input(event: InputEvent) -> void:
+	if (event is InputEventKey or event is InputEventMouseButton or event is InputEventScreenTouch) and event.is_pressed():
+		music.heard = true
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	var k := event as InputEventKey
 	var click := event as InputEventMouseButton
+	if k != null and k.pressed and not k.echo and k.keycode == MUSIC_KEY: # on any screen
+		records.set_music(not records.music)
+		return
+	if winning and not intro: # the win box takes every key; its two buttons are tapped through src/touch.gd
+		if k != null and k.pressed and not k.echo and bot == null:
+			var did: String = ui.winbox.key(k.keycode)
+			if did != "":
+				_win_answer(did)
+		return
 	if intro: # the guide takes every key and click; only its start button (or Enter, Space) closes it
 		var did := ""
 		if k != null and k.pressed and not k.echo:
@@ -336,11 +427,15 @@ func _physics_process(_delta: float) -> void:
 	pending = {}
 	if paused or intro or choosing or touch.upright(): # presses made while paused are dropped; keys still held count again once it goes on
 		return
-	if f.pressed.has("restart") and Ui.ENDINGS.has(world.phase) and bot == null:
-		if chosen_by_flag:
-			_take_character(world.character)
-		else:
-			_set_choosing(true)
+	if winning: # the world waits under the win box; the demo bot reads it for a while and keeps going
+		bot_looked += 1
+		if bot != null and bot_looked >= BOT_LOOKS * 2:
+			_win_answer("go_on")
+		elif bot == null and (f.pressed.has("go_on") or f.pressed.has("restart")):
+			_win_answer("go_on" if f.pressed.has("go_on") else "restart")
+		return
+	if (f.pressed.has("restart") or f.pressed.has("retry")) and Ui.ENDINGS.has(world.phase) and bot == null:
+		_again(f.pressed.has("retry"))
 		return
 	var holding: bool = juice.hold > 0 # hit-stop: the world is not stepped, so it is the same step a moment later
 	juice.frame()
@@ -365,7 +460,15 @@ func _physics_process(_delta: float) -> void:
 	painter.step(world)
 	juice.step(world)
 	for name in juice.sounds:
-		sfx[name].play()
+		if sfx.has(name):
+			sfx[name].play()
+		# a sting of the music's: only with the music on, once its sample is made, and the dawn's not under the win's
+		var sting: AudioStreamPlayer = music_players.get(name) if Music.STINGS.has(name) else null
+		if sting != null and sting.stream != null and records.music and music.may_play(OS.has_feature("web")) and not (name == "dawn" and juice.sounds.has("win")):
+			sting.play()
+	music.sounded(juice.sounds)
+	if world.won and world.events.any(func(ev): return ev.kind == "won"):
+		_set_winning(true)
 	ui.after_step(world)
 	queue_redraw()
 	overlay.queue_redraw()
@@ -374,7 +477,10 @@ func _physics_process(_delta: float) -> void:
 func _process(delta: float) -> void:
 	if perf:
 		_perf(delta)
-	touch.mode = "off" if intro or choosing else "paused" if paused else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
+	touch.mode = "off" if intro or choosing else "paused" if paused else "won" if winning else "ended" if Ui.ENDINGS.has(world.phase) else world.phase if world.phase == "pick" else "play"
+	touch.targets = ui.targets(world)
+	touch.music_on = records.music
+	_music(delta)
 	touch.dash_shown = world.mod("dash_every", 0.0) > 0.0
 	touch.attack_icon = Looks.character(world.character).button
 	touch.guide_controls = intro and ui.guide.page == Guide.CONTROLS
@@ -405,6 +511,29 @@ func _process(delta: float) -> void:
 			light.position = lit[i][0]
 			light.texture_scale = lit[i][1] * 2.0 / Painter.LIGHT_SIZE
 			light.energy = lit[i][2] * (1.0 - day)
+
+
+## The music, every drawn frame: a few milliseconds of making its samples until all are made (each player gets its
+## sample when it is whole), then each loop's player turned to what the world asks for (src/audio/music.gd). A loop
+## plays from the moment it may (after the first press, in a browser) and is only ever turned down, never stopped;
+## the three of one length start on the same frame, so the tight one stays in step with the night's and the boss's.
+func _music(delta: float) -> void:
+	if music_players.is_empty():
+		return
+	if not music_makers.is_empty() and music_makers[0].work(Time.get_ticks_usec() + MUSIC_WORK_USEC):
+		var made = music_makers.pop_front()
+		music_players[made.name].stream = made.stream
+	music.frame(delta, Music.state(world, intro or choosing), Music.urgency(world), records.music)
+	if not music.may_play(OS.has_feature("web")):
+		return
+	var layers_made: bool = Music.LAYERED.all(func(name): return music_players[name].stream != null)
+	for name in Music.LOOPS:
+		var player: AudioStreamPlayer = music_players[name]
+		if player.stream == null or (Music.LAYERED.has(name) and not layers_made):
+			continue
+		player.volume_db = MUSIC_DB + linear_to_db(maxf(music.gain(name), 0.0001))
+		if not player.playing:
+			player.play()
 
 
 ## --perf: once a second, how big the crowd is and what it costs. The draw calls are the last frame's.

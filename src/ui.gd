@@ -19,6 +19,7 @@ const Guide := preload("res://src/guide.gd")
 const Coach := preload("res://src/coach.gd")
 const Chooser := preload("res://src/chooser.gd")
 const Picker := preload("res://src/picker.gd")
+const Winbox := preload("res://src/winbox.gd")
 
 signal chosen(slot: int) # a card was clicked: main.gd presses that slot's key for the next step
 signal rerolled # the reroll button was clicked: main.gd presses "reroll" for the next step
@@ -88,7 +89,7 @@ const FLY_TIME := 0.5
 const FLY_ARC := 24.0 # pixels the flight bows up
 const FLASH_TIME := 0.7 # the tile's ring after the icon lands
 const TOLD_TIME := 3.2 # seconds the line naming what was taken stays
-const TOLD_TOP := 27.0
+const TOLD_TOP := 31.0 # under the clock's panel and the goal's pips in it
 const FADE := 0.2
 ## The score: it pops when it rises, and the gain floats up under it.
 const POP_TIME := 0.3
@@ -174,7 +175,32 @@ const SLOTS := "%d / %d칸"
 const NONE_HELD := "아직 없다"
 const SLOT_PIP := Vector2(7.0, 7.0) # a slot on the pause screen
 const AGAIN_KEYS := "R 다시 하기"
-const AGAIN_TOUCH := "눌러서 다시 하기"
+const AGAIN_TOUCH := "다시 하기"
+const RETRY_KEYS := "T 같은 시드로 다시"
+const RETRY_TOUCH := "같은 시드로 다시"
+const WIN_TITLE := "새벽을 지켜 냈다!"
+const WIN_LINE := "%s · %d번째 새벽 · 점수 %d"
+const WON_RUN := "%d번째 새벽을 지켜 낸 판"
+const GO_ON_KEYS := "Enter 계속 지키기"
+const GO_ON_TOUCH := "계속 지키기"
+const NEW_KEYS := "R 새 판"
+const NEW_TOUCH := "새 판"
+const GOAL_FIRST := "%d번째 새벽까지 지키면 이긴다 · "
+const GOAL_LEFT := "새벽이 왔다! 승리까지 %d번 · "
+const OPENED := "새로 열렸다: %s"
+const LONG_NAME := "긴 밤"
+const LONG_KEYS := "L 긴 밤 · %d번째 새벽까지: %s"
+const LONG_TOUCH := "긴 밤 · %d번째 새벽까지: %s"
+const LONG_ON := "켜짐"
+const LONG_OFF := "꺼짐"
+const LOCKED := "%d번째 밤의 새벽을 맞으면 열린다"
+const LOCKED_SHADE := Color(0.22, 0.2, 0.3) # a locked character's picture
+const WINS := "×%d"
+const BOARD_WON := " · 승리" # after a record that reached its goal
+const BOARD_LONG := " · 긴 밤" # after one played as the long night that did not (its goal was further)
+const BOARD_WINS := "승리   %s"
+const BUTTON := Vector2(64.0, 18.0) # the least an end box's button measures: a thumb finds it
+const END_WIDTH := 280.0 # the width an end box's upgrades wrap at: with its edges the box stays right of the HUD's left panel
 const PAUSE_KEYS := "P / Esc 계속하기 · H 설명 보기"
 const PAUSE_TOUCH := "눌러서 계속하기 · ? 설명 보기"
 const SEED := "시드 %d"
@@ -199,8 +225,12 @@ var intro := false # set by main.gd: the first screen is up
 var choosing := false # set by main.gd: the choosing screen is up
 var chooser = Chooser.new() # what the choosing screen's input does; main.gd feeds it
 var picker = Picker.new() # what the keys do to the offer's cards (focus, take); main.gd feeds it
+var winning := false # set by main.gd: the win box is up (the world waits under it)
+var winbox = Winbox.new() # what the win box's keys do; main.gd feeds it
 var choose_title: Label
 var choose_hint: Label
+var choose_long: PanelContainer # the long night's button, drawn where it answers (Chooser.LONG)
+var choose_long_label: Label
 var choose_cards: Array = [] # per character, in Chooser.ids() order: { card, style, key_style, focus }
 var choose_age := 0.0 # real seconds since the choosing screen opened
 var guide = Guide.new() # what the first screen's input does; main.gd feeds it
@@ -256,7 +286,12 @@ var foot: Label
 var held_head: Label
 var held_flow: HFlowContainer
 var board: Label
-var again: Label
+var opened_line: Label # what this run opened (records.fresh)
+var end_buttons: HBoxContainer # the two buttons under an ending or a win: again and retry, each a label in its box
+var again: Label # "다시 하기" under an ending, "계속 지키기" under a win
+var again_box: PanelContainer
+var retry: Label # "같은 시드로 다시" under an ending, "새 판" under a win
+var retry_box: PanelContainer
 var end_seed: Label
 
 var pause_box: PanelContainer
@@ -352,10 +387,18 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	held_flow.alignment = FlowContainer.ALIGNMENT_CENTER
 	held_flow.add_theme_constant_override("h_separation", 8)
 	held_flow.add_theme_constant_override("v_separation", 1)
-	held_flow.custom_minimum_size = Vector2(300.0, 0.0)
+	held_flow.custom_minimum_size = Vector2(END_WIDTH, 0.0)
 	lines.add_child(held_flow)
+	opened_line = _label(lines, SMALL, FRESH, HORIZONTAL_ALIGNMENT_CENTER)
 	board = _label(lines, SMALL, CARD_TEXT, HORIZONTAL_ALIGNMENT_CENTER)
-	again = _label(lines, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	end_buttons = HBoxContainer.new()
+	end_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	end_buttons.add_theme_constant_override("separation", 12)
+	lines.add_child(end_buttons)
+	again_box = _end_button()
+	again = again_box.get_child(0)
+	retry_box = _end_button()
+	retry = retry_box.get_child(0)
 	end_seed = _seed_label(box)
 	box.visible = false
 
@@ -428,10 +471,16 @@ func setup(the_painter, the_records, overlay: Node2D, slot: int, w) -> void:
 	choose_title.position = Vector2(0.0, Chooser.TOP - 22.0)
 	choose_hint = _label(self, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
 	choose_hint.size = Vector2(Painter.VIEW.x, 12.0)
-	choose_hint.position = Vector2(0.0, Chooser.TOP + Chooser.CARD.y + 6.0)
+	choose_hint.position = Vector2(0.0, Chooser.TOP + Chooser.CARD.y + 4.0)
 	for i in Chooser.ids().size():
 		choose_cards.append(_char_card(i, Chooser.ids()[i]))
 	move_child(choose_hint, -1) # over the lifted card, never under it
+	choose_long = _panel(self, CARD_BACK, 1.0)
+	choose_long.position = Chooser.LONG.position
+	choose_long.custom_minimum_size = Chooser.LONG.size
+	choose_long_label = _label(choose_long, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	choose_long_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	choose_long.visible = false
 	choose_title.visible = false
 	choose_hint.visible = false
 
@@ -479,7 +528,13 @@ func set_paused(on: bool, w) -> void:
 func frame(w, delta: float) -> void:
 	clock_time += delta
 	press.text = PICK_TOUCH if touch else PICK_KEYS
-	again.text = AGAIN_TOUCH if touch else AGAIN_KEYS
+	if winning:
+		again.text = GO_ON_TOUCH if touch else GO_ON_KEYS
+		retry.text = NEW_TOUCH if touch else NEW_KEYS
+	else:
+		again.text = AGAIN_TOUCH if touch else AGAIN_KEYS
+		retry.text = RETRY_TOUCH if touch else RETRY_KEYS
+	winbox.frame(delta)
 	pause_keys.text = PAUSE_TOUCH if touch else PAUSE_KEYS
 	_top(w, delta)
 	if intro or choosing or paused: # covered: the key that uncovers it must not also move or take a card
@@ -500,7 +555,7 @@ func frame(w, delta: float) -> void:
 	if paused:
 		pause_box.reset_size()
 		pause_box.position = ((Painter.VIEW - pause_box.size) / 2.0).round()
-	var ended: bool = ENDINGS.has(w.phase)
+	var ended: bool = ENDINGS.has(w.phase) or winning
 	var target := INTRO_SCRIM if intro or choosing else 0.55 if paused else (0.5 if ended else (0.45 if w.phase == "pick" else 0.0))
 	if taken >= 0:
 		target = 0.45 * (1.0 - take_age / TAKE_TIME)
@@ -594,10 +649,11 @@ static func coming_line(who: String, does: String) -> String:
 	return "%s%s %s" % [who, Looks.particle(who, "가"), does]
 
 
-## The box in the middle: the offer while you pick (and the taken card playing out just after), or how it ended.
+## The box in the middle: the offer while you pick (and the taken card playing out just after), how it ended, or,
+## while the win box is up (winning), what the run that just won has kept.
 func _offer(w, delta: float) -> void:
-	var picking: bool = w.phase == "pick"
-	var ended: bool = ENDINGS.has(w.phase)
+	var picking: bool = w.phase == "pick" and not winning # the offer of the night after the win waits under its box
+	var ended: bool = ENDINGS.has(w.phase) or winning
 	if picking:
 		var key := ",".join(w.offer) + "/%d/%d/%s/%d" % [w.picks.size(), w.night, w.character, w.rerolls]
 		if key != offer_key:
@@ -626,20 +682,21 @@ func _offer(w, delta: float) -> void:
 		reroll_label.text = (REROLL_TOUCH if touch else REROLL_KEYS) % w.rerolls
 		reroll_label.add_theme_color_override("font_color", GOLD if w.can_reroll() else MUTED)
 		reroll.modulate.a = 1.0 if w.can_reroll() else REROLL_OFF
-	for n in [foot, held_head, held_flow, board, again, end_seed]:
+	for n in [foot, held_head, held_flow, opened_line, board, end_buttons, end_seed]:
 		n.visible = ended
+	subheading.visible = not ended
 	if ended:
 		_fill_end(w)
 	elif picking:
 		heading.add_theme_font_size_override("font_size", BIG)
 		heading.add_theme_color_override("font_color", WARM)
-		if w.time == 0.0: # the offer at dusk, between two nights
+		subheading.add_theme_color_override("font_color", MUTED)
+		if w.time == 0.0: # the offer at dusk, between two nights: until the run is won, it says how far the goal is
 			heading.text = "%d번째 밤이 온다" % w.night
-			subheading.text = ("새벽이 왔다! " if w.night > 1 else "") + "횃불이 힘을 하나 내어 준다"
+			subheading.text = dusk_words(w) + "횃불이 힘을 하나 내어 준다"
 		else:
 			heading.text = "한밤중"
 			subheading.text = "횃불이 힘을 하나 더 내어 준다"
-	subheading.visible = not ended
 	omen_row.visible = cards_on and not ended and w.omen != ""
 	if omen_row.visible:
 		omen_name.text = Config.OMENS[w.omen].name
@@ -661,6 +718,34 @@ func _offer(w, delta: float) -> void:
 		top = maxf(top, Painter.hud_bottom(w) + 3.0)
 	top = minf(top, Painter.VIEW.y - box.size.y - 2.0)
 	box.position = Vector2(roundf((Painter.VIEW.x - box.size.x) / 2.0), top)
+
+
+## What a dusk's offer says first: on the first night the goal, on a later one that dawn came and how many more
+## dawns win the run; once the run is won (or its start was past the goal), only that dawn came.
+static func dusk_words(w) -> String:
+	if w.won or w.night > w.goal:
+		return "새벽이 왔다! "
+	return GOAL_FIRST % w.goal if w.night == 1 else GOAL_LEFT % (w.goal - w.night + 1)
+
+
+## The buttons of the box in the middle, for src/touch.gd: action -> where it is drawn. Under a win, both ("go_on",
+## "restart"); under an ending, the same-seed one ("retry": a tap anywhere else starts again).
+func targets(w) -> Dictionary:
+	if winning:
+		return { "go_on": again_box.get_global_rect(), "restart": retry_box.get_global_rect() }
+	if ENDINGS.has(w.phase):
+		return { "retry": retry_box.get_global_rect() }
+	return {}
+
+
+## One of the two buttons under an ending or a win: a small edged box with its words, in end_buttons.
+func _end_button() -> PanelContainer:
+	var b := _panel(end_buttons, CARD_BACK, 3.0)
+	(b.get_theme_stylebox("panel") as StyleBoxFlat).border_color = CARD_EDGE
+	b.custom_minimum_size = BUTTON
+	var l := _label(b, SMALL, GOLD, HORIZONTAL_ALIGNMENT_CENTER)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return b
 
 
 ## Each card's place and look this frame: dealt in, bobbing, lifted when focused, or taken.
@@ -859,11 +944,25 @@ static func combo_hint(w, id: String) -> String:
 ## The end: how it ended, the night and score and where it landed, the upgrades held by name, the best runs, and in
 ## the corner the run's seed.
 func _fill_end(w) -> void:
-	heading.text = ENDINGS[w.phase]
 	heading.add_theme_font_size_override("font_size", HUGE)
-	heading.add_theme_color_override("font_color", RED if w.phase == "dead" else Color("#ff9a3c"))
-	foot.text = "%s · %d번째 밤 · 점수 %d" % [Config.CHARACTERS[w.character].name, w.night, w.score] + (" · 새 기록!" if records.place == 1 else (" · %d위" % records.place if records.place > 1 else ""))
-	foot.add_theme_color_override("font_color", GOLD if records.place == 1 else CREAM)
+	if winning: # the win box: what the run has kept so far, and the two ways on
+		heading.text = WIN_TITLE
+		heading.add_theme_color_override("font_color", GOLD)
+		foot.text = WIN_LINE % [Config.CHARACTERS[w.character].name, w.goal, w.score]
+		foot.add_theme_color_override("font_color", CREAM)
+	else:
+		heading.text = ENDINGS[w.phase]
+		heading.add_theme_color_override("font_color", RED if w.phase == "dead" else Color("#ff9a3c"))
+		foot.text = "%s · %d번째 밤 · 점수 %d" % [Config.CHARACTERS[w.character].name, w.night, w.score] + (" · 새 기록!" if records.place == 1 else (" · %d위" % records.place if records.place > 1 else ""))
+		foot.add_theme_color_override("font_color", GOLD if records.place == 1 else CREAM)
+	subheading.visible = w.won and not winning # an ending of a run that was won and went on says so
+	subheading.text = WON_RUN % w.goal
+	subheading.add_theme_color_override("font_color", GOLD)
+	var opened: Array = records.fresh.map(func(id): return Config.CHARACTERS[id].name)
+	if winning and records.wins.values().reduce(func(a, b): return a + b, 0) == 1:
+		opened.append(LONG_NAME) # a first win opens the long night
+	opened_line.visible = not opened.is_empty()
+	opened_line.text = OPENED % ", ".join(opened)
 	var ids := Painter.held(w)
 	held_head.visible = not ids.is_empty()
 	held_flow.visible = not ids.is_empty()
@@ -876,7 +975,7 @@ func _fill_end(w) -> void:
 			for id in ids:
 				if Looks.side(id) == side:
 					held_flow.add_child(_held_item(w, id))
-	board.text = _board()
+	board.text = _board() if not winning else ""
 	board.visible = board.text != ""
 	again.modulate.a = 0.65 + 0.35 * cos(clock_time * 4.0)
 	_write_seed(end_seed, heading, w)
@@ -1110,7 +1209,11 @@ func _board() -> String:
 	for i in mini(records.runs.size(), Records.SHOWN):
 		var r: Dictionary = records.runs[i]
 		var mark := "  ◀ 이번" if is_same(r, records.latest) else ""
-		lines.append("%d위   %d점 · %s · %d번째 밤 · %s%s" % [i + 1, r.score, Config.CHARACTERS[r.char].name, r.night, _day(r.date), mark])
+		var how: String = BOARD_WON if r.get("won", false) else BOARD_LONG if r.get("mode", "") == "long" else ""
+		lines.append("%d위   %d점 · %s · %d번째 밤 · %s%s%s" % [i + 1, r.score, Config.CHARACTERS[r.char].name, r.night, _day(r.date), how, mark])
+	var won: Array = Config.CHARACTERS.keys().filter(func(id): return records.wins.get(id, 0) > 0)
+	if not won.is_empty(): # under the list: how often each character has won
+		lines.append(BOARD_WINS % " · ".join(won.map(func(id): return "%s %d" % [Config.CHARACTERS[id].name, records.wins[id]])))
 	return ("최고 기록\n" + "\n".join(lines)) if not lines.is_empty() else ""
 
 
@@ -1203,12 +1306,33 @@ func _choose_frame(delta: float) -> void:
 	choose_age = choose_age + delta if choosing else 0.0
 	choose_title.visible = choosing
 	choose_hint.visible = choosing
+	choose_long.visible = choosing and chooser.long_open
 	for i in choose_cards.size():
 		choose_cards[i].card.visible = choosing
 	if not choosing:
 		return
 	choose_hint.text = CHOOSE_TOUCH if touch else CHOOSE_KEYS
 	var ready: bool = chooser.listening()
+	choose_long_label.text = (LONG_TOUCH if touch else LONG_KEYS) % [Config.UNLOCKS.long.night, LONG_ON if chooser.long else LONG_OFF]
+	choose_long_label.add_theme_color_override("font_color", GOLD if chooser.long else MUTED)
+	(choose_long.get_theme_stylebox("panel") as StyleBoxFlat).border_color = GOLD if chooser.long else CARD_EDGE
+	choose_long.size = Chooser.LONG.size
+	for i in choose_cards.size(): # a locked card: its picture dark under a padlock, and what opens it for its words
+		var c: Dictionary = choose_cards[i]
+		var id: String = Chooser.ids()[i]
+		var locked: bool = chooser.locked.has(id)
+		var won: int = records.wins.get(id, 0) if records != null else 0
+		c.lock.visible = locked
+		c.lock.pivot_offset = c.lock.size / 2.0
+		c.portrait.self_modulate = LOCKED_SHADE if locked else Color.WHITE
+		var words: String = LOCKED % Config.UNLOCKS.opens[id] if locked else Config.CHARACTERS[id].text
+		if c.text.get_meta("words", "") != words:
+			c.text.set_meta("words", words)
+			c.text.text = _wrap(c.text, words, Chooser.CARD.x - 10.0)
+		c.text.add_theme_color_override("font_color", GOLD if locked else CARD_TEXT)
+		c.crown.visible = won > 0
+		c.wins.visible = won > 0
+		c.wins.text = WINS % won
 	choose_hint.modulate.a = (0.75 + 0.25 * sin(clock_time * INTRO_BLINK)) if ready else GUIDE_WAITING
 	choose_title.modulate.a = clampf(choose_age / FADE, 0.0, 1.0)
 	for i in choose_cards.size():
@@ -1251,9 +1375,11 @@ func _char_card(i: int, id: String) -> Dictionary:
 	card.add_theme_stylebox_override("panel", style)
 	add_child(card)
 	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 2)
+	stack.add_theme_constant_override("separation", 1)
 	card.add_child(stack)
-	var badge_row := CenterContainer.new()
+	var badge_row := HBoxContainer.new()
+	badge_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	badge_row.add_theme_constant_override("separation", 3)
 	stack.add_child(badge_row)
 	var key := _label(badge_row, SMALL, INK, HORIZONTAL_ALIGNMENT_CENTER)
 	key.remove_theme_constant_override("outline_size")
@@ -1264,16 +1390,26 @@ func _char_card(i: int, id: String) -> Dictionary:
 	key_style.content_margin_left = 4.0
 	key_style.content_margin_right = 4.0
 	key.add_theme_stylebox_override("normal", key_style)
+	var crown := _icon(badge_row) # beside the key once this character has won: a crown and how many times
+	crown.texture = Sprites.alone("crown")
+	crown.custom_minimum_size = crown.texture.get_size()
+	var wins := _label(badge_row, SMALL, GOLD)
 	var portrait := TextureRect.new()
 	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	portrait.texture = Sprites.alone(Looks.character(id).sprite + "_down_a")
 	portrait.custom_minimum_size = portrait.texture.get_size() * CHOOSE_PORTRAIT
 	stack.add_child(portrait)
+	var lock := TextureRect.new()
+	lock.texture = Sprites.alone("lock")
+	lock.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	lock.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lock.set_anchors_preset(Control.PRESET_FULL_RECT)
+	lock.scale = Vector2(2.0, 2.0) # about its middle, which _choose_frame keeps as the card lays it out
+	portrait.add_child(lock)
 	_label(stack, BIG, WARM, HORIZONTAL_ALIGNMENT_CENTER).text = row_.name
 	var text := _label(stack, SMALL, CARD_TEXT, HORIZONTAL_ALIGNMENT_CENTER)
 	text.remove_theme_constant_override("outline_size")
-	text.text = _wrap(text, row_.text, Chooser.CARD.x - 10.0)
 	text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var bars: Array = [[CHOOSE_HP, World.character_stats(id).hp]] + row_.bars
 	for bar in bars:
@@ -1292,7 +1428,7 @@ func _char_card(i: int, id: String) -> Dictionary:
 			pip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			line.add_child(pip)
 	_label(stack, SMALL, RED if row_.trait.begins_with("약점") else FRESH, HORIZONTAL_ALIGNMENT_CENTER).text = row_.trait
-	return { "card": card, "style": style, "key_style": key_style, "focus": 0.0 }
+	return { "card": card, "style": style, "key_style": key_style, "focus": 0.0, "portrait": portrait, "lock": lock, "text": text, "crown": crown, "wins": wins }
 
 
 ## A row of a guide page: its pictures (a "→" among them is an arrow), a name, and what to know.

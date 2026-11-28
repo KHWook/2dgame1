@@ -12,6 +12,7 @@ const Looks := preload("res://src/art/looks.gd")
 const RulesTest := preload("res://tools/rules_test.gd")
 const RecordsTest := preload("res://tools/records_test.gd")
 const TouchTest := preload("res://tools/touch_test.gd")
+const GoalsTest := preload("res://tools/goals_test.gd")
 const Ui := preload("res://src/ui.gd")
 
 
@@ -88,7 +89,14 @@ func _initialize() -> void:
 	for line in records:
 		printerr("records: " + line)
 	if records.is_empty():
-		print("records: kept best first, once per run, and read back as saved")
+		print("records: kept best first, once per run, and read back as saved; what is open, the wins and the music setting kept; nothing in a file lost")
+	else:
+		failed = true
+	var goals: Array = GoalsTest.run()
+	for line in goals:
+		printerr("goals: " + line)
+	if goals.is_empty():
+		print("goals: the win is told once and changes no step; the same seed is the same run; the music follows the world")
 	else:
 		failed = true
 	var touches: Array = TouchTest.run()
